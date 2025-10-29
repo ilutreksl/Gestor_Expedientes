@@ -1507,6 +1507,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         cursor = conn.cursor()
         
         descripcion = f"Campo '{campo}' modificado: '{valor_antiguo}' -> '{valor_nuevo}'"
+        # Si el campo modificado es 'Procesado Por' (o su variante), añadimos la nota requerida
+        try:
+            campo_norm = str(campo).lower().strip().replace(' ', '_')
+            if campo_norm == 'procesado_por' or campo_norm == 'procesadopor':
+                descripcion = descripcion + " - MATERIAL REVISADO"
+        except Exception:
+            # En caso de cualquier problema al normalizar, no bloqueamos el guardado del historial
+            pass
         
         try:
             cursor.execute("""
@@ -2508,6 +2516,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
             command=self._cargar_datos_abonos
         ).grid(row=0, column=4, padx=(10, 0), pady=5)
         
+        # FILTRO 3: Resultado Expediente - Fila 1
+        opciones_resultado = ["Todos"] + (self.OPCIONES.get("Resultado_Expediente", []) if hasattr(self, 'OPCIONES') else [])
+        ctk.CTkLabel(controles_frame, text="Resultado Expediente:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.abono_resultado_option = ctk.CTkOptionMenu(controles_frame, values=opciones_resultado)
+        self.abono_resultado_option.grid(row=1, column=1, padx=(0, 10), pady=5, sticky="ew")
+        self.abono_resultado_option.set(opciones_resultado[0])
+        
         # --- 3. Marco donde se dibujará la tabla de resultados ---
         self.abonos_tabla_resultados_frame = ctk.CTkFrame(self.main_stats_frame)
         self.abonos_tabla_resultados_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
@@ -2580,6 +2595,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if fecha_final_db:
             condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) <= ?")
             parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        # 3.2. Filtro por Resultado de Expediente (si se seleccionó uno distinto de 'Todos')
+        try:
+            if hasattr(self, 'abono_resultado_option'):
+                resultado_seleccionado = self.abono_resultado_option.get()
+            elif hasattr(self, 'abono_resultado_optionmenu'):
+                resultado_seleccionado = self.abono_resultado_optionmenu.get()
+            else:
+                resultado_seleccionado = None
+
+            if resultado_seleccionado and resultado_seleccionado != 'Todos':
+                # Comparación case-insensitive para mayor robustez
+                condiciones.append("lower(resultado_expediente) = ?")
+                parametros.append(resultado_seleccionado.strip().lower())
+        except Exception:
+            # Si algo falla al leer el widget, ignoramos el filtro (la consulta seguirá funcionando)
+            pass
 
         # 4. Ensamblaje y Ejecución
         
