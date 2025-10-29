@@ -1245,6 +1245,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
         precio_total = sum(item['cantidad_entregada'] * item['precio_unitario'] for item in self.articulos_data)
         datos_maestro['precio_total_expediente'] = precio_total
 
+        # 2.5 Validación: Numero de documento del cliente no debe repetirse
+        # Se permiten repeticiones para los valores 'email' y 'telefonico'
+        numero_doc = str(datos_maestro.get('numero_documento_cliente', '')).strip()
+        if numero_doc:
+            numero_doc_norm = numero_doc.lower()
+            if numero_doc_norm not in ('email', 'telefonico'):
+                # Conectar a la DB para comprobar duplicados
+                conn_check, cursor_check = self.master.conectar_db()
+                if not conn_check:
+                    return
+                try:
+                    cursor_check = conn_check.cursor()
+                    cursor_check.execute("SELECT COUNT(*) FROM rma_maestro WHERE lower(numero_documento_cliente) = ?", (numero_doc_norm,))
+                    count = cursor_check.fetchone()[0]
+                    if count and count > 0:
+                        conn_check.close()
+                        messagebox.showwarning("Valor duplicado", f"El número de documento '{numero_doc}' ya existe en otro expediente.")
+                        return
+                except sqlite3.Error as e:
+                    print(f"Error comprobando duplicados de numero_documento_cliente: {e}")
+                    conn_check.close()
+                    return
+                # Cerramos la conexión de comprobación; la conexión principal se abrirá más abajo para la inserción
+                conn_check.close()
+
         # if not self.articulos_data:
         #     print("Error: Debe añadir al menos un artículo.")
         #     return
