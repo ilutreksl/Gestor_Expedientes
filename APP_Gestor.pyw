@@ -1,0 +1,3109 @@
+import customtkinter as ctk
+import tkinter.messagebox as messagebox
+from tkinter import Toplevel
+import sqlite3
+import bcrypt
+import sys
+import os 
+import datetime
+import webbrowser
+import docx
+from PIL import Image, ImageTk
+#from tkcalendar import Calendar
+from CTkDatePicker import CTkDatePicker
+
+import tkinter as tk
+
+import pandas as pd
+import locale
+import shutil # Para copiar archivos
+import tkinter.filedialog as filedialog # Para el diálogo de selección de archivos
+import subprocess # Para abrir archivos en diferentes OS
+
+# Definición de las variables globales de la base de datos
+DB_NAME = "rma_app.db"
+# Mensaje de advertencia sobre la limitación de SQLite en red compartida
+ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
+
+APP_VERSION = "v0.0.25"
+DB_FILENAME = "rma_app.db"
+
+# --- NUEVA VARIABLE GLOBAL ---
+ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
+# -----------------------------
+#try:
+#    locale.setlocale(locale.LC_ALL, 'es_ES.UTF-8')
+#except locale.Error:
+#    try:
+#        locale.setlocale(locale.LC_ALL, 'es_ES')
+#    except locale.Error:
+#        print("Advertencia: No se pudo configurar el locale para moneda.")
+
+# ----------------------------------------------------------------------
+# 1. CLASE DE LA VENTANA DE LOGIN
+# ----------------------------------------------------------------------
+
+class LoginApp(ctk.CTk):
+    """Clase principal de la aplicación, encargada del login."""
+    def __init__(self):
+        super().__init__()
+        
+        # Configuraciones básicas de la ventana
+        self.title("Gestión RMA - Login")
+        self.geometry("400x300")
+        self.resizable(False, False)
+        
+        ctk.set_appearance_mode("light") 
+        ctk.set_default_color_theme("themes/rime.json")
+
+        self.crear_widgets_login()
+
+    def crear_widgets_login(self):
+        """Diseña y coloca los elementos de la ventana de login."""
+        
+        login_frame = ctk.CTkFrame(self, 
+                                   width=400, 
+                                   height=300, 
+                                   corner_radius=10,
+                                   #fg_color=("gray95", "gray10")
+                                   )
+        login_frame.pack(pady=20, padx=40, fill="both", expand=True)
+
+        ctk.CTkLabel(login_frame, text="Iniciar Sesión", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 10))
+
+        self.username_entry = ctk.CTkEntry(login_frame, placeholder_text="Nombre de Usuario")
+        self.username_entry.pack(pady=12, padx=10)
+
+        self.password_entry = ctk.CTkEntry(login_frame, placeholder_text="Contraseña", show="*")
+        self.password_entry.pack(pady=12, padx=10)
+
+        login_button = ctk.CTkButton(login_frame, 
+                                  text="Iniciar Sesión", 
+                                  command=self.verificar_login,
+                                  # AJUSTE CLAVE: Color de fondo y hover a tonos de gris
+                                  #fg_color="gray50",     # Fondo del botón: Gris medio
+                                  #hover_color="gray40",   # Color al pasar el ratón: Gris oscuro
+                                  #text_color="white"
+                                  )     # Color del texto (blanco para contraste)
+        login_button.pack(pady=12, padx=10)
+        
+        self.error_label = ctk.CTkLabel(login_frame, text="", text_color="red")
+        self.error_label.pack(pady=5)
+
+    def conectar_db(self):
+        """Intenta conectar a la base de datos."""
+        try:
+            # Añadimos un timeout de 5 segundos para intentar manejar el bloqueo de red
+            conn = sqlite3.connect(DB_NAME, timeout=5)
+            cursor = conn.cursor()
+            return conn, cursor
+        except sqlite3.Error as e:
+            self.error_label.configure(text=f"Error de DB: {e}", text_color="red")
+            print(f"Error de base de datos: {e}")
+            return None
+
+    def verificar_login(self):
+        """Comprueba las credenciales del usuario."""
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        
+        if not username or not password:
+            self.error_label.configure(text="Rellena todos los campos.")
+            return
+
+        conn, cursor = self.conectar_db()
+    
+        # Manejar el caso de que la conexión haya fallado
+        if conn is None:
+            messagebox.showerror("Error de Conexión", "No se pudo conectar a la base de datos.")
+            return
+        # -----------------------
+        if not conn:
+            return
+
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT password_hash, rol FROM usuarios WHERE nombre_usuario = ?", (username,))
+        resultado = cursor.fetchone()
+        conn.close()
+
+        if resultado:
+            password_hash, rol = resultado
+            try:
+                if bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8')):
+                    self.error_label.configure(text=f"✅ Acceso concedido", text_color="green")
+                    self.abrir_ventana_principal(username, rol)
+                else:
+                    self.error_label.configure(text="Usuario o contraseña incorrectos.")
+            except Exception as e:
+                 self.error_label.configure(text="Error de seguridad en credenciales.")
+                 print(f"Error bcrypt: {e}")
+        else:
+            self.error_label.configure(text="Usuario o contraseña incorrectos.")
+
+    def abrir_ventana_principal(self, username, rol):
+        """Abre la ventana principal de la aplicación."""
+        
+        self.withdraw() # Ocultamos la ventana de login
+        
+        if not hasattr(self, 'ventana_principal') or not self.ventana_principal.winfo_exists():
+            self.ventana_principal = VentanaPrincipal(self, username, rol)
+        
+        print(ADVERTENCIA_MULTIUSUARIO) 
+
+# ----------------------------------------------------------------------
+# 2. CLASE DE LA VENTANA PRINCIPAL DE LA APLICACIÓN
+# ----------------------------------------------------------------------
+
+class VentanaPrincipal(ctk.CTkToplevel):
+    """Ventana principal que gestiona el listado, creación y edición de RMAs."""
+    
+    # Opciones predefinidas para desplegables
+    OPCIONES = {
+        "Autorizacion": ["SI", "NO"],
+        "Autorizado_Por": ["RAQUEL", "SILVIA", "CARLOS", "IVAN", "ANDRES"],
+        "Gestionado_Por": ["RAQUEL", "SILVIA", "CARLOS", "IVAN", "ANDRES"],
+        "Resultado_Expediente": ["", "ABONAR", "NO ABONAR", "REPOSICION"],
+        "Estado_Producto": [
+            "", "EN PERFECTO ESTADO ; ABONAR", "FUNCIONA PERFECTAMENTE ; ABONAR", "SOBRANTE DE OBRA ; ABONAR", "NO FUNCIONA, ABONAR", "FUNCIONA PERFECTAMENTE ; NO ABONAR",
+            "NO FUNCIONA ; NO ABONAR", "REPOSICION FALLO PRODUCTO", "REPOSICION ; ABONAR", "MERCANCIA ENVIADA POR ERROR", "MALA MANIPULACION ; NO ABONAR",
+            "EN PERFECTO ESTADO ; ABONAR 10% DEPRECIACION", "FALLO SOLDADURA ; ABONAR", "FALLO SOLDADURA ; NO ABONAR", "FALLO MODULO ; ABONAR", "MAL MANIPULACION ; ABONAR",
+            "DANA", "CAMBIO DE PRODUCTO"
+        ]
+    }
+    
+    def __init__(self, master, username, rol):
+        super().__init__(master)
+        self.master = master
+        self.username = username
+        self.rol = rol
+        self.rma_actual_id = None # ID del RMA que se está editando (None para nuevo)
+        self.articulos_data = [] # Lista temporal para los artículos en el formulario
+        
+        self.crear_tabla_adjuntos() # Aseguramos que la tabla exista
+        self.verificar_columna_motivo() # NUEVA LÍNEA: Asegura la columna 'motivo' en la DB
+        # ---------------------
+        
+        self.title(f"Gestión de Expedientes - Bienvenido {self.username} ({self.rol})")
+        self.geometry("1200x700")
+        
+        # ----------------------------------------------------
+        # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️
+        # ----------------------------------------------------
+        # Configurar la expansión horizontal y vertical de la ventana principal
+        
+        # Columna 0 (Sidebar): Peso 0 (No se expande)
+        self.master.grid_columnconfigure(0, weight=0) 
+        
+        # Columna 1 (Content Frame): Peso 1 (Ocupa todo el ancho restante)
+        self.master.grid_columnconfigure(1, weight=1) 
+        
+        # Fila 0: Peso 1 (Ocupa toda la altura)
+        self.master.grid_rowconfigure(0, weight=1)
+        
+        self.protocol("WM_DELETE_WINDOW", self.cerrar_app)
+        
+        self.crear_diseno()
+
+    def verificar_columna_motivo(self):
+        """
+        Verifica si la columna 'motivo' existe en rma_maestro y la añade si no.
+        Esto es una migración simple para SQLite.
+        """
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+
+        try:
+            # Intenta seleccionar la columna
+            cursor.execute("SELECT motivo FROM rma_maestro LIMIT 1")
+        except sqlite3.OperationalError:
+            # La columna no existe, añadirla
+            try:
+                cursor.execute("ALTER TABLE rma_maestro ADD COLUMN motivo TEXT")
+                conn.commit()
+                print("✅ Columna 'motivo' añadida a rma_maestro.")
+            except Exception as e:
+                print(f"Error al añadir columna 'motivo': {e}")
+        finally:
+            conn.close()
+    
+    
+    def cerrar_app(self):
+        """Maneja el cierre de la ventana principal y de toda la app."""
+        self.master.destroy()
+
+    def limpiar_contenido(self):
+        """Limpia todos los widgets del marco de contenido principal."""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+    def crear_diseno(self):
+        """Define la estructura principal con un panel lateral y un área de contenido."""
+        
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+
+        # --- Panel Lateral de Navegación (Columna 0) ---
+        self.sidebar_frame = ctk.CTkFrame(self, 
+                                          width=140, 
+                                          corner_radius=0, 
+                                          #fg_color="gray90"
+                                          )
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        
+        ruta_logo = os.path.join(os.path.dirname(__file__), "Icono_Ilutrek.png")
+        self.logo_image = ctk.CTkImage(light_image=Image.open(ruta_logo),
+                                           dark_image=Image.open(ruta_logo),
+                                           size=(100, 100)) # Ajusta este tamaño (width, height)
+            
+        # 💡 PASO 2: COLOCAR LA IMAGEN EN LA FILA 0
+        # Usamos un CTkLabel para contener la imagen.
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, 
+                                       text="", 
+                                       image=self.logo_image)
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        #ctk.CTkLabel(self.sidebar_frame, text="MENÚ", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
+
+        # Fila 4: Espacio vacío para empujar los elementos inferiores.
+        self.sidebar_frame.grid_rowconfigure(6, weight=1) # <--- Reubicado aquí.
+
+        # Información de Usuario y Rol (Fila 6)
+        self.lbl_usuario_rol = ctk.CTkLabel(self.sidebar_frame, text=f"Usuario: {self.username} ({self.rol})", font=ctk.CTkFont(size=12))
+        self.lbl_usuario_rol.grid(row=7, column=0, padx=20, pady=(10, 5))
+
+        # 💡 NUEVO: Versión de la App (Fila 7)
+        ctk.CTkLabel(self.sidebar_frame, text=f"Versión: {APP_VERSION}", font=ctk.CTkFont(size=10, slant="italic")).grid(row=8, column=0, padx=20, pady=(0, 2))
+
+        # 💡 NUEVO: Copyright (Fila 8)
+        año_actual = datetime.datetime.now().year
+        ctk.CTkLabel(self.sidebar_frame, text=f"© {año_actual} ILUTREK, S.L.", font=ctk.CTkFont(size=10, weight="bold")).grid(row=9, column=0, padx=20, pady=(2, 10))
+        
+        ctk.CTkLabel(self.sidebar_frame, text="MENÚ", font=ctk.CTkFont(family="Verdana", size=20, weight="bold")).grid(row=1, column=0, padx=20, pady=(20, 10))
+        
+        self.btn_lista = ctk.CTkButton(self.sidebar_frame,
+                                       text="📋 Listado",
+                                       command=self.mostrar_lista_rma,
+                                       #fg_color="gray80",
+                                       #hover_color="gray70",
+                                       #text_color="black", # Texto negro para contraste en fondo gris
+                                       font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_lista.grid(row=2, column=0, padx=20, pady=10)
+        
+        self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
+                                        text="Backup BD", 
+                                        command=self.crear_copia_seguridad_db,
+                                        #fg_color="gray80",
+                                        #hover_color="gray70",
+                                        #text_color="black", # Texto negro para contraste en fondo gris
+                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_buscar.grid(row=5, column=0, padx=20, pady=10)
+        
+        self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
+                                          text="🐞 Reportar", 
+                                          command=self.abrir_formulario_email,
+                                          #fg_color="gray80",
+                                          #hover_color="gray70",
+                                          #text_color="black", # Texto negro para contraste en fondo gris
+                                          font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_reportar.grid(row=4, column=0, padx=20, pady=10)
+        
+        self.btn_estadisticas = ctk.CTkButton(self.sidebar_frame,
+                                              text="📊 Filtrado",
+                                              command=self.mostrar_ventana_estadisticas,
+                                              #fg_color="gray80",
+                                              #hover_color="gray70",
+                                              #text_color="black", # Texto negro para contraste en fondo gris
+                                              font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_estadisticas.grid(row=3, column=0, padx=20, pady=10)
+        
+        # --- Contenido Principal (Columna 1) ---
+        self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
+        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.content_frame.grid_columnconfigure(0, weight=1)
+        
+        self.mostrar_lista_rma()
+    
+    
+    # ----------------------------------------------------------------------
+    # 3. MÉTODOS AUXILIARES Y GENERACIÓN DE CÓDIGO RMA
+    # ----------------------------------------------------------------------
+    
+    def obtener_quincenas_futuras(self):
+        """Genera las quincenas (Q1/Q2) para los próximos 12 meses."""
+        hoy = datetime.date.today()
+        quincenas = []
+        for i in range(12):
+            mes = hoy.month + i
+            anio = hoy.year + (mes - 1) // 12
+            mes = (mes - 1) % 12 + 1
+            
+            anio_str = str(anio)[2:]
+            mes_str = str(mes).zfill(2)
+            
+            quincenas.append(f"Q1-{mes_str}-{anio_str}")
+            quincenas.append(f"Q2-{mes_str}-{anio_str}")
+        return quincenas
+
+    def obtener_siguiente_rma(self):
+        """Calcula el siguiente código RMA (Ej: RMA25001)."""
+        conn, cursor = self.master.conectar_db()
+        if not conn: return "ERROR-DB"
+
+        cursor = conn.cursor()
+        
+        anio_actual_str = str(datetime.datetime.now().year)[2:]
+        prefijo_busqueda = f"RMA{anio_actual_str}%" 
+        
+        cursor.execute("""
+            SELECT codigo_rma FROM rma_maestro 
+            WHERE codigo_rma LIKE ? 
+            ORDER BY id DESC 
+            LIMIT 1
+        """, (prefijo_busqueda,))
+        
+        ultimo_rma = cursor.fetchone()
+        siguiente_numero = 1
+        
+        if ultimo_rma:
+            numero_str = ultimo_rma[0].replace(f"RMA{anio_actual_str}", "")
+            try:
+                siguiente_numero = int(numero_str) + 1
+            except ValueError:
+                siguiente_numero = 1
+        
+        codigo_numerico = str(siguiente_numero).zfill(3)
+        conn.close()
+        
+        return f"RMA{anio_actual_str}{codigo_numerico}"
+
+    def crear_campo(self, parent, fila, label_text, campo_bd, valor_defecto="", deshabilitado=False, tipo="entry", opciones=None):
+        """Función auxiliar para crear etiquetas y campos de entrada/desplegables en el formulario."""
+        ctk.CTkLabel(parent, text=label_text).grid(row=fila, column=0, padx=10, pady=5, sticky="w")
+
+        
+        widget = None
+        
+        if tipo == "entry":
+            # 1. Crear el Entry en estado normal (por defecto)
+            widget = ctk.CTkEntry(parent, width=300, state="normal") 
+            
+            # 2. Insertar el valor (solo se puede en estado normal)
+            if valor_defecto:
+                widget.insert(0, valor_defecto)
+                
+            # 3. Deshabilitar si se indica
+            if deshabilitado:
+                widget.configure(state="disabled")
+
+        elif tipo == "optionmenu":
+            widget = ctk.CTkOptionMenu(parent, 
+                                       values=opciones, 
+                                       width=300,
+                                       #fg_color="gray80",        # Color del botón principal
+                                       #button_color="gray70",    # Color del botón de flecha
+                                       #button_hover_color="gray60", # Color al pasar el ratón por el botón de flecha
+                                       #text_color="black"
+                                       )
+            if valor_defecto in opciones:
+                widget.set(valor_defecto)
+            elif opciones:
+                widget.set(opciones[0])
+            # Nota: CTkOptionMenu no tiene estado 'disabled' de forma nativa como el Entry, 
+            # pero no es necesario para los campos que estamos usando ahora.
+        elif tipo == "date":
+            # 📅 Campo de selección de fecha
+            widget = CTkDatePicker(parent, width=300)
+            widget.set_date_format("%Y-%m-%d")
+
+            # Si hay valor por defecto, establecerlo
+            if valor_defecto:
+                try:
+                    from datetime import datetime
+                    fecha = datetime.strptime(valor_defecto, "%Y-%m-%d")
+                    widget.set_date(fecha)
+                except ValueError:
+                    pass  # Ignorar si el formato no es válido
+
+            if deshabilitado:
+                widget.configure(state="disabled")
+
+            
+        if widget:
+            widget.grid(row=fila, column=1, padx=10, pady=5, sticky="ew")
+            # Guardamos la referencia para acceder a los datos después
+            setattr(self, f"entry_{campo_bd}", widget)
+    
+
+    # ----------------------------------------------------------------------
+    # 4. LÓGICA DE LISTADO DE RMAS
+    # ----------------------------------------------------------------------
+
+    def mostrar_lista_rma(self):
+        """Muestra el listado completo de RMAs, filtros y el botón de crear nuevo RMA."""
+        self.limpiar_contenido()
+        
+        # 0. Configurar la expansión para el listado (fila 2, ahora)
+        self.content_frame.grid_rowconfigure(0, weight=0) # Título
+        self.content_frame.grid_rowconfigure(1, weight=0) # Filtros
+        self.content_frame.grid_rowconfigure(2, weight=1) # Listado
+
+        # 1. Título y Botón Crear (Fila 0)
+        title_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        title_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        title_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(title_frame, text="LISTADO", font=ctk.CTkFont(family="Verdana", size=24, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(title_frame,
+                      text="➕ Crear Nuevo RMA",
+                      #fg_color="gray80",        # Fondo del botón: Gris claro
+                      #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+                      #text_color="black",
+                      command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
+
+        # ----------------------------------------------------
+        # 2. NUEVO: Panel de Búsqueda y Filtros (Fila 1)
+        # ----------------------------------------------------
+        filtro_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        filtro_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        
+        # 2a. Búsqueda por texto (Código RMA / Cliente / Documento Cliente)
+        ctk.CTkLabel(filtro_frame, text="Buscar:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.entry_busqueda = ctk.CTkEntry(filtro_frame, placeholder_text="Código RMA, Cliente o Doc.", width=250)
+        self.entry_busqueda.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        
+        # 2b. Filtro por Estado
+        estados_posibles = self.OPCIONES.get("Estado", ["Todos"])
+        if "Todos" not in estados_posibles:
+            estados_posibles.insert(0, "Todos")
+            
+        ctk.CTkLabel(filtro_frame, text="Estado:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
+        self.filtro_estado = ctk.CTkOptionMenu(filtro_frame, 
+                                               values=estados_posibles, 
+                                               width=200,
+                                               #fg_color="gray80",        # Color del botón principal
+                                               #button_color="gray70",    # Color del botón de flecha
+                                               #button_hover_color="gray60", # Color al pasar el ratón por el botón de flecha
+                                               #text_color="black"
+                                               )
+        self.filtro_estado.set("Todos")
+        self.filtro_estado.grid(row=0, column=3, padx=10, pady=5, sticky="w")
+        
+        # 2c. Botón de Aplicar Filtro
+        # Ahora el botón llama a la función que aplica los filtros
+        btn_aplicar_filtro = ctk.CTkButton(filtro_frame,
+                                           text="🔍 Aplicar Filtros", 
+                                           command=self.aplicar_filtros_rma,
+                                           #fg_color="gray80",      # Fondo del botón: Gris claro
+                                           #hover_color="gray70",   # Color al pasar el ratón: Ligeramente más oscuro
+                                           #text_color="black"
+                                           )
+        btn_aplicar_filtro.grid(row=0, column=4, padx=(20, 0), pady=5, sticky="w")
+        
+        # Configurar expansión para que el campo de búsqueda ocupe el espacio extra
+        filtro_frame.grid_columnconfigure(1, weight=1) 
+        # ----------------------------------------------------
+
+        # 3. Listado de RMAs (Fila 2)
+        # RENOMBRAR la referencia de list_scroll_frame a self.lista_rma_frame
+        self.lista_rma_frame = ctk.CTkScrollableFrame(self.content_frame, label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
+        self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
+        self.lista_rma_frame.grid_columnconfigure(0, weight=1) # Columna del listado se expande
+        
+        # 4. Cargar los datos iniciales
+        self.cargar_lista_rma() # Llamada a la función de carga con filtros por defecto
+
+
+    def cargar_lista_rma(self, texto_busqueda="", estado_filtro="Todos"):
+        """
+        Carga los estados únicos de la DB para el filtro, y luego carga los RMA 
+        desde la DB aplicando los filtros (texto, estado).
+        """
+        
+        # Limpiar el frame (siempre)
+        for widget in self.lista_rma_frame.winfo_children():
+            widget.destroy()
+
+        conn, cursor = self.master.conectar_db()
+        if not conn: 
+            ctk.CTkLabel(self.lista_rma_frame, text="Error de conexión a la base de datos.").grid(row=0, column=0, padx=10, pady=10)
+            return
+        cursor = conn.cursor()
+        
+        try:
+            # 1. OBTENER ESTADOS ÚNICOS PARA EL FILTRO
+            # Solo hacemos esto si el filtro_estado ya existe (es decir, en mostrar_lista_rma ya se creó la interfaz)
+            if hasattr(self, 'filtro_estado'):
+                # Consultar todos los valores únicos y no nulos de la columna 'estado'
+                cursor.execute("SELECT DISTINCT estado FROM rma_maestro WHERE estado IS NOT NULL AND estado != '' ORDER BY estado ASC")
+                estados_db = [fila[0] for fila in cursor.fetchall()]
+                
+                # Crear la lista final de opciones: "Todos" + estados únicos de la DB
+                estados_posibles = ["Todos"] + estados_db
+                
+                # Actualizar el OptionMenu (sin cambiar la selección actual si es válida)
+                seleccion_actual = self.filtro_estado.get()
+                self.filtro_estado.configure(values=estados_posibles)
+                
+                # Mantener la selección actual si todavía existe, si no, poner "Todos"
+                if seleccion_actual in estados_posibles:
+                    self.filtro_estado.set(seleccion_actual)
+                else:
+                    self.filtro_estado.set("Todos")
+                    
+            # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
+            # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
+            
+            sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado FROM rma_maestro WHERE 1=1"
+            params = []
+            
+            # Aplicar filtro de ESTADO
+            estado_filtro_actual = self.filtro_estado.get() # Usamos el valor que se ha configurado
+            if estado_filtro_actual and estado_filtro_actual != "Todos":
+                sql += " AND estado = ?"
+                params.append(estado_filtro_actual)
+                
+            # Aplicar filtro de BÚSQUEDA por texto
+            if texto_busqueda:
+                busqueda_like = f"%{texto_busqueda}%"
+                sql += " AND (codigo_rma LIKE ? OR cliente LIKE ? OR numero_documento_cliente LIKE ?)"
+                params.append(busqueda_like)
+                params.append(busqueda_like)
+                params.append(busqueda_like) 
+
+            # Ordenar y Ejecutar
+            sql += " ORDER BY id DESC"
+            cursor.execute(sql, tuple(params))
+            
+            registros = cursor.fetchall()
+            conn.close()
+
+            # 3. Dibujar la tabla de resultados (Encabezados y Registros)
+            
+            # ... (código para dibujar encabezados y la tabla de registros, sigue igual) ...
+            
+            # Encabezados
+            header_font = ctk.CTkFont(weight="bold")
+            self.lista_rma_frame.grid_columnconfigure(1, weight=3)
+            self.lista_rma_frame.grid_columnconfigure(2, weight=1) 
+            ctk.CTkLabel(self.lista_rma_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="ACCIONES", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w") # Columna 5
+            if not registros:
+                ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
+                return
+
+            # Registros
+            for i, reg in enumerate(registros):
+                rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
+                row = i + 1
+                
+                # Mapeo de color según estado
+                color = {"Pendiente de Autorizacion": "orange", "Autorizado": "blue", "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+                
+                # 0: Código RMA
+                ctk.CTkLabel(self.lista_rma_frame, text=codigo_rma).grid(row=row, column=0, padx=5, pady=2, sticky="w")
+                # 1: Cliente
+                ctk.CTkLabel(self.lista_rma_frame, text=cliente).grid(row=row, column=1, padx=5, pady=2, sticky="w")
+                
+                # 💡 ¡NUEVO CAMPO en Columna 2!
+                ctk.CTkLabel(self.lista_rma_frame, text=numero_documento_cliente).grid(row=row, column=2, padx=5, pady=2, sticky="w")
+                
+                # 3: Estado (Se desplaza a Columna 3)
+                ctk.CTkLabel(self.lista_rma_frame, text=estado, text_color=color).grid(row=row, column=3, padx=5, pady=2, sticky="w")
+                # 4: Fecha Emisión (Se desplaza a Columna 4)
+                ctk.CTkLabel(self.lista_rma_frame, text=fecha_emision).grid(row=row, column=4, padx=5, pady=2, sticky="w")
+                
+                # 5: Botón Editar (Se desplaza a Columna 5)
+                ctk.CTkButton(self.lista_rma_frame, 
+                              text="✏️ Editar", 
+                              width=100,
+                              #fg_color="gray80",        # Fondo del botón: Gris claro
+                              #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+                              #text_color="black",                              
+                              command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+            
+        except Exception as e:
+            print(f"Error al cargar lista de RMA: {e}")
+            if conn: conn.close()
+            ctk.CTkLabel(self.lista_rma_frame, text=f"Error al cargar la lista: {e}").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
+
+    def crear_copia_seguridad_db(self):
+        """
+        Crea una copia de seguridad completa de la base de datos principal
+        usando el diálogo 'Guardar como' para que el usuario elija la ubicación.
+        La base de datos se asume en la carpeta actual: rma_app.db.
+        """
+        
+        # 1. Determinar la ruta de origen de la BD
+        try:
+            # Usamos os.getcwd() para obtener la ruta del directorio de trabajo actual
+            # y os.path.join para construir la ruta completa de la base de datos.
+            db_path_origen = os.path.join(os.getcwd(), DB_FILENAME)
+            
+            # Opcional: una verificación rápida para ver si el archivo existe
+            if not os.path.exists(db_path_origen):
+                messagebox.showerror(
+                    "Error de Archivo", 
+                    f"No se encontró la base de datos en la ruta esperada: {db_path_origen}\n"
+                    "Asegúrate de que el archivo '{DB_FILENAME}' está en la misma carpeta."
+                )
+                return
+
+        except Exception as e:
+            messagebox.showerror("Error de Ruta", f"No se pudo determinar la ruta de la base de datos: {e}")
+            return
+
+        # 2. Generar un nombre de archivo sugerido con fecha y hora
+        fecha_actual = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        nombre_sugerido = f"backup_rma_app_{fecha_actual}.db"
+
+        # 3. Abrir el diálogo para que el usuario seleccione la ruta de destino
+        path_destino = filedialog.asksaveasfilename(
+            defaultextension=".db", 
+            filetypes=[
+                ("Base de Datos SQLite", "*.db"), 
+                ("Base de Datos SQLite", "*.sqlite"),
+                ("Todos los archivos", "*.*")
+            ],
+            initialfile=nombre_sugerido,
+            title="Guardar Copia de Seguridad de la Base de Datos"
+        )
+
+        if not path_destino:
+            # El usuario canceló el diálogo
+            return
+
+        # 4. Realizar la copia de seguridad
+        conn_origen = None
+        conn_destino = None
+        try:
+            # 4.1. Conectar a la base de datos de origen (solo lectura)
+            conn_origen = sqlite3.connect(db_path_origen)
+            
+            # 4.2. Conectar a la base de datos de destino (se crea si no existe)
+            conn_destino = sqlite3.connect(path_destino)
+
+            # 4.3. Usar el método de backup integrado de SQLite
+            with conn_destino:
+                conn_origen.backup(conn_destino)
+            
+            messagebox.showinfo(
+                "Copia de Seguridad", 
+                f"¡Copia de seguridad completada con éxito!\nGuardada en: {path_destino}"
+            )
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de Base de Datos", f"Ocurrió un error al crear la copia de seguridad: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error inesperado: {e}")
+        finally:
+            if conn_origen:
+                conn_origen.close()
+            if conn_destino:
+                conn_destino.close()
+
+
+    # ----------------------------------------------------------------------
+    # 5. LÓGICA DE FORMULARIO (CREAR/EDITAR)
+    # ----------------------------------------------------------------------
+
+    def mostrar_nuevo_rma(self, rma_id=None):
+        """Muestra el formulario para crear (rma_id=None) o editar (rma_id=ID) un RMA."""
+        self.limpiar_contenido()
+        self.rma_actual_id = rma_id
+        self.articulos_data = [] # Lista temporal que contendrá los artículos
+        
+        self.datos_rma_maestro = {}
+        
+        if rma_id is not None:
+            # Modo Edición
+            self.mode = 'editar'
+            # Usaremos 'current_rma_id' para ser consistentes con la función de guardar
+            self.current_rma_id = rma_id
+        else:
+            # Modo Nuevo
+            self.mode = 'nuevo'
+            self.current_rma_id = None
+        
+        es_edicion = rma_id is not None
+        
+        # --- Cabecera ---
+        titulo_texto = "EDITAR EXPEDIENTE" if es_edicion else "CREAR NUEVO EXPEDIENTE"
+        header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        header_frame.grid_columnconfigure(0, weight=1)
+        
+        # 🛠️ 1. AJUSTE DE PESO: Fila 0 (Cabecera Principal)
+        self.content_frame.grid_rowconfigure(0, weight=0) # No se expande
+        # --------------------------------------------------------------------------
+
+        ctk.CTkLabel(header_frame, text=titulo_texto, font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, sticky="w")
+        
+        btn_volver = ctk.CTkButton(header_frame, 
+                                   text="⬅️ Volver", 
+                                   command=self.mostrar_lista_rma,
+                                   #fg_color="gray80",        # Fondo del botón: Gris claro
+                                   #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+                                   #text_color="black"
+                                   )
+        btn_volver.grid(row=0, column=1, padx=(20, 0), sticky="e")
+        
+        # --------------------------------------------------------------------------
+        # 2. Fila Principal (Código RMA + Comentarios Fijos) (Fila 1)
+        # --------------------------------------------------------------------------
+        # Creamos un frame de control para la Fila 1
+        fila1_control_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        fila1_control_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        
+        # Configuramos las columnas dentro de este frame: Col 0 es fija, Col 1 se expande
+        fila1_control_frame.grid_columnconfigure(0, weight=0) # Fija para el código
+        fila1_control_frame.grid_columnconfigure(1, weight=1) # Expansiva para los comentarios
+
+        # A) NÚMERO DE EXPEDIENTE (Columna 0)
+        codigo_rma_mostrar = "Cargando..." if es_edicion else self.obtener_siguiente_rma()
+        self.lbl_codigo_rma = ctk.CTkLabel(fila1_control_frame, text=f"Nº EXPEDIENTE: {codigo_rma_mostrar}", 
+                     font=ctk.CTkFont(size=18, weight="bold"), 
+                     text_color="grey30")
+        # ⚠️ Cambiamos el contenedor a fila1_control_frame
+        self.lbl_codigo_rma.grid(row=0, column=0, padx=10, pady=5, sticky="w") 
+        
+        
+        # B) CAJA DE COMENTARIOS (Columna 1)
+        comentarios_frame = ctk.CTkFrame(fila1_control_frame, fg_color="transparent") 
+        # Cambiamos el contenedor a fila1_control_frame y lo ponemos en column=1
+        comentarios_frame.grid(row=0, column=1, sticky="ew", padx=(20, 10), pady=5)
+        comentarios_frame.grid_columnconfigure(0, weight=1) 
+
+        # Etiqueta
+        ctk.CTkLabel(comentarios_frame, text="Comentarios (Guarde al momento con el botón ➕):", 
+                     text_color="black",
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, pady=(5, 0), sticky="nw")
+        
+        comentario_input_frame = ctk.CTkFrame(comentarios_frame, fg_color="transparent")
+        comentario_input_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(5, 5))
+        comentario_input_frame.grid_columnconfigure(0, weight=1) # El textbox se expande
+        
+        # 1. Textbox (con altura reducida) - va en la Columna 0 del nuevo frame
+        self.textbox_comentarios = ctk.CTkTextbox(comentario_input_frame, 
+                                                  height=40, # Altura compacta
+                                                  #fg_color="gray95", 
+                                                  #text_color="black",
+                                                  wrap="word")
+        self.textbox_comentarios.grid(row=0, column=0, sticky="ew")
+
+        # 2. Botón de Guardar Comentario - va en la Columna 1 del nuevo frame
+        ctk.CTkButton(comentario_input_frame, 
+                      text="➕", 
+                      width=40, 
+                      #fg_color="gray70", 
+                      #hover_color="gray60", 
+                      #text_color="black", 
+                      command=self.guardar_comentario_historial
+                      ).grid(row=0, column=1, padx=(5, 0), sticky="e")
+        
+        # 🛠️ 2. AJUSTE DE PESO: Fila 1 (Código RMA y Status)
+        self.content_frame.grid_rowconfigure(1, weight=0) # No se expande
+        # --------------------------------------------------------------------------
+        
+       
+        
+        # 3. Vista con pestañas (Tabview) para el formulario y el historial
+        self.tabview = ctk.CTkTabview(self.content_frame)
+        self.tabview.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
+        self.content_frame.grid_rowconfigure(2, weight=1)
+
+        # -----------------------------------------------------------
+        # -- 1. PESTAÑAS PRINCIPALES DEL FORMULARIO (NUEVAS) --
+        # -----------------------------------------------------------
+        general_tab = self.tabview.add("📝 General")
+        estados_fechas_tab = self.tabview.add("⏱️ Estados y Fechas")
+        articulos_tab = self.tabview.add("📦 Artículos")
+        contabilidad_tab = self.tabview.add("💰 Contabilidad")
+        adjuntos_tab = self.tabview.add("📎 Adjuntos (Pendiente)")
+        historial_tab = self.tabview.add("📜 Historial de Cambios")
+        self.historial_tab = historial_tab
+
+        # Configurar todas las pestañas con un marco scrollable (excepto Adjuntos/Historial, si es necesario)
+        # Hacemos los marcos scrollable y los frames internos transparentes
+        general_scroll = ctk.CTkScrollableFrame(general_tab, label_text="Datos de Identificación")
+        general_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        general_frame = ctk.CTkFrame(general_scroll, fg_color="transparent")
+        general_frame.pack(fill="x", padx=10, pady=10)
+        general_frame.grid_columnconfigure(1, weight=1)
+
+        estados_fechas_scroll = ctk.CTkScrollableFrame(estados_fechas_tab, label_text="Trazabilidad y Proceso")
+        estados_fechas_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        estados_fechas_frame = ctk.CTkFrame(estados_fechas_scroll, fg_color="transparent")
+        estados_fechas_frame.pack(fill="x", padx=10, pady=10)
+        estados_fechas_frame.grid_columnconfigure(1, weight=1)
+        
+        contabilidad_scroll = ctk.CTkScrollableFrame(contabilidad_tab, label_text="Cierre del Expediente")
+        contabilidad_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        contabilidad_frame = ctk.CTkFrame(contabilidad_scroll, fg_color="transparent")
+        contabilidad_frame.pack(fill="x", padx=10, pady=10)
+        contabilidad_frame.grid_columnconfigure(1, weight=1)
+
+        # El historial solo se muestra si estamos editando
+        if es_edicion:
+            self.mostrar_historial(historial_tab)
+        else:
+            self.tabview.delete("📜 Historial de Cambios")
+            self.tabview.delete("📎 Adjuntos (Pendiente)")
+            
+        # -----------------------------------------------------------
+        # -- 2. MOVER LLAMADAS A crear_campo A SUS NUEVOS FRAMES --
+        # -----------------------------------------------------------
+        
+        # V A L O R E S  A U T O M Á T I C O S
+        fecha_emision_valor = datetime.datetime.now().strftime("%Y-%m-%d")
+        usuario_actual = self.username
+        
+        # A) PESTAÑA GENERAL
+        # Campos de Cliente y Contacto
+        self.crear_campo(general_frame, 0, "Cliente:", "Cliente")
+        self.crear_campo(general_frame, 1, "Núm. Doc. Cliente:", "Numero_Documento_Cliente")
+        self.crear_campo(general_frame, 2, "Persona de Contacto:", "Persona_de_Contacto")
+        self.crear_campo(general_frame, 3, "Email de Contacto:", "Email_de_Contacto")
+        self.crear_campo(general_frame, 4, "Autorización:", "Autorizacion", tipo="optionmenu", opciones=self.OPCIONES["Autorizacion"], valor_defecto="NO")
+        self.crear_campo(general_frame, 5, "Motivo Devolucion:", "motivo")
+        
+        # Fechas y Creador (Solo lectura)
+        self.crear_campo(general_frame, 6, "Fecha Emisión:", "Fecha_Emision", 
+                         valor_defecto=fecha_emision_valor, deshabilitado=True)
+        self.crear_campo(general_frame, 7, "Creado Por:", "Creado_Por", 
+                         valor_defecto=usuario_actual, deshabilitado=True)
+
+
+        # B) PESTAÑA ESTADOS Y FECHAS
+        # Fechas de Autorización, Recepción, Proceso y Gestión
+        fila_estados = 0
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Autorización:", "Fecha_Autorizacion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Autorizado Por:", "Autorizado_Por", tipo="optionmenu", opciones=self.OPCIONES["Autorizado_Por"], valor_defecto=self.OPCIONES["Autorizado_Por"][0]); fila_estados += 1
+        
+        ctk.CTkLabel(estados_fechas_frame, text="--- RECEPCIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Recepción:", "Fecha_Recepcion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Recepcionado Por:", "Recepcionado_Por"); fila_estados += 1
+        
+        ctk.CTkLabel(estados_fechas_frame, text="--- PROCESO ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Proceso:", "Fecha_Proceso"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Procesado Por:", "Procesado_Por"); fila_estados += 1
+        
+        ctk.CTkLabel(estados_fechas_frame, text="--- CIERRE/GESTIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Gestión:", "Fecha_Gestion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Gestionado Por:", "Gestionado_Por", tipo="optionmenu", opciones=self.OPCIONES["Gestionado_Por"], valor_defecto=self.OPCIONES["Gestionado_Por"][0]); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha para Factura:", "Fecha_para_factura", tipo="optionmenu", opciones=self.obtener_quincenas_futuras(), valor_defecto=self.obtener_quincenas_futuras()[0]); fila_estados += 1
+
+        
+        # C) PESTAÑA ARTÍCULOS (Mantener la lógica de listado y añadir artículo)
+        articulos_tab.grid_columnconfigure(0, weight=1)
+        articulos_frame = ctk.CTkFrame(articulos_tab) # Este marco no necesita scroll, la lista interna sí
+        articulos_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        articulos_frame.grid_columnconfigure(0, weight=1)
+        articulos_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(articulos_frame, text="**DETALLE DE ARTÍCULOS**", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=6, pady=(10, 5), sticky="w")
+        
+        # 4. Entradas para añadir un nuevo artículo (Input Article Frame)
+        input_articulo_frame = ctk.CTkFrame(articulos_frame)
+        input_articulo_frame.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(5, 10))
+        # ... (Mantener la definición de las entradas self.art_ref, self.art_cant_doc, etc.)
+        # ... (NO TOCAR ESTA SECCIÓN, está bien como está, solo moverla)
+
+        # Etiquetas
+        ctk.CTkLabel(input_articulo_frame, text="Ref. Artículo", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Cant. Doc.", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Cant. Entregada", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Estado", font=ctk.CTkFont(size=11)).grid(row=0, column=3, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Precio Unitario", font=ctk.CTkFont(size=11)).grid(row=0, column=4, padx=5)
+        
+        # Entradas
+        self.art_ref = ctk.CTkEntry(input_articulo_frame, width=150)
+        self.art_ref.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
+        self.art_cant_doc = ctk.CTkEntry(input_articulo_frame, width=80)
+        self.art_cant_doc.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
+        self.art_cant_entregada = ctk.CTkEntry(input_articulo_frame, width=80)
+        self.art_cant_entregada.grid(row=1, column=2, padx=5, pady=2, sticky="ew")
+        self.art_estado = ctk.CTkOptionMenu(input_articulo_frame, values=self.OPCIONES["Estado_Producto"], width=150)
+        self.art_estado.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
+        self.art_precio = ctk.CTkEntry(input_articulo_frame, width=100)
+        self.art_precio.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
+
+        # Botones de Acción de Artículos
+        ctk.CTkButton(input_articulo_frame, 
+                      text="➕", 
+                      width=30,
+                      #fg_color="gray70",        # Fondo del botón: Gris claro
+                      #hover_color="gray60",     # Efecto hover: Ligeramente más oscuro
+                      #text_color="black",                      
+                      command=self.anadir_articulo).grid(row=1, column=5, padx=5, pady=2)
+        
+        # 5. Listado de Artículos ya añadidos
+        self.articulos_list_frame = ctk.CTkFrame(articulos_frame)
+        self.articulos_list_frame.grid(row=2, column=0, columnspan=6, sticky="ew", padx=10, pady=10)
+        self.actualizar_listado_articulos()
+
+        
+        # D) PESTAÑA CONTABILIDAD
+        fila_cont = 0
+        self.crear_campo(contabilidad_frame, fila_cont, "Resultado Expediente:", "Resultado_Expediente", tipo="optionmenu", opciones=self.OPCIONES["Resultado_Expediente"], valor_defecto=self.OPCIONES["Resultado_Expediente"][0]); fila_cont += 1
+        self.crear_campo(contabilidad_frame, fila_cont, "Número Albarán:", "Numero_Albaran"); fila_cont += 1
+        self.crear_campo(contabilidad_frame, fila_cont, "Fecha Doc. Cliente:", "Fecha_Doc_Cliente"); fila_cont += 1
+        
+        # --- NUEVO CAMPO CALCULADO: PRECIO TOTAL ---
+        ctk.CTkLabel(contabilidad_frame, text="------------------------------").grid(row=fila_cont, column=0, columnspan=2, pady=(10, 5), sticky="ew"); fila_cont += 1
+        
+        ctk.CTkLabel(contabilidad_frame, text="PRECIO TOTAL EXPEDIENTE:", font=ctk.CTkFont(weight="bold")).grid(row=fila_cont, column=0, padx=10, pady=5, sticky="w")
+        
+        # Creamos una etiqueta para mostrar el total y guardamos su referencia
+        self.lbl_precio_total = ctk.CTkLabel(contabilidad_frame, text="0.00 €", font=ctk.CTkFont(size=16, weight="bold"), text_color="green")
+        self.lbl_precio_total.grid(row=fila_cont, column=1, padx=10, pady=5, sticky="w")
+        
+        # E) PESTAÑA ADJUNTOS
+        # 1. Botón para Añadir Adjunto
+        self.btn_subir_adjunto = ctk.CTkButton(
+            adjuntos_tab, 
+            text="➕ Subir Archivo", 
+            #fg_color="gray80",        # Fondo del botón: Gris claro
+            #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+            #text_color="black",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            # CRÍTICO: Usar lambda para forzar el argumento a False
+            command=lambda: self.abrir_dialogo_adjunto(modo_abrir_carpeta=False) 
+        )
+        self.btn_subir_adjunto.pack(pady=(10, 5), padx=10, fill='x')
+
+        # 2. Frame para el Listado de Adjuntos
+        # Usamos un ScrollableFrame para que la lista crezca
+        self.adjuntos_list_frame = ctk.CTkScrollableFrame(adjuntos_tab, label_text="Archivos Adjuntos")
+        self.adjuntos_list_frame.pack(pady=5, padx=10, fill="both", expand=True)
+
+        # Cargar los adjuntos si estamos en modo edición (la función la crearemos en el paso 4)
+        if self.mode == 'editar':
+            self.cargar_lista_adjuntos(self.current_rma_id)
+        else:
+            # En modo 'nuevo', mostramos un mensaje hasta que el RMA se guarde
+            ctk.CTkLabel(self.adjuntos_list_frame, 
+                         text="Guarde el expediente primero para poder adjuntar archivos.")\
+                .pack(pady=20)
+        
+
+        # 4. Botón de Guardar Definitivo
+        
+        # 💡 CREAR UN FRAME PARA AGRUPAR LOS BOTONES DE ACCIÓN (Fila 3)
+        btn_action_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        btn_action_frame.grid(row=3, column=0, padx=20, pady=20, sticky="w")
+        
+        # 1. Botón de Generar Informe (Solo en modo edición)
+        if es_edicion:
+            self.btn_generar_informe = ctk.CTkButton(
+                btn_action_frame, 
+                text="📄 Informe (Word)", 
+                command=self.generar_informe_dinamico, 
+                #text_color="black",
+                #fg_color="grey80", 
+                #hover_color="grey70",
+                font=ctk.CTkFont(size=14, weight="bold")
+            )
+            self.btn_generar_informe.pack(side="left", padx=(5, 15)) # 15px de margen derecho
+            self.btn_generar_reposicion = ctk.CTkButton(
+                btn_action_frame, 
+                text="🔄 Reposicion/Devolucion", # Texto largo para mayor claridad
+                command=self.generar_reposicion_devolucion, 
+                #text_color="black",
+                #fg_color="grey80",
+                #hover_color="grey70",
+                font=ctk.CTkFont(size=14, weight="bold")
+            )
+            self.btn_generar_reposicion.pack(side="left", padx=(5, 15)) # 5px izquierda, 15px derecha antes de Actualizar
+            self.btn_enviar_email = ctk.CTkButton(btn_action_frame, 
+                text="📧 Enviar Email",
+                command=self.enviar_email_contacto,
+                #text_color="black",
+                #fg_color="grey80",
+                #hover_color="grey70",
+                font=ctk.CTkFont(size=14, weight="bold"))               
+            self.btn_enviar_email.pack(side="left", padx=(5, 15))
+
+        # 2. Botón de Guardar
+        guardar_texto = "💾 ACTUALIZAR" if es_edicion else "💾 GUARDAR"
+        guardar_button = ctk.CTkButton(
+            btn_action_frame, 
+            text=guardar_texto, 
+            #fg_color="gray80",        # Fondo del botón: Gris claro
+            #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+            #text_color="black",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.guardar_rma_placeholder
+        )
+        guardar_button.pack(side="left", padx=(0, 5))
+        
+        # Lógica de Edición
+        if es_edicion:
+            # self.lbl_codigo_rma.configure(text="Cargando datos...")
+            self.cargar_datos_rma(rma_id) # Se implementará después
+
+    def guardar_comentario_historial(self):
+        """
+        Guarda el contenido del Textbox de comentarios como una entrada del historial, 
+        usando la estructura simple de la tabla rma_historial.
+        """
+        
+        # 1. Validar ID del Expediente
+        rma_id = self.rma_actual_id
+        if rma_id is None:
+            messagebox.showwarning("Aviso", "Debes guardar el expediente principal primero (botón GUARDAR RMA) para poder añadir comentarios.")
+            return
+
+        # 2. Obtener y validar el texto
+        nuevo_comentario = self.textbox_comentarios.get("1.0", "end-1c").strip()
+        
+        if not nuevo_comentario:
+            messagebox.showwarning("Aviso", "No hay texto en la caja de comentarios para guardar.")
+            return
+            
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            
+            # 3. Preparar los datos
+            fecha_cambio = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            usuario = self.username
+            
+            # 4. Crear la descripción completa del cambio
+            # Para un historial simple, el comentario es la descripción completa
+            descripcion_cambio = f"COMENTARIO MANUAL: {nuevo_comentario}"
+            
+            # 5. Ejecutar la inserción SQL
+            cursor.execute("""
+                INSERT INTO rma_historial 
+                (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id, fecha_cambio, usuario, descripcion_cambio))
+
+            # 6. Commit, Limpieza y Feedback
+            conn.commit()
+            conn.close()
+            
+            self.textbox_comentarios.delete("1.0", "end")
+            
+            # 7. Recargar historial (si la pestaña está visible)
+            if hasattr(self, 'historial_tab') and self.historial_tab:
+                # Llama a la función que recarga el listado de la pestaña historial
+                self.mostrar_historial(self.historial_tab)
+            
+            try:
+                # 1. Obtener el texto completo (ej: "Nº EXPEDIENTE: RMA25001")
+                texto_label = self.lbl_codigo_rma.cget("text")
+                # 2. Extraer solo el código (ej: "RMA25001")
+                codigo_rma = texto_label.split(': ')[1]
+            except Exception:
+                # Fallback seguro en caso de que el label tenga un formato inesperado
+                codigo_rma = f"ID {rma_id}"
+                
+            # 8. Mostrar mensaje de éxito usando la variable local 'codigo_rma'
+            messagebox.showinfo("Comentario Guardado", f"El comentario ha sido guardado en el historial del RMA {codigo_rma}.")
+            
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de Base de Datos", f"Error al guardar el comentario: {e}")
+    
+    def anadir_articulo(self):
+        """Añade una fila de artículo a la lista temporal."""
+        try:
+            referencia = self.art_ref.get()
+            cant_doc = int(self.art_cant_doc.get() or 0)
+            cant_entregada = int(self.art_cant_entregada.get() or 0)
+            estado = self.art_estado.get()
+            # Reemplazar comas por puntos para que float funcione
+            precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0) 
+        except ValueError:
+            print("Error: Cantidad y Precio deben ser números.")
+            return
+
+        if not referencia:
+            print("Error: La Referencia es obligatoria.")
+            return
+
+        nuevo_articulo = {
+            "referencia_articulo": referencia,
+            "cantidad_segun_documento": cant_doc,
+            "cantidad_entregada": cant_entregada,
+            "estado_producto": estado,
+            "precio_unitario": precio_unitario
+        }
+        
+        self.articulos_data.append(nuevo_articulo)
+        self.actualizar_listado_articulos()
+        self.limpiar_articulo()
+
+    def limpiar_articulo(self):
+        """Limpia los campos de entrada de un solo artículo."""
+        self.art_ref.delete(0, ctk.END)
+        self.art_cant_doc.delete(0, ctk.END)
+        self.art_cant_entregada.delete(0, ctk.END)
+        self.art_precio.delete(0, ctk.END)
+        self.art_estado.set(self.OPCIONES["Estado_Producto"][0])
+
+    def eliminar_articulo(self, index):
+        """Elimina un artículo de la lista temporal y actualiza la vista."""
+        if 0 <= index < len(self.articulos_data):
+            self.articulos_data.pop(index)
+            self.actualizar_listado_articulos()
+
+    def actualizar_listado_articulos(self):
+        """Redibuja la tabla con los artículos de la lista temporal."""
+        for widget in self.articulos_list_frame.winfo_children():
+            widget.destroy()
+            
+        if not self.articulos_data:
+            ctk.CTkLabel(self.articulos_list_frame, text="No hay artículos asociados a este RMA.", text_color="gray").pack(pady=10)
+            return
+            
+        header_frame = ctk.CTkFrame(self.articulos_list_frame)
+        header_frame.pack(fill="x")
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado Producto", "P. Unitario", "Acción"]
+        weights = [2, 1, 1, 2, 1, 1]
+        
+        for i, col in enumerate(cols):
+            ctk.CTkLabel(header_frame, text=col, font=ctk.CTkFont(weight="bold")).grid(row=0, column=i, padx=5, pady=5, sticky="w")
+            header_frame.grid_columnconfigure(i, weight=weights[i])
+
+        for i, item in enumerate(self.articulos_data):
+            row_frame = ctk.CTkFrame(self.articulos_list_frame)
+            row_frame.pack(fill="x")
+            
+            ctk.CTkLabel(row_frame, text=item["referencia_articulo"]).grid(row=0, column=0, padx=5, pady=2, sticky="w")
+            ctk.CTkLabel(row_frame, text=item["cantidad_segun_documento"]).grid(row=0, column=1, padx=5, pady=2, sticky="w")
+            ctk.CTkLabel(row_frame, text=item["cantidad_entregada"]).grid(row=0, column=2, padx=5, pady=2, sticky="w")
+            ctk.CTkLabel(row_frame, text=item["estado_producto"]).grid(row=0, column=3, padx=5, pady=2, sticky="w")
+            ctk.CTkLabel(row_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=0, column=4, padx=5, pady=2, sticky="w")
+            
+            ctk.CTkButton(row_frame, text="X", width=30, fg_color="red", hover_color="darkred", 
+                          command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=0, column=5, padx=5, pady=2, sticky="w")
+            
+            for j in range(6):
+                row_frame.grid_columnconfigure(j, weight=weights[j])
+        # --- NUEVO: Calcular y actualizar el Precio Total en la etiqueta de Contabilidad ---
+        precio_total = sum(item.get('cantidad_entregada', 0) * item.get('precio_unitario', 0.0) for item in self.articulos_data)
+        
+        # Esto es seguro porque lbl_precio_total se crea en mostrar_nuevo_rma
+        if hasattr(self, 'lbl_precio_total'):
+            self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
+
+
+    def guardar_rma_placeholder(self):
+        """Punto de entrada para guardar/actualizar."""
+        if self.rma_actual_id is None:
+            self.guardar_nuevo_rma()
+        else:
+            self.actualizar_rma()
+
+    def guardar_nuevo_rma(self):
+        """Valida los campos y realiza la inserción en rma_maestro y rma_detalles."""
+        
+        # 1. Recolección y Validación de campos obligatorios
+        datos_maestro = {}
+        campos_a_insertar = [
+            'Cliente', 'Numero_Documento_Cliente', 'Persona_de_Contacto', 'Email_de_Contacto',
+            'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
+            'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
+            'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo'
+        ]
+        
+        for campo in campos_a_insertar:
+            entry = getattr(self, f"entry_{campo}")
+            # Si es optionmenu, usa .get(). Si es Entry, usa .get()
+            valor = entry.get() if hasattr(entry, 'get') else entry.cget("text")
+            
+            # Validación de obligatorios
+            if campo in ["Cliente", "Numero_Documento_Cliente", "Persona_de_Contacto", "Email_de_Contacto", "motivo"] and not valor:
+                print(f"Error: El campo {campo.replace('_', ' ')} es obligatorio.")
+                messagebox.showinfo("Advertencia", f"Error: El campo {campo.replace('_', ' ')} es obligatorio.")
+                # Aquí deberías mostrar un mensaje de error en la interfaz
+                return
+            
+            # Conversión especial para Autorizacion (SI/NO a 1/0)
+            if campo == 'Autorizacion':
+                datos_maestro[campo.lower()] = 1 if valor == "SI" else 0
+            else:
+                datos_maestro[campo.lower()] = valor
+
+        # Campos automáticos/calculados
+        datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        datos_maestro['fecha_emision'] = self.entry_Fecha_Emision.get()
+        datos_maestro['creado_por'] = self.entry_Creado_Por.get()
+        
+        # Definir estado inicial basado en Autorización
+        # 1. INTEGRACIÓN DE LA TRAZABILIDAD
+        datos_maestro['estado'] = self.determinar_estado_rma(datos_maestro)
+        
+        # 2. Calcular Precio Total y validar Artículos
+        precio_total = sum(item['cantidad_entregada'] * item['precio_unitario'] for item in self.articulos_data)
+        datos_maestro['precio_total_expediente'] = precio_total
+
+        # if not self.articulos_data:
+        #     print("Error: Debe añadir al menos un artículo.")
+        #     return
+
+        # 3. Inserción en la Base de Datos
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+        cursor = conn.cursor()
+        
+        try:
+            # 3a. Inserción en rma_maestro
+            columnas_maestro = ', '.join(datos_maestro.keys())
+            placeholders_maestro = ', '.join('?' * len(datos_maestro))
+            valores_maestro = tuple(datos_maestro.values())
+            
+            cursor.execute(f"""
+                INSERT INTO rma_maestro ({columnas_maestro}, estado) 
+                VALUES ({placeholders_maestro}, ?)
+            """, valores_maestro + (datos_maestro['estado'],)) # El estado se añade al final
+
+            # Obtener el ID del RMA recién creado
+            rma_id_generado = cursor.lastrowid
+            
+            # 3b. Inserción en rma_detalles
+            if self.articulos_data:
+                for articulo in self.articulos_data:
+                    articulo['rma_id'] = rma_id_generado
+                    
+                    # Mapeo simple de diccionario a tupla de valores
+                    columnas_detalle = ', '.join(articulo.keys())
+                    placeholders_detalle = ', '.join('?' * len(articulo))
+                    valores_detalle = tuple(articulo.values())
+                    
+                    cursor.execute(f"""
+                        INSERT INTO rma_detalles ({columnas_detalle}) 
+                        VALUES ({placeholders_detalle})
+                    """, valores_detalle)
+                print(f"✅ Detalles de {len(self.articulos_data)} artículos guardados.")
+
+            # 3c. Inserción en rma_historial (modificar descripción si no hay artículos)
+            num_articulos = len(self.articulos_data)
+            descripcion = f"RMA creado. Cliente: {datos_maestro['cliente']}. Artículos: {num_articulos}. Total: {precio_total:.2f} €"
+            cursor.execute("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
+
+            conn.commit()
+            print(f"✅ RMA {datos_maestro['codigo_rma']} guardado exitosamente.")
+            messagebox.showinfo("Expediente Guardado", "El expediente se ha guardado correctamente.")
+            
+            self.current_rma_id = rma_id_generado # Asigna el ID al atributo de instancia
+            self.mode = 'editar'                   # Cambia la ventana a modo edición
+            
+            # Eliminamos la llamada a self.mostrar_lista_rma() para mantener la vista abierta.
+            
+            # Actualizar el título de la pestaña si fuera necesario
+            self.tabview.set("📝 General")
+            
+            messagebox.showinfo("Éxito", f"RMA {datos_maestro['codigo_rma']} creado y guardado. Ahora puede adjuntar archivos.")
+            
+            # Volver al listado
+            self.mostrar_lista_rma()
+
+        except sqlite3.IntegrityError as e:
+            conn.rollback()
+            print(f"Error al guardar (Integridad): {e}. Es posible que el código RMA ya exista.")
+        except sqlite3.Error as e:
+            conn.rollback()
+            print(f"Error general de DB al guardar: {e}")
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # 6. LÓGICA DE EDICIÓN Y ACTUALIZACIÓN (CARGA Y GUARDADO DE CAMBIOS)
+    # ----------------------------------------------------------------------
+
+    def obtener_datos_actuales_maestro(self):
+        """Recupera los datos del formulario MAESTRO actuales."""
+        datos_maestro = {}
+        # Lista de campos de la tabla rma_maestro que corresponden a entries
+        campos_a_recuperar = [
+            'Cliente', 'Numero_Documento_Cliente', 'Persona_de_Contacto', 'Email_de_Contacto',
+            'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
+            'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
+            'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
+            'Fecha_Emision', 'Creado_Por', 'motivo'
+        ]
+
+        for campo in campos_a_recuperar:
+            entry_name = f"entry_{campo}"
+            if hasattr(self, entry_name):
+                entry = getattr(self, entry_name)
+                # Intenta obtener el valor de la entrada o del optionmenu
+                valor = entry.get() if hasattr(entry, 'get') else entry.cget("text")
+                
+                # Conversión especial para Autorizacion (SI/NO a 1/0)
+                if campo == 'Autorizacion':
+                    datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
+                else:
+                    datos_maestro[campo.lower()] = valor
+        
+        datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        
+        return datos_maestro
+
+
+    def cargar_datos_rma(self, rma_id):
+        """Carga el RMA maestro y sus detalles en el formulario."""
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+        cursor = conn.cursor()
+        
+        try:
+            # 1. Cargar RMA Maestro
+            cursor.execute("SELECT * FROM rma_maestro WHERE id = ?", (rma_id,))
+            columnas_maestro = [col[0] for col in cursor.description]
+            datos_maestro = dict(zip(columnas_maestro, cursor.fetchone()))
+            
+            self.datos_rma_maestro = datos_maestro
+            
+            # 2. Cargar RMA Detalles (Artículos)
+            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            columnas_detalle = [col[0] for col in cursor.description]
+            articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
+
+            conn.close()
+
+            # 3. Rellenar Formulario Maestro
+            self.lbl_codigo_rma.configure(text=f"Nº EXPEDIENTE: {datos_maestro['codigo_rma']}")
+            
+            # >>> VERIFICACIÓN CRÍTICA DEL WIDGET MOTIVO <<<
+            # Si esta línea falla, el nombre de la variable está mal.
+            entry_motivo = None
+            
+            # Prueba 1: entry_Motivo (La que falló)
+            if 'entry_Motivo' in self.__dict__:
+                entry_motivo = self.entry_Motivo
+            # Prueba 2: entry_motivo (Todo minúscula, la más probable)
+            elif 'entry_motivo' in self.__dict__:
+                entry_motivo = self.entry_motivo
+            # Prueba 3: entry_motivo_ (Por si hay un guion bajo final)
+            elif 'entry_motivo_' in self.__dict__:
+                entry_motivo = getattr(self, "entry_motivo_", None)
+
+            # Si encontramos el widget con el nombre correcto:
+            if entry_motivo and 'motivo' in datos_maestro:
+                valor_motivo = datos_maestro['motivo']
+                
+                if isinstance(entry_motivo, ctk.CTkEntry):
+                    # 1. Borrar el placeholder
+                    entry_motivo.configure(state="normal")
+                    entry_motivo.delete(0, ctk.END)
+                    
+                    # 2. Insertar el valor
+                    valor_a_insertar = str(valor_motivo) if valor_motivo is not None and str(valor_motivo).strip() != "" else ""
+                    entry_motivo.insert(0, valor_a_insertar)
+                    
+                    # 3. Restaurar estado (si no era un campo deshabilitado, se queda en normal)
+                    # NOTA: En este formulario es un campo editable, así que se queda en 'normal'
+            # -----------------------------------------------
+            # --- Mapeo de Columna DB a Variable de Formulario ---
+            for columna, valor in datos_maestro.items():
+                
+                # Excluir 'id', 'precio_total_expediente' y 'estado' que no tienen entry directo
+                if columna in ['id', 'precio_total_expediente', 'estado']:
+                    continue
+
+                # ---------------------------------------------------------------------------------
+                # 1. DETERMINAR EL NOMBRE CORRECTO DE LA VARIABLE DE LA INTERFAZ (entry_name)
+                # ---------------------------------------------------------------------------------
+                entry_name = None
+                
+                # Caso A: Campos simples (Sin guiones bajos, como 'motivo', 'cliente', 'creado_por')
+                # ESTA ES LA RUTA CRÍTICA QUE 'motivo' DEBE SEGUIR
+                if '_' not in columna:
+                    # Convierte a título para hacer coincidir la convención (ej: motivo -> Motivo)
+                    entry_name = f"entry_{columna.title()}" 
+                
+                # Caso B: Campos con guiones bajos (como 'persona_de_contacto', 'numero_documento_cliente')
+                else:
+                    # Aplica tu lógica compleja de transformación:
+                    formato_titulo = columna.replace('_', ' ').title()
+                    entry_key_name = formato_titulo.replace(' De ', ' de ')
+                    entry_key_name = entry_key_name.replace(' ', '_')
+                    entry_name = f"entry_{entry_key_name}"
+
+
+                # ---------------------------------------------------------------------------------
+                # 2. TRATAMIENTO Y RELLENO DEL WIDGET EN BASE AL NOMBRE
+                # ---------------------------------------------------------------------------------
+                
+                # Si encontramos un nombre de variable, intentamos rellenar
+                if entry_name and hasattr(self, entry_name):
+                    entry = getattr(self, entry_name)
+                    
+                    # Tratamiento especial para OptionMenu (Autorizacion)
+                    if columna == 'autorizacion' and isinstance(entry, ctk.CTkOptionMenu):
+                        valor_str = "SI" if valor == 1 else "NO"
+                        entry.set(valor_str)
+                        
+                    # Tratamiento para Entry
+                    elif isinstance(entry, ctk.CTkEntry):
+                        # Configurar Entry
+                        estado_original = entry.cget("state")  
+                        entry.configure(state="normal")
+                        
+                        # CRÍTICO: Borrar el placeholder ANTES de insertar
+                        entry.delete(0, ctk.END)
+                        entry.insert(0, str(valor) if valor is not None else "")
+                        
+                        entry.configure(state=estado_original)
+                        
+                    # Tratamiento para OptionMenu General
+                    elif isinstance(entry, ctk.CTkOptionMenu):
+                        if str(valor) in entry.cget("values"):  
+                             entry.set(str(valor))
+            
+            # --- NUEVO: Actualizar la etiqueta del total ---
+            precio_total = datos_maestro.get('precio_total_expediente', 0.0) # Obtener el valor
+            self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
+            
+            # 4. Rellenar Artículos (self.articulos_data)
+            self.articulos_data = articulos_db
+            self.actualizar_listado_articulos()
+
+        except Exception as e:
+            print(f"Error al cargar datos del RMA ID {rma_id}: {e}")
+            conn.close()
+            
+    def guardar_cambio_historial(self, rma_id, campo, valor_antiguo, valor_nuevo):
+        """Registra un cambio de un campo en la tabla de historial."""
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+        cursor = conn.cursor()
+        
+        descripcion = f"Campo '{campo}' modificado: '{valor_antiguo}' -> '{valor_nuevo}'"
+        
+        try:
+            cursor.execute("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
+            conn.commit()
+        except sqlite3.Error as e:
+            print(f"Error al registrar historial: {e}")
+        finally:
+            conn.close()
+
+    def actualizar_rma(self):
+        """Compara los datos, actualiza rma_maestro y rma_detalles, y registra los cambios."""
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+
+        cursor = conn.cursor()
+        rma_id = self.rma_actual_id
+        
+        # 1. Obtener datos antiguos de la DB
+        cursor.execute("SELECT * FROM rma_maestro WHERE id = ?", (rma_id,))
+        columnas_maestro_db = [col[0] for col in cursor.description]
+        datos_antiguos = dict(zip(columnas_maestro_db, cursor.fetchone()))
+        
+        # 2. Obtener datos nuevos del formulario
+        datos_nuevos = self.obtener_datos_actuales_maestro()
+        
+        # 2.1. INTEGRACIÓN DE LA TRAZABILIDAD - Calcular el nuevo estado
+        estado_nuevo = self.determinar_estado_rma(datos_nuevos)
+        
+        # Añadir el estado al diccionario de datos nuevos
+        datos_nuevos['estado'] = estado_nuevo 
+        
+        # 3. Comparar y construir la consulta de actualización (UPDATE)
+        campos_a_actualizar = []
+        valores_a_actualizar = []
+        
+        for columna_db, valor_nuevo in datos_nuevos.items():
+            valor_antiguo = datos_antiguos.get(columna_db)
+            
+            # SQLite almacena el boolean como int (1/0)
+            if columna_db == 'autorizacion':
+                if valor_nuevo != valor_antiguo:
+                    self.guardar_cambio_historial(rma_id, "Autorización", "NO" if valor_antiguo == 0 else "SI", "NO" if valor_nuevo == 0 else "SI")
+                    campos_a_actualizar.append(f"{columna_db} = ?")
+                    valores_a_actualizar.append(valor_nuevo)
+            
+            # Comparación de campos normales (no boolean)
+            elif str(valor_nuevo) != str(valor_antiguo):
+                self.guardar_cambio_historial(rma_id, columna_db.title().replace('_', ' '), str(valor_antiguo), str(valor_nuevo))
+                campos_a_actualizar.append(f"{columna_db} = ?")
+                valores_a_actualizar.append(valor_nuevo)
+        
+        columna_estado_ya_anadida = 'estado' in [c.split('=')[0].strip() for c in campos_a_actualizar]
+
+        if not columna_estado_ya_anadida:
+            # Si no se incluyó en el bucle anterior (lo que indica que el estado no cambió),
+            # lo incluimos ahora, usando el nuevo valor calculado.
+            campos_a_actualizar.append("estado = ?")
+            valores_a_actualizar.append(estado_nuevo)
+
+        # 4. Actualizar rma_maestro si hay cambios
+        if campos_a_actualizar:
+            valores_a_actualizar.append(rma_id)
+            set_clause = ", ".join(campos_a_actualizar)
+            
+            try:
+                cursor.execute(f"UPDATE rma_maestro SET {set_clause} WHERE id = ?", tuple(valores_a_actualizar))
+                print(f"✅ RMA {datos_nuevos['codigo_rma']} Maestro actualizado.")
+                messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
+            except sqlite3.Error as e:
+                print(f"Error al actualizar maestro: {e}")
+                conn.rollback()
+                conn.close()
+                return
+
+        # 5. Actualizar rma_detalles (Borrar antiguos e Insertar nuevos)
+        try:
+            # Borrar todos los detalles existentes
+            cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            
+            # Insertar los detalles de la lista temporal del formulario
+            if self.articulos_data:
+                for articulo in self.articulos_data:
+                    articulo['rma_id'] = rma_id
+                    
+                    columnas_detalle = ', '.join(articulo.keys())
+                    placeholders_detalle = ', '.join('?' * len(articulo))
+                    valores_detalle = tuple(articulo.values())
+                    
+                    cursor.execute(f"""
+                        INSERT INTO rma_detalles ({columnas_detalle}) 
+                        VALUES ({placeholders_detalle})
+                    """, valores_detalle)
+                    
+                self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", f"Lista Nueva ({len(self.articulos_data)} items)")
+            
+            elif not self.articulos_data and cursor.rowcount > 0: # Si borramos y no insertamos nada
+                 self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
+            
+            print(f"✅ RMA {datos_nuevos['codigo_rma']} Detalles actualizados.")
+            messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
+
+        except sqlite3.Error as e:
+            print(f"Error al actualizar detalles: {e}")
+            conn.rollback()
+            conn.close()
+            return
+            
+        # 6. Commit final y retorno a la lista
+        conn.commit()
+        conn.close()
+        self.mostrar_lista_rma()
+    
+    def mostrar_historial(self, parent_frame):
+        """Muestra la lista de registros de cambios para el RMA actual."""
+        
+        # Destruye el 'historial_scroll_frame' anterior y todos sus hijos.
+        for widget in parent_frame.winfo_children():
+            widget.destroy()
+        
+        # Marco scrollable para contener la lista de eventos
+        historial_scroll_frame = ctk.CTkScrollableFrame(parent_frame, label_text="Detalle de Cambios en el Expediente")
+        historial_scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Encabezados
+        header_font = ctk.CTkFont(weight="bold")
+        historial_scroll_frame.grid_columnconfigure(2, weight=1) # Descripción se expande
+        ctk.CTkLabel(historial_scroll_frame, text="FECHA/HORA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(historial_scroll_frame, text="USUARIO", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(historial_scroll_frame, text="DESCRIPCIÓN DEL CAMBIO", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        
+        conn, cursor = self.master.conectar_db()
+        if not conn: return
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT fecha_cambio, usuario, descripcion_cambio 
+                FROM rma_historial 
+                WHERE rma_id = ? 
+                ORDER BY id DESC
+            """, (self.rma_actual_id,))
+            
+            registros = cursor.fetchall()
+            conn.close()
+
+            if not registros:
+                ctk.CTkLabel(historial_scroll_frame, text="No hay registros de historial para este RMA.", text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
+                return
+            
+            # Mostrar los registros
+            for i, reg in enumerate(registros):
+                fecha, usuario, descripcion = reg
+                row = i + 1
+                
+                ctk.CTkLabel(historial_scroll_frame, text=fecha).grid(row=row, column=0, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(historial_scroll_frame, text=usuario).grid(row=row, column=1, padx=5, pady=2, sticky="w")
+                
+                # Usamos wrap para que el texto de la descripción no se salga
+                ctk.CTkLabel(historial_scroll_frame, text=descripcion, wraplength=500, justify="left").grid(row=row, column=2, padx=5, pady=2, sticky="w")
+
+        except Exception as e:
+            print(f"Error al cargar historial: {e}")
+            if conn: conn.close()
+            ctk.CTkLabel(historial_scroll_frame, text="Error al cargar el historial.", text_color="red").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
+
+
+    def determinar_estado_rma(self, datos_maestro):
+        """Calcula el estado del RMA basándose en las fechas clave."""
+        
+        # Obtener fechas del diccionario de datos (asegúrate que las claves son minúsculas como en la DB)
+        fecha_recepcion = datos_maestro.get('fecha_recepcion')
+        fecha_gestion = datos_maestro.get('fecha_gestion')
+        fecha_autorizacion = datos_maestro.get('fecha_autorizacion')
+        fecha_emision = datos_maestro.get('fecha_emision')
+        
+        # 5. Estado 'Completado' (Último paso)
+        if fecha_gestion:
+            return "Completado"
+            
+        # 4. Estado 'Recibido'
+        elif fecha_recepcion:
+            return "Recibido"
+        
+        # 3. Estado 'Autorizado' (Debe ir antes que fecha_emision)
+        elif fecha_autorizacion:
+            return "Autorizado"
+            
+        # 2. Estado 'Pendiente de Autorizacion' (Si solo existe la emisión)
+        elif fecha_emision:
+            return "Pendiente de Autorizacion"
+            
+        # 1. Estado por defecto
+        else:
+            return "Pendiente de Autorizacion"
+    
+    def aplicar_filtros_rma(self):
+        """Lee los valores de los filtros y recarga la lista."""
+        texto_busqueda = self.entry_busqueda.get()
+        estado_filtro = self.filtro_estado.get()
+        
+        self.cargar_lista_rma(texto_busqueda, estado_filtro)
+    
+    def crear_tabla_adjuntos(self):
+        """Crea la tabla rma_adjuntos si no existe."""
+        conn, cursor = self.master.conectar_db()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rma_adjuntos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rma_id INTEGER NOT NULL,
+                    nombre_archivo TEXT NOT NULL,
+                    ruta_relativa TEXT NOT NULL,
+                    fecha_subida TEXT,
+                    usuario_subida TEXT,
+                    FOREIGN KEY (rma_id) REFERENCES rma_maestro (id)
+                )
+            """)
+            conn.commit()
+            print("Tabla 'rma_adjuntos' verificada/creada.")
+        except sqlite3.Error as e:
+            print(f"Error al crear la tabla 'rma_adjuntos': {e}")
+        finally:
+            conn.close()
+    
+    def crear_carpeta_adjuntos_rma(self, codigo_rma):
+        """
+        Crea la carpeta específica para el RMA (Ej: Adjuntos_RMA/RMA25001) 
+        si no existe.
+        """
+        # 1. Asegurarse de que la carpeta raíz exista (Adjuntos_RMA)
+        if not os.path.exists(ADJUNTOS_ROOT_DIR):
+            os.makedirs(ADJUNTOS_ROOT_DIR)
+            
+        # 2. Crear la carpeta específica del RMA
+        ruta_rma = os.path.join(ADJUNTOS_ROOT_DIR, codigo_rma)
+        os.makedirs(ruta_rma, exist_ok=True)
+        return ruta_rma
+    
+    def abrir_dialogo_adjunto(self, modo_abrir_carpeta=False):
+        """Abre el diálogo de selección de archivo y lo sube al sistema."""
+        # 1. Verificar si el RMA ya está guardado (si current_rma_id tiene valor)
+        if not self.current_rma_id:
+            messagebox.showwarning("Advertencia", "Debe guardar el RMA al menos una vez antes de adjuntar archivos.")
+            return
+        
+        
+        # -----------------------------------------------------------------
+        # LÓGICA DE OBTENCIÓN DEL CÓDIGO RMA (Igual que en tu código original)
+        # -----------------------------------------------------------------
+        # Obtener el texto completo de la etiqueta (Ej: "Código RMA: RMA25001")
+        texto_completo = self.lbl_codigo_rma.cget("text") 
+        # Extraer solo el código RMA dividiendo el texto por ": "
+        codigo_rma = texto_completo.split(": ")[1] 
+        
+        # -----------------------------------------------------------------
+        # LÓGICA DE ABRIR CARPETA (Modo Informe)
+        # -----------------------------------------------------------------
+        if modo_abrir_carpeta:
+            # 1. Obtener la ruta de destino y crear la carpeta (usando tu método existente)
+            ruta_destino_base = self.crear_carpeta_adjuntos_rma(codigo_rma)
+            
+            # 2. Abrir la carpeta de destino en el explorador de archivos
+            try:
+                if os.name == 'nt':
+                    # Para Windows, usar os.startfile para abrir la carpeta
+                    os.startfile(ruta_destino_base)
+                elif sys.platform == 'darwin':
+                    # Para macOS
+                    subprocess.Popen(['open', ruta_destino_base])
+                else:
+                    # Para Linux (usa el comando genérico xdg-open)
+                    subprocess.Popen(['xdg-open', ruta_destino_base])
+                
+                # ¡IMPORTANTE! Aquí termina la ejecución en modo carpeta
+                return
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo abrir la carpeta de destino:\n{ruta_destino_base}\nError: {e}")
+                return
+
+        # 2. Abrir diálogo para seleccionar archivo
+        filepath = filedialog.askopenfilename(
+            title="Seleccionar Archivo a Adjuntar",
+            filetypes=(("Todos los archivos", "*.*"), ("Documentos PDF", "*.pdf"), ("Imágenes", "*.jpg;*.png"))
+        )
+        
+        if not filepath:
+            return # El usuario canceló
+
+        nombre_original = os.path.basename(filepath)
+        # 1. Obtener el texto completo de la etiqueta (Ej: "Código RMA: RMA25001")
+        texto_completo = self.lbl_codigo_rma.cget("text") 
+        
+        # 2. Extraer solo el código RMA dividiendo el texto por ": "
+        codigo_rma = texto_completo.split(": ")[1] 
+        # --------------------------
+
+        # 3. Preparar rutas
+        # Crear la ruta de destino: Adjuntos_RMA/RMA25001/nombre_archivo.ext
+        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_original)
+        
+        # 4. Copiar el archivo
+        try:
+            # shutil.copy2 copia el archivo y preserva metadatos
+            shutil.copy2(filepath, ruta_destino_completa)
+        except Exception as e:
+            messagebox.showerror("Error de Copia", f"No se pudo copiar el archivo. ¿Permisos?\nError: {e}")
+            return
+        
+        # 5. Insertar registro en la base de datos
+        # La ruta relativa es la que guardamos en la DB (Ej: RMA25001/nombre_archivo.ext)
+        ruta_relativa = os.path.join(codigo_rma, nombre_original)
+        
+        conn, cursor = self.master.conectar_db()
+        try:
+            cursor.execute("""
+                INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                self.current_rma_id, 
+                nombre_original, 
+                ruta_relativa, 
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                self.username
+            ))
+            conn.commit()
+            messagebox.showinfo("Éxito", f"Archivo '{nombre_original}' adjuntado correctamente.")
+            
+            self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
+            
+            # NOTA: Llamar a self.cargar_lista_adjuntos(self.current_rma_id) aquí
+            # para recargar la lista se implementará en el siguiente paso.
+            # Si ya tienes una implementación básica, añádela aquí.
+            
+        except Exception as e:
+            conn.rollback()
+            # Si falla la DB, eliminar el archivo copiado para evitar inconsistencias
+            if os.path.exists(ruta_destino_completa):
+                os.remove(ruta_destino_completa)
+            messagebox.showerror("Error DB", f"Error al guardar registro en la base de datos: {e}")
+        finally:
+            conn.close()
+    def cargar_lista_adjuntos(self, rma_id):
+        """Consulta y muestra el listado de adjuntos para un RMA específico."""
+        
+        # Limpiar el frame antes de cargar la nueva lista
+        for widget in self.adjuntos_list_frame.winfo_children():
+            widget.destroy()
+
+        conn, cursor = self.master.conectar_db()
+        cursor.execute("SELECT id, nombre_archivo, ruta_relativa FROM rma_adjuntos WHERE rma_id = ?", (rma_id,))
+        adjuntos = cursor.fetchall()
+        conn.close()
+
+        if not adjuntos:
+            ctk.CTkLabel(self.adjuntos_list_frame, text="No hay archivos adjuntos para este expediente.").pack(pady=10)
+            return
+
+        for i, adjunto in enumerate(adjuntos):
+            adjunto_id, nombre, ruta = adjunto
+
+            item_frame = ctk.CTkFrame(self.adjuntos_list_frame)
+            item_frame.pack(fill='x', padx=5, pady=2)
+
+            # Etiqueta del nombre del archivo
+            ctk.CTkLabel(item_frame, text=nombre, width=300, anchor='w').pack(side='left', padx=5)
+
+            # Botón Visualizar
+            # El comando usa lambda para pasar la ruta del archivo
+            ctk.CTkButton(
+                item_frame, 
+                text="👁️ Abrir", 
+                width=80, 
+                command=lambda r=ruta: self.abrir_adjunto(r)
+            ).pack(side='right', padx=5)
+
+            # Botón Eliminar
+            # El comando usa lambda para pasar el ID del adjunto y la ruta
+            ctk.CTkButton(
+                item_frame, 
+                text="🗑️ Eliminar", 
+                width=80, 
+                fg_color="red", 
+                hover_color="darkred",
+                command=lambda aid=adjunto_id, r=ruta: self.confirmar_eliminar_adjunto(aid, r)
+            ).pack(side='right', padx=5)
+            
+        # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
+    def abrir_adjunto(self, ruta_relativa):
+        """Abre el archivo adjunto usando el programa predeterminado del sistema operativo."""
+        ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
+        
+        if not os.path.exists(ruta_completa):
+            messagebox.showerror("Error", f"Archivo no encontrado: {ruta_completa}. Posiblemente haya sido movido o eliminado manualmente.")
+            return
+
+        try:
+            if sys.platform == "win32":
+                # Windows
+                os.startfile(ruta_completa)
+            elif sys.platform == "darwin":
+                # macOS
+                subprocess.call(['open', ruta_completa])
+            else:
+                # Linux (Usa xdg-open para el programa predeterminado)
+                subprocess.call(['xdg-open', ruta_completa])
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el archivo. Error: {e}")
+    
+    def confirmar_eliminar_adjunto(self, adjunto_id, ruta_relativa):
+        """Pide confirmación antes de eliminar el registro y el archivo."""
+        if messagebox.askyesno("Confirmar Eliminación", "¿Está seguro de que desea eliminar este adjunto? Esta acción es irreversible y también eliminará el archivo del disco."):
+            self.eliminar_adjunto(adjunto_id, ruta_relativa)
+
+    def eliminar_adjunto(self, adjunto_id, ruta_relativa):
+        """Elimina el registro de la base de datos y el archivo físico."""
+        ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
+        
+        conn, cursor = self.master.conectar_db()
+        try:
+            # 1. Eliminar registro de la DB
+            cursor.execute("DELETE FROM rma_adjuntos WHERE id = ?", (adjunto_id,))
+            
+            # 2. Eliminar archivo físico
+            if os.path.exists(ruta_completa):
+                os.remove(ruta_completa)
+            
+            conn.commit()
+            messagebox.showinfo("Éxito", "Adjunto eliminado correctamente.")
+            self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror("Error", f"Error al eliminar el adjunto: {e}")
+        finally:
+            conn.close()
+    
+    # Dentro de la clase VentanaPrincipal
+
+    # Dentro de la clase VentanaPrincipal
+
+    def generar_informe_dinamico(self):
+        """
+        Genera un informe dinámico usando python-docx, lo guarda en la carpeta 
+        de adjuntos del RMA y lo registra en la base de datos.
+        """
+        # 1. Validaciones y Obtención de Datos
+        if not self.current_rma_id:
+            messagebox.showerror("Error", "Debe cargar un RMA guardado para generar el informe.")
+            return
+
+        # Asumimos que self.datos_rma_maestro contiene los datos del RMA cargado
+        # Esta variable debe llenarse cuando llamas a self.cargar_datos_rma(rma_id)
+        datos = self.datos_rma_maestro 
+        
+        # 🚨 Verificación: Asegúrate de que los datos clave existen
+        codigo_rma = datos.get('codigo_rma')
+        nombre_cliente = datos.get('cliente')
+        
+        if not codigo_rma or not nombre_cliente:
+             messagebox.showerror("Error", "Los datos del RMA no están cargados. Intente recargar el expediente.")
+             return
+
+        # 2. Rutas
+        plantilla_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas", "Plantilla_RMA.docx")
+        
+        # Nombre del archivo final: Ej. RMA2024-001_Informe_20240920.docx
+        fecha_str = datetime.datetime.now().strftime("%Y%m%d")
+        nombre_archivo_final = f"{codigo_rma}_Informe_{fecha_str}.docx"
+        
+        # Ruta donde se guardará el archivo final (usando tu método existente para la carpeta)
+        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo_final)
+
+        try:
+            # 3. Cargar la plantilla y definir mapeo de marcadores
+            document = docx.Document(plantilla_path)
+            
+            # Mapeo: [Marcador en Word]: [Valor a insertar]
+            mapeo = {
+                '[[CODIGO_RMA]]': codigo_rma,
+                '[[CLIENTE]]': nombre_cliente,
+                '[[FECHA_EMISION]]': datos.get('fecha_emision', 'N/A'),
+                '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'), # Asumo que 'estado' es parte de los datos cargados
+                '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
+            }
+            
+            # 4. Reemplazar marcadores en párrafos
+            for p in document.paragraphs:
+                for clave, valor in mapeo.items():
+                    if clave in p.text:
+                        p.text = p.text.replace(clave, valor)
+            
+            # 5. Guardar el documento final
+            os.makedirs(ruta_destino_dir, exist_ok=True) 
+            document.save(ruta_destino_completa)
+            
+            # 6. Registrar en la Base de Datos
+            ruta_relativa = os.path.join(codigo_rma, nombre_archivo_final)
+            conn, cursor = self.master.conectar_db()
+            try:
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    nombre_archivo_final, 
+                    ruta_relativa, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    self.username
+                ))
+                
+                # Registro en el historial
+                cursor.execute("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, descripcion_cambio, usuario)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    f"Generado documento de Informe: {nombre_archivo_final}", 
+                    self.username
+                ))
+                
+                conn.commit()
+                self.cargar_lista_adjuntos(self.current_rma_id) # Refresca la lista de adjuntos
+                try:
+                    # Llamamos al método que recarga el contenido de la pestaña
+                    self.mostrar_historial(self.historial_tab) 
+                except AttributeError:
+                    # Si la pestaña historial_tab no está definida (ej. en modo "nuevo"), ignoramos.
+                    pass
+                
+                messagebox.showinfo("Éxito", f"Informe '{nombre_archivo_final}' generado y adjuntado correctamente.")
+                
+            except Exception as db_e:
+                conn.rollback()
+                messagebox.showerror("Error DB", f"Informe generado, pero error al registrar en DB. Revise la carpeta de adjuntos.\nError: {db_e}")
+            finally:
+                conn.close()
+
+        except Exception as e:
+            messagebox.showerror("Error de Generación", f"No se pudo generar el informe dinámico. Asegúrese de que la plantilla existe y python-docx está instalado.\nError: {e}")
+    
+    # Dentro de la clase VentanaPrincipal
+
+    def generar_reposicion_devolucion(self):
+        """
+        Genera el documento de Reposición/Devolución usando la plantilla
+        "Reposicion_RMA.docx", lo guarda y lo registra como adjunto.
+        """
+        # 1. Validaciones y Obtención de Datos
+        if not self.current_rma_id:
+            messagebox.showerror("Error", "Debe cargar un RMA guardado para generar el documento de Reposición/Devolución.")
+            return
+
+        # Asumimos que self.datos_rma_maestro contiene los datos del RMA cargado
+        datos = self.datos_rma_maestro 
+        
+        # Obtener datos clave para el archivo y la ruta
+        codigo_rma = datos.get('codigo_rma')
+        nombre_cliente = datos.get('cliente')
+        
+        if not codigo_rma or not nombre_cliente:
+             messagebox.showerror("Error", "No se pudieron cargar los datos clave del RMA. Intente recargar el expediente.")
+             return
+
+        # 2. Rutas y Nombres de Archivo
+        # 🚨 ¡Diferencia Clave! Usamos la nueva plantilla
+        nombre_plantilla = "Reposicion_RMA.docx" 
+        plantilla_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas", nombre_plantilla)
+        
+        # Nombre del archivo final: Ej. RMA2024-001_Reposicion_20251016.docx
+        fecha_str = datetime.datetime.now().strftime("%Y%m%d")
+        nombre_archivo_final = f"{codigo_rma}_Reposicion_{fecha_str}.docx"
+        
+        # Ruta donde se guardará el archivo final (usando tu método existente para la carpeta)
+        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo_final)
+
+        # 3. Verificar la Plantilla
+        if not os.path.exists(plantilla_path):
+            messagebox.showerror("Error", f"No se encontró la plantilla requerida en:\n{plantilla_path}")
+            return
+            
+        try:
+            # 4. Cargar la plantilla y definir mapeo de marcadores
+            document = docx.Document(plantilla_path)
+            
+            # Mapeo: Reutilizamos el mapeo existente (si tienes nuevos campos, añádelos aquí)
+            mapeo = {
+                '[[CODIGO_RMA]]': codigo_rma,
+                '[[CLIENTE]]': nombre_cliente,
+                '[[FECHA_EMISION]]': datos.get('fecha_emision', 'N/A'),
+                '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'),
+                '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
+            }
+            
+            # 5. Reemplazar marcadores en párrafos (Usando la lógica robusta que ya funciona)
+            for p in document.paragraphs:
+                for clave, valor in mapeo.items():
+                    valor_a_insertar = str(valor) if valor is not None else "" 
+                    if clave in p.text:
+                        p.text = p.text.replace(clave, valor_a_insertar)
+            
+            # 6. Guardar el documento final
+            os.makedirs(ruta_destino_dir, exist_ok=True) 
+            document.save(ruta_destino_completa)
+            
+            # 7. Registrar en la Base de Datos (Misma lógica para adjuntos e historial)
+            ruta_relativa = os.path.join(codigo_rma, nombre_archivo_final)
+            conn, cursor = self.master.conectar_db()
+            try:
+                # Registro en rma_adjuntos
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    nombre_archivo_final, 
+                    ruta_relativa, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    self.username
+                ))
+                
+                # Registro en el historial
+                cursor.execute("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, descripcion_cambio, usuario)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    f"Generado documento de Reposición/Devolución: {nombre_archivo_final}", 
+                    self.username
+                ))
+                
+                conn.commit()
+                self.cargar_lista_adjuntos(self.current_rma_id) # Refresca la lista de adjuntos
+                try:
+                    # Llamamos al método que recarga el contenido de la pestaña
+                    self.mostrar_historial(self.historial_tab) 
+                except AttributeError:
+                    # Si la pestaña historial_tab no está definida (ej. en modo "nuevo"), ignoramos.
+                    pass
+                
+                messagebox.showinfo("Éxito", f"Documento de Reposición/Devolución '{nombre_archivo_final}' generado y adjuntado correctamente.")
+                
+            except Exception as db_e:
+                conn.rollback()
+                messagebox.showerror("Error DB", f"Documento generado, pero error al registrar en DB/Historial. Error: {db_e}")
+            finally:
+                conn.close()
+
+        except Exception as e:
+            messagebox.showerror("Error de Generación", f"No se pudo generar el documento. Asegúrese de que la plantilla existe y es un archivo .docx válido.\nError: {e}")
+    
+    
+    
+    def abrir_plantilla_informe_manual_sinusoactualmente(self):
+        """
+        Abre la plantilla de informe de Word y la carpeta de destino de los adjuntos.
+        """
+        # Verificación inicial: ¿Estamos editando un RMA?
+        if not self.rma_actual_id:
+            messagebox.showerror("Error", "Primero debe guardar el expediente o cargar uno existente para generar un informe.")
+            return
+
+        # 1. Definir rutas
+        # Obtiene la ruta absoluta de la carpeta 'plantillas'
+        plantilla_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas")
+        plantilla_path = os.path.join(plantilla_dir, "Plantilla_RMA.docx") # Asegúrate de que el nombre coincide
+        
+        # 2. Verificar que la plantilla existe
+        if not os.path.exists(plantilla_path):
+            messagebox.showerror("Error", f"No se encontró la plantilla de informe en:\n{plantilla_path}")
+            return
+            
+        # 3. Abrir la plantilla con el programa asociado (Word)
+        try:
+            # os.startfile es la forma más limpia en Windows para abrir archivos
+            if os.name == 'nt': 
+                 os.startfile(plantilla_path)
+            else:
+                 # Común para macOS o Linux (puede requerir ajustes según la distribución)
+                 subprocess.Popen(['xdg-open', plantilla_path]) 
+
+            messagebox.showinfo("Instrucción", 
+                "Se ha abierto la plantilla de Word.\n"
+                "A continuación se abrirá la carpeta de destino. Por favor, "
+                "**GUARDE el documento de Word FINAL ahí**.")
+            
+            # 4. Abrir la carpeta de destino para que el usuario guarde el resultado
+            self.abrir_dialogo_adjunto(modo_abrir_carpeta=True)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la plantilla.\nError: {e}")
+    
+    def mostrar_ventana_estadisticas(self):
+        """Crea y muestra la ventana Toplevel y la estructura de navegación interna para estadísticas."""
+        
+        # 1. Prevenir que se abra más de una vez (si ya existe, simplemente enfocarla)
+        if hasattr(self, 'stats_window') and self.stats_window.winfo_exists():
+            self.stats_window.focus()
+            return
+
+        self.stats_window = Toplevel(self) 
+        self.stats_window.title("Módulo de Estadísticas")
+        self.stats_window.geometry("1600x900")
+        self.stats_window.transient(self) # Hace que la ventana de estadísticas dependa de la principal
+
+        # Marco principal que contendrá la navegación y el contenido
+        stats_frame = ctk.CTkFrame(self.stats_window)
+        stats_frame.pack(fill="both", expand=True)
+
+        # Configurar para que los marcos se expandan correctamente
+        stats_frame.grid_columnconfigure(1, weight=1)
+        stats_frame.grid_rowconfigure(0, weight=1)
+
+        # 2. Marco de Navegación Lateral Interna (Columna 0)
+        nav_frame = ctk.CTkFrame(stats_frame, width=220, corner_radius=0)
+        nav_frame.grid(row=0, column=0, sticky="nsew")
+        
+        ctk.CTkLabel(nav_frame, text="INFORMES", font=ctk.CTkFont(weight="bold", size=16)).pack(pady=20, padx=10)
+
+        # 3. Marco de Contenido Principal para la Estadística (Columna 1)
+        self.main_stats_frame = ctk.CTkFrame(stats_frame)
+        self.main_stats_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.main_stats_frame.grid_columnconfigure(0, weight=1) # Permite que el contenido se expanda
+        
+        # 4. Definición de las estadísticas y sus métodos (Aún no creados)
+        self.botones_stats = {
+            "Expedientes Completados (Rentabilidad)": self.mostrar_expedientes_completados,
+            "Abonos por Cliente y Periodo": self.mostrar_abonos_cliente,
+            "Referencia (Incidencia)": self.mostrar_articulos_incidencia
+        }
+        
+        # 5. Creación de los botones del menú interno
+        for text, command in self.botones_stats.items():
+            ctk.CTkButton(
+                nav_frame, 
+                text=text, 
+                anchor="w",
+                command=lambda cmd=command: self.cargar_estadistica(cmd)
+            ).pack(fill="x", padx=10, pady=5)
+
+        # 6. Cargar la primera estadística por defecto
+        #self.cargar_estadistica(self.mostrar_expedientes_cliente)
+        self.cargar_estadistica(self.mostrar_expedientes_completados)
+
+    def cargar_estadistica(self, func_callback):
+        """
+        Método central que limpia el marco principal y llama a la función 
+        de la estadística seleccionada (callback).
+        """
+        # Limpiar el marco principal
+        for widget in self.main_stats_frame.winfo_children():
+            widget.destroy()
+        
+        # Llamar a la función que dibuja la estadística
+        func_callback()
+    
+    def validar_fecha_entrada(self, fecha_ddmmyyyy):
+        """Función auxiliar para validar el formato de fecha DD/MM/AAAA."""
+        if not fecha_ddmmyyyy:
+            return None 
+        try:
+            datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
+            return fecha_ddmmyyyy 
+        except ValueError:
+            messagebox.showerror("Error de Formato de Fecha", 
+                                 f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
+            return False 
+        except Exception:
+            return None
+    
+    def mostrar_expedientes_completados(self):
+        """
+        Estadística: Muestra los clientes con más expedientes COMPLETADOS, 
+        el total de expedientes y la suma de su rentabilidad, con filtros de fecha y cliente.
+        """
+        from datetime import datetime
+        
+        self.limpiar_marco_stats()
+        if not self.main_stats_frame: return
+        
+        ctk.CTkLabel(self.main_stats_frame, 
+                     text="INFORME DE EXPEDIENTES RMA COMPLETADOS (POR CLIENTE)", 
+                     font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=20)
+
+        # --- 1. Marco de Controles y Total ---
+        controles_frame = ctk.CTkFrame(self.main_stats_frame)
+        controles_frame.pack(padx=20, pady=(0, 10), fill="x")
+        
+        # Configuración de columnas
+        controles_frame.grid_columnconfigure((0, 2, 4), weight=0) # Etiquetas y Botones
+        controles_frame.grid_columnconfigure((1, 3, 5), weight=1) # Entries (expandibles)
+
+        # FILTRO 1: Fecha Inicial (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Inicial:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.fecha_inicial_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 01/01/2024")
+        self.fecha_inicial_exp_entry.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew")
+
+        # FILTRO 2: Fecha Final (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Final:").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
+        self.fecha_final_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 31/12/2024")
+        self.fecha_final_exp_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="ew")
+        
+        # FILTRO 3: Cliente - Fila 0
+        ctk.CTkLabel(controles_frame, text="Buscar Cliente:").grid(row=0, column=4, padx=(10, 5), pady=5, sticky="w")
+        self.cliente_filtro_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Escriba parte del cliente...")
+        self.cliente_filtro_exp_entry.grid(row=0, column=5, padx=(0, 10), pady=5, sticky="ew")
+        
+        # Botón para aplicar filtros - Fila 1
+        ctk.CTkButton(
+            controles_frame, 
+            text="Aplicar Filtros", 
+            command=self._cargar_datos_expedientes_completados
+        ).grid(row=1, column=0, columnspan=2, padx=(0, 5), pady=10, sticky="ew")
+        
+        # Etiqueta para el Total de Rentabilidad - Fila 1
+        ctk.CTkLabel(controles_frame, text="Total de Rentabilidad (€):", font=ctk.CTkFont(weight="bold")).grid(row=1, column=2, padx=10, pady=10, sticky="w")
+        self.lbl_total_rentabilidad = ctk.CTkLabel(controles_frame, text="0.00 €", font=ctk.CTkFont(weight="bold", size=16), text_color="#2ecc71") # Color verde para el dinero
+        self.lbl_total_rentabilidad.grid(row=1, column=3, padx=(0, 10), pady=10, sticky="w")
+        
+        # --- 2. Marco Contenedor de Resultados ---
+        self.tabla_expedientes_frame = ctk.CTkFrame(self.main_stats_frame)
+        self.tabla_expedientes_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        
+        # 3. Cargar los datos iniciales
+        self._cargar_datos_expedientes_completados()
+    
+    def _cargar_datos_expedientes_completados(self):
+        """
+        Consulta la base de datos para obtener expedientes completados, 
+        aplica filtros de fecha y cliente, y calcula el total.
+        """
+        from datetime import datetime
+        
+        # 1. Obtener los valores de los filtros
+        cliente_filtro = self.cliente_filtro_exp_entry.get().strip()
+        fecha_inicial_str = self.fecha_inicial_exp_entry.get().strip()
+        fecha_final_str = self.fecha_final_exp_entry.get().strip()
+        
+        # Función auxiliar de validación de fecha (copiada de 'mostrar_articulos_incidencia')
+        def validar_fecha_entrada(fecha_ddmmyyyy):
+            if not fecha_ddmmyyyy:
+                return None 
+            try:
+                datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
+                return fecha_ddmmyyyy 
+            except ValueError:
+                messagebox.showerror("Error de Formato de Fecha", 
+                                     f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
+                return False 
+            except Exception:
+                return None
+        
+        fecha_inicial_db = validar_fecha_entrada(fecha_inicial_str)
+        fecha_final_db = validar_fecha_entrada(fecha_final_str)
+        
+        if fecha_inicial_db is False or fecha_final_db is False:
+            return
+        
+        # 2. Conexión y Limpieza del Marco
+        conn, cursor = self.master.conectar_db()
+        if not conn: 
+            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+            return
+
+        for widget in self.tabla_expedientes_frame.winfo_children():
+            widget.destroy()
+
+        # 3. Construcción dinámica de la consulta SQL y los parámetros
+        
+        # Seleccionamos: Cliente, Conteo de Expedientes, Suma de Precios Totales (Rentabilidad)
+        sql_query_base = """
+            SELECT 
+                cliente, 
+                COUNT(id) AS total_expedientes,
+                SUM(precio_total_expediente) AS suma_total_rentabilidad
+            FROM 
+                rma_maestro
+            WHERE 
+                fecha_gestion IS NOT NULL  -- CRÍTICO: Solo expedientes COMPLETADOS
+        """
+        
+        condiciones = []
+        parametros = []
+        
+        # 3.1. Filtro por Cliente
+        if cliente_filtro:
+            condiciones.append("cliente LIKE ?")
+            parametros.append(f"%{cliente_filtro}%")
+            
+        # 3.2. Filtro por Rango de Fechas (usando la conversión a YYYY-MM-DD para SQLite)
+        if fecha_inicial_db:
+            # Reorganiza: fecha_gestion (DD/MM/AAAA) -> YYYY-MM-DD
+            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) >= ?")
+            # El parámetro se convierte a YYYY-MM-DD para la comparación
+            parametros.append(datetime.strptime(fecha_inicial_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        if fecha_final_db:
+            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) <= ?")
+            parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        # 4. Ensamblaje y Ejecución
+        
+        if condiciones:
+            sql_query_base += " AND " + " AND ".join(condiciones)
+
+        sql_query_final = sql_query_base + """
+            GROUP BY 
+                cliente
+            ORDER BY 
+                total_expedientes DESC
+            LIMIT 50; 
+        """
+
+        try:
+            cursor.execute(sql_query_final, parametros)
+            datos_raw = cursor.fetchall()
+            
+            # 5. Calcular la suma total del listado mostrado
+            # La columna 2 de los datos (índice 2) contiene la suma total_rentabilidad de cada cliente
+            suma_total_global = sum(fila[2] for fila in datos_raw if fila[2] is not None)
+
+            # 6. Actualizar la etiqueta del total
+            self.lbl_total_rentabilidad.configure(text=f"{suma_total_global:,.2f} €") 
+
+            # 7. Dibujar la tabla
+            self.mostrar_tabla_estadistica(
+                datos_raw, 
+                columnas=["CLIENTE", "TOTAL EXPEDIENTES", "RENTABILIDAD TOTAL (€)"],
+                export_filename="Expedientes_Completados_Rentabilidad",
+                frame=self.tabla_expedientes_frame, 
+                formato_moneda=True # La última columna es monetaria
+            )
+
+            if not datos_raw:
+                 ctk.CTkLabel(self.tabla_expedientes_frame, 
+                              text="No se encontraron expedientes completados con los filtros aplicados.",
+                              font=ctk.CTkFont(size=14)
+                 ).pack(pady=40)
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de Base de Datos", f"Error SQL: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error inesperado al cargar expedientes completados: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    # ==============================================================================
+    # RESTO DE MÉTODOS AUXILIARES Y PLACEHOLDERS (SIN MODIFICAR, exceptuando la nueva llamada)
+    # ==============================================================================
+
+    # El método original 'mostrar_expedientes_cliente' ha sido eliminado/reemplazado.
+    
+    def mostrar_abonos_cliente(self):
+        """
+        Estadística: Muestra la suma del 'precio_total_expediente' por Cliente 
+        y permite filtrar por un 'Periodo' (rango de fecha).
+        """
+        # 1. Preparación de la interfaz
+        self.limpiar_marco_stats()
+        if not self.main_stats_frame: return
+        
+        ctk.CTkLabel(self.main_stats_frame, 
+                     text="ABONOS POR CLIENTE Y PERIODO", 
+                     font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=20)
+        
+        # --- 2. Marco de Controles Principales (Filtros de Fecha) ---
+        controles_frame = ctk.CTkFrame(self.main_stats_frame)
+        controles_frame.pack(padx=20, pady=(0, 10), fill="x")
+        
+        # Configuración de columnas
+        controles_frame.grid_columnconfigure((0, 2), weight=0) # Etiquetas (fijas)
+        controles_frame.grid_columnconfigure((1, 3), weight=1)    # Entries de Fecha (expandible)
+        controles_frame.grid_columnconfigure(4, weight=0) # Botón (fijo)
+
+        # FILTRO 1: Fecha Inicial (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Inicial (DD/MM/AAAA):").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        # Almacenamos las entries en la clase para poder acceder a ellas desde el helper
+        self.abono_fecha_inicial_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 01/01/2024")
+        self.abono_fecha_inicial_entry.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew")
+
+        # FILTRO 2: Fecha Final (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Final (DD/MM/AAAA):").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
+        self.abono_fecha_final_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 31/12/2024")
+        self.abono_fecha_final_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="ew")
+        
+        # Botón para aplicar filtros - Fila 0
+        ctk.CTkButton(
+            controles_frame, 
+            text="Aplicar Filtros", 
+            command=self._cargar_datos_abonos
+        ).grid(row=0, column=4, padx=(10, 0), pady=5)
+        
+        # --- 3. Marco donde se dibujará la tabla de resultados ---
+        self.abonos_tabla_resultados_frame = ctk.CTkFrame(self.main_stats_frame)
+        self.abonos_tabla_resultados_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.abonos_tabla_resultados_frame.grid_columnconfigure(0, weight=1) # Permite que el contenido se expanda
+
+        # 4. Cargar los datos iniciales (sin filtros)
+        self._cargar_datos_abonos()
+
+    def _cargar_datos_abonos(self, event=None):
+        """
+        Consulta la base de datos, suma 'precio_total_expediente' por cliente y 
+        aplica filtros de rango de fecha.
+        """
+        
+        # 1. Obtener y validar las fechas (DD/MM/AAAA)
+        fecha_inicial_str = self.abono_fecha_inicial_entry.get().strip()
+        fecha_final_str = self.abono_fecha_final_entry.get().strip()
+
+        # Función local para validar fecha
+        def validar_fecha_entrada(fecha_ddmmyyyy):
+            if not fecha_ddmmyyyy:
+                return None 
+            try:
+                datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
+                return fecha_ddmmyyyy 
+            except ValueError:
+                messagebox.showerror("Error de Formato de Fecha", 
+                                     f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
+                return False 
+            except Exception:
+                return None
+        
+        fecha_inicial_db = validar_fecha_entrada(fecha_inicial_str)
+        fecha_final_db = validar_fecha_entrada(fecha_final_str)
+        
+        if fecha_inicial_db is False or fecha_final_db is False:
+            return
+
+        # 2. Conexión y Limpieza del Marco de Resultados
+        conn, cursor = self.master.conectar_db()
+        if not conn: 
+            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+            return
+
+        for widget in self.abonos_tabla_resultados_frame.winfo_children():
+            widget.destroy()
+
+        # 3. Construcción dinámica de la consulta SQL y los parámetros
+        
+        # IMPORTANTE: Usamos SUM(precio_total_expediente) en lugar del error 'abono'
+        sql_query_base = """
+            SELECT 
+                cliente, 
+                SUM(precio_total_expediente) AS total_abono 
+            FROM 
+                rma_maestro
+            WHERE 1=1
+        """
+        
+        condiciones = []
+        parametros = []
+        
+        # 3.1. Filtro por Rango de Fechas (Convierte la fecha de la DB a YYYY-MM-DD para comparación)
+        if fecha_inicial_db:
+            # Reorganiza: fecha_gestion (DD/MM/AAAA) -> YYYY-MM-DD
+            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) >= ?")
+            # El parámetro se convierte a YYYY-MM-DD para la comparación
+            parametros.append(datetime.strptime(fecha_inicial_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        if fecha_final_db:
+            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) <= ?")
+            parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        # 4. Ensamblaje y Ejecución
+        
+        if condiciones:
+            sql_query_base += " AND " + " AND ".join(condiciones)
+
+        sql_query_final = sql_query_base + """
+            GROUP BY 
+                cliente
+            ORDER BY 
+                total_abono DESC; 
+        """
+
+        try:
+            cursor.execute(sql_query_final, parametros)
+            datos_raw = cursor.fetchall()
+            
+            datos_formateados = list(datos_raw)
+
+            # 5. Dibujar la tabla
+            self.mostrar_tabla_estadistica(
+                datos_formateados, 
+                columnas=["CLIENTE", "TOTAL ABONADO (€)"],
+                export_filename="Abonos_Por_Cliente",
+                frame=self.abonos_tabla_resultados_frame, 
+                formato_moneda=True # Activamos el formato de moneda para esta estadística
+            )
+
+            if not datos_formateados:
+                 ctk.CTkLabel(self.abonos_tabla_resultados_frame, 
+                              text="No se encontraron datos con los filtros aplicados.",
+                              font=ctk.CTkFont(size=14)
+                 ).pack(pady=40)
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de Base de Datos", f"Error SQL al cargar abonos por cliente: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error inesperado: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def mostrar_articulos_incidencia(self):
+        """
+        Estadística con filtros avanzados: Muestra el top de artículos según 
+        múltiples 'estado_producto', rango de 'fecha_gestion' y búsqueda por 'referencia_articulo'.
+        """
+        
+        # Lista de estados fijos proporcionada por el usuario
+        self.ESTADOS_DISPONIBLES = [
+            "EN PERFECTO ESTADO ; ABONAR", "FUNCIONA PERFECTAMENTE ; ABONAR", 
+            "SOBRANTE DE OBRA ; ABONAR", "NO FUNCIONA, ABONAR", 
+            "FUNCIONA PERFECTAMENTE ; NO ABONAR", "NO FUNCIONA ; NO ABONAR", 
+            "REPOSICION FALLO PRODUCTO", "REPOSICION ; ABONAR", 
+            "MERCANCIA ENVIADA POR ERROR", "MALA MANIPULACION ; NO ABONAR",
+            "EN PERFECTO ESTADO ; ABONAR 10% DEPRECIACION", "FALLO SOLDADURA ; ABONAR", 
+            "FALLO SOLDADURA ; NO ABONAR", "FALLO MODULO ; ABONAR", 
+            "MAL MANIPULACION ; ABONAR", "DANA", "CAMBIO DE PRODUCTO"
+        ]
+        
+        # 1. Preparación de la interfaz
+        self.limpiar_marco_stats()
+        if not self.main_stats_frame: return
+        
+        ctk.CTkLabel(self.main_stats_frame, 
+                     text="ARTÍCULOS CON MÁS INCIDENCIA", 
+                     font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=20)
+        
+        # --- 2. Marco de Controles Principales (Filtros y Búsqueda) ---
+        controles_frame = ctk.CTkFrame(self.main_stats_frame)
+        controles_frame.pack(padx=20, pady=(0, 10), fill="x")
+        
+        # Configuración de columnas para la primera fila (Fechas)
+        controles_frame.grid_columnconfigure((0, 2, 4), weight=0) # Etiquetas y Botón (fijo)
+        controles_frame.grid_columnconfigure((1, 3), weight=1)    # Entries de Fecha (expandible)
+
+        # FILTRO 1: Fecha Inicial (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Inicial (DD/MM/AAAA):").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.fecha_inicial_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 01/01/2024")
+        self.fecha_inicial_entry.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew")
+
+        # FILTRO 2: Fecha Final (DD/MM/AAAA) - Fila 0
+        ctk.CTkLabel(controles_frame, text="Fecha Final (DD/MM/AAAA):").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
+        self.fecha_final_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 31/12/2024")
+        self.fecha_final_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="ew")
+        
+        # Botón para aplicar filtros - Fila 0
+        ctk.CTkButton(
+            controles_frame, 
+            text="Aplicar Filtros", 
+            command=self._cargar_datos_articulos_incidencia
+        ).grid(row=0, column=4, padx=(10, 0), pady=5)
+        
+        # --- NUEVOS WIDGETS DE BÚSQUEDA POR REFERENCIA (Fila 1) ---
+        controles_frame.grid_columnconfigure(5, weight=0) # Columna del botón Limpiar
+
+        ctk.CTkLabel(controles_frame, text="Buscar Referencia:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky="w")
+        self.referencia_entry = ctk.CTkEntry(controles_frame, placeholder_text="Escriba parte de la referencia...")
+        self.referencia_entry.grid(row=1, column=1, columnspan=3, padx=(0, 10), pady=5, sticky="ew") # Ocupa 3 columnas
+        
+        ctk.CTkButton(
+            controles_frame, 
+            text="Limpiar Búsqueda", 
+            command=self._limpiar_filtro_referencia_y_recargar,
+            fg_color="gray"
+        ).grid(row=1, column=4, padx=(10, 0), pady=5)
+
+
+        # --- 3. Marco Contenedor de Listado de Estados y Resultados ---
+        content_frame = ctk.CTkFrame(self.main_stats_frame)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        # Configuración clave de expansión: la tabla (col 1) se expande
+        content_frame.grid_columnconfigure(0, weight=0, minsize=300) 
+        content_frame.grid_columnconfigure(1, weight=1)             
+        content_frame.grid_rowconfigure(0, weight=1)
+
+        # --- 4. Listado de Estados con Checkboxes (Panel Izquierdo) ---
+        estados_panel = ctk.CTkFrame(content_frame)
+        estados_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        estados_panel.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(estados_panel, 
+                     text="ESTADOS DE INCIDENCIA", 
+                     font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(pady=(10, 5))
+        
+        scroll_frame = ctk.CTkScrollableFrame(estados_panel)
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        scroll_frame.grid_columnconfigure(0, weight=1)
+
+        # Variables para almacenar el estado de cada checkbox
+        self.estado_vars = {} 
+        
+        # Creación dinámica de las Checkboxes
+        for idx, estado in enumerate(self.ESTADOS_DISPONIBLES):
+            var = ctk.StringVar(value="0") 
+            chk = ctk.CTkCheckBox(
+                scroll_frame, 
+                text=estado, 
+                variable=var,
+                onvalue="1", offvalue="0"
+            )
+            chk.grid(row=idx, column=0, padx=5, pady=2, sticky="w")
+            self.estado_vars[estado] = var
+
+        # Checkbox para seleccionar/deseleccionar todos
+        all_var = ctk.StringVar(value="0")
+        def toggle_all_states():
+            new_value = all_var.get()
+            for var in self.estado_vars.values():
+                var.set(new_value)
+
+        ctk.CTkCheckBox(
+            estados_panel, 
+            text="SELECCIONAR TODOS", 
+            variable=all_var,
+            command=toggle_all_states,
+            onvalue="1", offvalue="0",
+            font=ctk.CTkFont(weight="bold")
+        ).pack(pady=(5, 10))
+
+
+        # --- 5. Marco donde se dibujará la tabla de resultados (Panel Derecho) ---
+        self.tabla_resultados_frame = ctk.CTkFrame(content_frame)
+        self.tabla_resultados_frame.grid(row=0, column=1, sticky="nsew") 
+
+        # 6. Cargar los datos iniciales
+        self._cargar_datos_articulos_incidencia()
+    
+    def _cargar_datos_articulos_incidencia(self, event=None):
+        """
+        Consulta la base de datos, aplica filtros de estado (múltiples), fecha,
+        y búsqueda LIKE por referencia de artículo.
+        """
+        from datetime import datetime
+        
+        # 1. Obtener los valores de los filtros
+        
+        # 1.1. Obtener los estados seleccionados (Lista de strings)
+        estados_seleccionados = [
+            estado for estado, var in self.estado_vars.items() if var.get() == "1"
+        ]
+        
+        # 1.2. Obtener filtro de Referencia
+        referencia_filtro = self.referencia_entry.get().strip()
+
+        # 1.3. Obtener y validar las fechas (DD/MM/AAAA)
+        fecha_inicial_str = self.fecha_inicial_entry.get().strip()
+        fecha_final_str = self.fecha_final_entry.get().strip()
+        
+        # Función que valida DD/MM/AAAA y devuelve el string si es válido
+        def validar_fecha_entrada(fecha_ddmmyyyy):
+            if not fecha_ddmmyyyy:
+                return None 
+            try:
+                datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
+                return fecha_ddmmyyyy 
+            except ValueError:
+                messagebox.showerror("Error de Formato de Fecha", 
+                                     f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
+                return False 
+            except Exception:
+                return None
+        
+        fecha_inicial_db = validar_fecha_entrada(fecha_inicial_str)
+        fecha_final_db = validar_fecha_entrada(fecha_final_str)
+        
+        if fecha_inicial_db is False or fecha_final_db is False:
+            return
+
+        # 2. Conexión y Limpieza del Marco
+        conn, cursor = self.master.conectar_db()
+        if not conn: 
+            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+            return
+
+        for widget in self.tabla_resultados_frame.winfo_children():
+            widget.destroy()
+
+        # 3. Construcción dinámica de la consulta SQL y los parámetros
+        
+        sql_query_base = """
+            SELECT 
+                T2.codigo_rma, 
+                T1.referencia_articulo,
+                T1.estado_producto,
+                T2.fecha_gestion,
+                COUNT(T1.id) AS total_incidencias
+            FROM 
+                rma_detalles AS T1
+            INNER JOIN 
+                rma_maestro AS T2 ON T1.rma_id = T2.id
+            WHERE 1=1 
+        """
+        
+        condiciones = []
+        parametros = []
+        
+        # 3.1. Filtro por Estado de Producto 
+        if estados_seleccionados:
+            placeholders = ', '.join('?' for _ in estados_seleccionados)
+            condiciones.append(f"T1.estado_producto IN ({placeholders})")
+            parametros.extend(estados_seleccionados)
+            
+        # 3.2. Filtro por Referencia de Artículo
+        if referencia_filtro:
+            condiciones.append("T1.referencia_articulo LIKE ?")
+            parametros.append(f"%{referencia_filtro}%")
+            
+        # 3.3. Filtro por Rango de Fechas (Convierte la fecha de la DB a YYYY-MM-DD para comparación)
+        if fecha_inicial_db:
+            # Reorganiza: T2.fecha_gestion (DD/MM/AAAA) -> YYYY-MM-DD
+            condiciones.append("SUBSTR(T2.fecha_gestion, 7, 4) || '-' || SUBSTR(T2.fecha_gestion, 4, 2) || '-' || SUBSTR(T2.fecha_gestion, 1, 2) >= ?")
+            # El parámetro se convierte a YYYY-MM-DD para la comparación
+            parametros.append(datetime.strptime(fecha_inicial_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        if fecha_final_db:
+            condiciones.append("SUBSTR(T2.fecha_gestion, 7, 4) || '-' || SUBSTR(T2.fecha_gestion, 4, 2) || '-' || SUBSTR(T2.fecha_gestion, 1, 2) <= ?")
+            parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
+
+        # 4. Ensamblaje y Ejecución
+        
+        if condiciones:
+            sql_query_base += " AND " + " AND ".join(condiciones)
+
+        sql_query_final = sql_query_base + """
+            GROUP BY 
+                T2.codigo_rma, T1.referencia_articulo, T1.estado_producto, T2.fecha_gestion
+            ORDER BY 
+                total_incidencias DESC
+            LIMIT 50; 
+        """
+
+        try:
+            cursor.execute(sql_query_final, parametros)
+            datos_raw = cursor.fetchall()
+
+            # Los datos están en formato DD/MM/AAAA, no se necesita conversión de salida
+            datos_formateados = list(datos_raw) 
+
+            # 5. Dibujar la tabla
+            self.mostrar_tabla_estadistica(
+                datos_formateados, 
+                columnas=["CÓDIGO RMA", "REFERENCIA ARTÍCULO", "ESTADO PRODUCTO", "FECHA GESTIÓN", "TOTAL INCIDENCIAS"],
+                export_filename="Articulos_Incidencia_Filtrado",
+                frame=self.tabla_resultados_frame, 
+                formato_moneda=False 
+            )
+
+            if not datos_formateados:
+                 ctk.CTkLabel(self.tabla_resultados_frame, 
+                              text="No se encontraron datos con los filtros aplicados.",
+                              font=ctk.CTkFont(size=14)
+                 ).pack(pady=40)
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de Base de Datos", f"Error SQL: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error inesperado: {e}")
+        finally:
+            if conn:
+                conn.close()
+    
+    def _limpiar_filtro_referencia_y_recargar(self):
+        """Limpia el campo de búsqueda de referencia y recarga los datos."""
+        # Se asegura de que el atributo existe antes de intentar acceder a él
+        if hasattr(self, 'referencia_entry'):
+            self.referencia_entry.delete(0, 'end')
+        # Recarga los datos para aplicar el filtro limpio (que es no filtrar)
+        self._cargar_datos_articulos_incidencia()
+            
+
+    def limpiar_marco_stats(self):
+        """Método auxiliar necesario para limpiar el marco principal antes de cargar una estadística."""
+        for widget in self.main_stats_frame.winfo_children():
+            widget.destroy()
+    
+    def exportar_a_excel(self, datos, columnas, filename):
+        """Exporta los datos de la estadística actual a un archivo Excel."""
+        if not datos:
+            messagebox.showwarning("Exportar", "No hay datos para exportar.")
+            return
+
+        # 1. Crear el DataFrame de Pandas
+        df = pd.DataFrame(datos, columns=columnas)
+        
+        # 2. Abrir diálogo para guardar archivo
+        path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", 
+            filetypes=[("Archivos Excel", "*.xlsx")],
+            initialfile=filename
+        )
+        
+        if path:
+            try:
+                # 3. Guardar en Excel (openpyxl se usa internamente por pandas)
+                df.to_excel(path, index=False) # index=False evita añadir la columna de índice de pandas
+                messagebox.showinfo("Exportación Exitosa", f"Datos exportados a:\n{path}")
+            except Exception as e:
+                messagebox.showerror("Error de Exportación", f"No se pudo guardar el archivo Excel.\nError: {e}")
+
+    def mostrar_tabla_estadistica(self, datos, columnas, export_filename, frame, formato_moneda=False):
+        """
+        Dibuja un listado genérico de resultados usando un CTkScrollableFrame 
+        y añade el botón de exportación.
+        """
+        
+        if not datos:
+            ctk.CTkLabel(frame, text="No se encontraron datos para esta estadística.", text_color="gray").pack(pady=20)
+            return
+
+        # 1. Botón de Exportar
+        btn_export = ctk.CTkButton(
+            frame, 
+            text="💾 Exportar a Excel", 
+            command=lambda: self.exportar_a_excel(datos, columnas, export_filename) # Llama al método de exportación
+        )
+        btn_export.pack(pady=(5, 15))
+
+        # 2. Contenedor de la Tabla
+        tabla_scroll_frame = ctk.CTkScrollableFrame(frame, label_text="Resultados")
+        tabla_scroll_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # La columna 0 (típicamente el nombre del cliente/artículo) se expande
+        for col_idx in range(len(columnas)):
+            # Damos un peso 3 a la primera columna (Referencia Artículo)
+            # y peso 1 al resto para asegurar que la Referencia se estire más.
+            if col_idx == 0:
+                tabla_scroll_frame.grid_columnconfigure(col_idx, weight=3) 
+            else:
+                tabla_scroll_frame.grid_columnconfigure(col_idx, weight=1) 
+        
+        # 3. Encabezados
+        header_font = ctk.CTkFont(weight="bold")
+        for col_idx, col_name in enumerate(columnas):
+            # Alineación del encabezado
+            sticky = "w" if col_idx == 0 else "e"
+            ctk.CTkLabel(tabla_scroll_frame, text=col_name, font=header_font).grid(row=0, column=col_idx, padx=10, pady=5, sticky=sticky)
+            
+        # 4. Datos
+        for row_idx, row_data in enumerate(datos):
+            for col_idx, cell_value in enumerate(row_data):
+                
+                text_to_display = str(cell_value if cell_value is not None else "N/A")
+                
+                # 🚨 Aplicar formato de moneda si se especifica y estamos en la columna de valor (la última)
+                if formato_moneda and col_idx == len(row_data) - 1 and cell_value is not None:
+                    try:
+                        # Intenta usar locale para el formato de moneda (€)
+                        text_to_display = locale.currency(float(cell_value), grouping=True, symbol=True)
+                    except (ValueError, TypeError, locale.Error):
+                        # Fallback si no es un número o si falla el locale
+                        text_to_display = f"{float(cell_value):,.2f} €"
+
+                # Alineación del contenido
+                sticky = "w" if col_idx == 0 else "e"
+                
+                ctk.CTkLabel(
+                    tabla_scroll_frame, 
+                    text=text_to_display,
+                    justify="left"
+                ).grid(row=row_idx + 1, column=col_idx, padx=10, pady=2, sticky=sticky)
+    
+    def abrir_cliente_correo_con_mailto(self, email_acontacto, asunto, cuerpo):
+        """Prepara el enlace mailto y lo abre con el cliente de correo por defecto."""
+        
+        # Necesitamos la librería para codificar el Asunto y el Cuerpo para la URL
+        import urllib.parse
+        
+        # Codificar el asunto y el cuerpo (necesario para URLs mailto con espacios o caracteres especiales)
+        asunto_codificado = urllib.parse.quote(asunto)
+        cuerpo_codificado = urllib.parse.quote(cuerpo)
+        
+        # Construir el enlace mailto
+        mailto_link = f"mailto:{email_acontacto}?subject={asunto_codificado}&body={cuerpo_codificado}"
+        
+        try:
+            # Abrir el enlace usando el cliente de correo/navegador por defecto
+            import webbrowser
+            webbrowser.open(mailto_link)
+            return True # Éxito
+        except Exception as e:
+            messagebox.showerror("Error de Email", "No se pudo abrir el cliente de correo por defecto. Por favor, asegúrate de que tienes un cliente de correo configurado.")
+            return False # Fallo
+    
+    def enviar_email_contacto(self):
+        """Abre el cliente de correo para enviar un email al contacto registrado en el RMA actual."""
+        
+        # 1. Verificar que haya un RMA actual abierto
+        if not self.rma_actual_id:
+            messagebox.showwarning("Advertencia", "Debe seleccionar o tener abierto un expediente RMA para enviar un email.")
+            return
+
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        try:
+            # 2. Consultar el email_contacto y el cliente del expediente actual
+            cursor.execute("SELECT email_de_contacto, cliente, numero_documento_cliente, codigo_rma FROM rma_maestro WHERE id = ?", (self.rma_actual_id,))
+            resultado = cursor.fetchone()
+            
+            if not resultado:
+                messagebox.showerror("Error", f"No se encontró el expediente RMA: {self.rma_actual_id}")
+                return
+            
+            email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma = resultado
+            
+            # Verificar si el email_contacto está vacío o es nulo
+            if not email_acontacto:
+                messagebox.showwarning("Advertencia", f"El campo 'email_de_contacto' del expediente {self.rma_actual_id} está vacío.")
+                return
+
+            # 3. Definir Asunto y Cuerpo
+            asunto_base = f"ENVIO DE INFORME {numero_rma}"
+            
+            # Texto que el cliente de correo abrirá por defecto (se puede editar)
+            cuerpo_base = (
+                f"Buenos dias,\n\n"
+                f"Se adjunta resolución sobre el expediente abierto a su número de devolución:\n"
+                f"{numero_documento_cliente}.\n"
+                f"Para saber el estado de este informe, puede responder a este mismo correo.\n\n"
+                f"Transcurridos 15 días del envío de este correo, se dará por cerrado el expediente, no aceptando ningún tipo de no conformidad a esta resolución.\n\n\n"
+                f"Dpto. Tecnico Ilutrek."
+            )
+
+            # 4. Llamar a la función del Paso 1 para abrir el cliente de correo
+            email_abierto_ok = self.abrir_cliente_correo_con_mailto(email_acontacto, asunto_base, cuerpo_base)
+            
+            if email_abierto_ok:
+                # 5. Registrar la acción en el historial
+                #accion = f"Email de contacto enviado al cliente {nombre_cliente} ({email_acontacto}). Asunto: '{asunto_base}'."
+                #self.registrar_historial(accion)
+                cursor.execute("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, descripcion_cambio, usuario)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    self.rma_actual_id, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    f"Email de Resolucion enviado al cliente {nombre_cliente} ({email_acontacto}). Asunto: '{asunto_base}'.", 
+                    self.username
+                ))
+                conn.commit()
+                
+                # Opcional: Mostrar una notificación al usuario
+                messagebox.showinfo("Enviar Email", "Se ha abierto tu gestor de correo, por favor revisa tu borrador antes de enviarlo.")
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Error de BD", f"Error al consultar la base de datos: {e}")
+        finally:
+            conn.close()
+    
+    
+    
+    def abrir_formulario_email(self):
+        """Abre el cliente de correo por defecto con un enlace mailto preconfigurado."""
+        
+        # 🚨 ¡IMPORTANTE! Reemplaza 'tu.email@empresa.com' por la dirección correcta
+        email_destino = "carlos@ilutrek.es"
+        
+        # Generamos un asunto útil que incluye el nombre de la aplicación y el usuario
+        asunto = f"Bug/Sugerencia de {self.username} ({self.rol}) en Gestión RMA"
+        
+        # Creamos un cuerpo predefinido para guiar al compañero
+        cuerpo = f"""
+Hola,
+        
+Por favor, describe el problema o sugerencia a continuación:
+        
+----------------------------------------------------------------------
+        
+Tipo: [BUG / SUGERENCIA]
+Página/Función: [Ej: Listado RMA / Formulario Edición]
+Descripción: 
+Pasos para reproducir (solo bugs):
+        
+----------------------------------------------------------------------
+        
+Información del Sistema (NO MODIFICAR):
+Usuario: {self.username}
+Versión de la App: {APP_VERSION}
+"""
+        
+        # URL-encode el asunto y el cuerpo (necesario para URLs mailto)
+        import urllib.parse
+        asunto_codificado = urllib.parse.quote(asunto)
+        cuerpo_codificado = urllib.parse.quote(cuerpo)
+        
+        # Construir el enlace mailto
+        mailto_link = f"mailto:{email_destino}?subject={asunto_codificado}&body={cuerpo_codificado}"
+        
+        try:
+            # Abrir el enlace usando el cliente de correo/navegador por defecto
+            webbrowser.open(mailto_link)
+        except Exception as e:
+            # Si falla (ej. en un entorno sin navegador o cliente de correo configurado)
+            print(f"Error al abrir el cliente de correo: {e}")
+            messagebox.showerror("Error de Email", "No se pudo abrir el cliente de correo por defecto. Por favor, envía un email manualmente a " + email_destino)
+    
+
+# ----------------------------------------------------------------------
+# 7. EJECUCIÓN DEL PROGRAMA
+# ----------------------------------------------------------------------
+
+if __name__ == "__main__":
+    if not os.path.exists(DB_NAME):
+        print("🚨 Error Crítico: No se encuentra el archivo de base de datos 'rma_app.db'.")
+        print("Asegúrate de ejecutar primero 'python db_setup.py'.")
+        sys.exit(1)
+        
+    app = LoginApp()
+    app.mainloop()
