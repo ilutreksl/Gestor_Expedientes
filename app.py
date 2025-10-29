@@ -864,9 +864,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         usuario_actual = self.username
         
         # A) PESTAÑA GENERAL
-        # Campos de Cliente y Contacto
-        self.crear_campo(general_frame, 0, "Cliente:", "Cliente")
-        self.crear_campo(general_frame, 1, "Núm. Doc. Cliente:", "Numero_Documento_Cliente")
+        # Campos de Cliente y Contacto - Cliente y Número de Documento son de solo lectura en modo edición
+        self.crear_campo(general_frame, 0, "Cliente:", "Cliente", deshabilitado=es_edicion)
+        self.crear_campo(general_frame, 1, "Núm. Doc. Cliente:", "Numero_Documento_Cliente", deshabilitado=es_edicion)
         self.crear_campo(general_frame, 2, "Persona de Contacto:", "Persona_de_Contacto")
         self.crear_campo(general_frame, 3, "Email de Contacto:", "Email_de_Contacto")
         self.crear_campo(general_frame, 4, "Autorización:", "Autorizacion", tipo="optionmenu", opciones=self.OPCIONES["Autorizacion"], valor_defecto="NO")
