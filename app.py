@@ -25,7 +25,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.25"
+APP_VERSION = "v0.0.28"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -214,16 +214,32 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if not conn: return
 
         try:
-            # Intenta seleccionar la columna
-            cursor.execute("SELECT motivo FROM rma_maestro LIMIT 1")
-        except sqlite3.OperationalError:
-            # La columna no existe, añadirla
-            try:
-                cursor.execute("ALTER TABLE rma_maestro ADD COLUMN motivo TEXT")
-                conn.commit()
-                print("✅ Columna 'motivo' añadida a rma_maestro.")
-            except Exception as e:
-                print(f"Error al añadir columna 'motivo': {e}")
+            # Obtenemos las columnas actuales de la tabla rma_maestro
+            cursor.execute("PRAGMA table_info('rma_maestro')")
+            cols = [row[1] for row in cursor.fetchall()]
+
+            # Columnas que queremos asegurar que existen (nombre en DB, tipo y default opcional)
+            columnas_necesarias = {
+                'motivo': "TEXT",
+                'rma_proveedor': "TEXT DEFAULT ''",
+                'modelo': "TEXT DEFAULT ''",
+                'n_serie': "TEXT DEFAULT ''",
+                'ref_proveedor': "TEXT DEFAULT ''",
+                'obs_tecnica': "TEXT DEFAULT ''"
+            }
+
+            for col_name, col_def in columnas_necesarias.items():
+                if col_name not in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE rma_maestro ADD COLUMN {col_name} {col_def}")
+                        print(f"✅ Columna '{col_name}' añadida a rma_maestro.")
+                    except Exception as e:
+                        print(f"Error al añadir columna '{col_name}': {e}")
+
+            conn.commit()
+
+        except Exception as e:
+            print(f"Error comprobando/añadiendo columnas en rma_maestro: {e}")
         finally:
             conn.close()
     
@@ -824,6 +840,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         estados_fechas_tab = self.tabview.add("⏱️ Estados y Fechas")
         articulos_tab = self.tabview.add("📦 Artículos")
         contabilidad_tab = self.tabview.add("💰 Contabilidad")
+        # Nueva pestaña para información técnica — por si en el futuro añadimos más campos técnicos
+        info_tecnica_tab = self.tabview.add("🔧 Información Técnica")
         adjuntos_tab = self.tabview.add("📎 Adjuntos (Pendiente)")
         historial_tab = self.tabview.add("📜 Historial de Cambios")
         self.historial_tab = historial_tab
@@ -847,6 +865,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         contabilidad_frame = ctk.CTkFrame(contabilidad_scroll, fg_color="transparent")
         contabilidad_frame.pack(fill="x", padx=10, pady=10)
         contabilidad_frame.grid_columnconfigure(1, weight=1)
+
+        # Configurar la nueva pestaña Información Técnica
+        info_tecnica_scroll = ctk.CTkScrollableFrame(info_tecnica_tab, label_text="Información Técnica")
+        info_tecnica_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        info_tecnica_frame = ctk.CTkFrame(info_tecnica_scroll, fg_color="transparent")
+        info_tecnica_frame.pack(fill="x", padx=10, pady=10)
+        info_tecnica_frame.grid_columnconfigure(1, weight=1)
 
         # El historial solo se muestra si estamos editando
         if es_edicion:
@@ -899,6 +924,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.crear_campo(estados_fechas_frame, fila_estados, "Fecha para Factura:", "Fecha_para_factura", tipo="optionmenu", opciones=self.obtener_quincenas_futuras(), valor_defecto=self.obtener_quincenas_futuras()[0]); fila_estados += 1
 
         
+        # C) PESTAÑA INFORMACIÓN TÉCNICA (campos técnicos)
+        # Fila 0: RMA Proveedor (label cambiado a 'RMA Proveedor')
+        self.crear_campo(info_tecnica_frame, 0, "RMA Proveedor:", "Rma_Proveedor")
+        # Fila 1: Modelo
+        self.crear_campo(info_tecnica_frame, 1, "Modelo:", "Modelo")
+        # Fila 2: N. Serie
+        self.crear_campo(info_tecnica_frame, 2, "N. Serie:", "N_Serie")
+        # Fila 3: Ref. Proveedor
+        self.crear_campo(info_tecnica_frame, 3, "Ref. Proveedor:", "Ref_Proveedor")
+        # Fila 4: Observaciones Técnicas (caja de texto mayor)
+        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(row=4, column=0, padx=10, pady=5, sticky="w")
+        self.entry_Obs_Tecnica = ctk.CTkTextbox(info_tecnica_frame, height=120, wrap="word")
+        self.entry_Obs_Tecnica.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
+
         # C) PESTAÑA ARTÍCULOS (Mantener la lógica de listado y añadir artículo)
         articulos_tab.grid_columnconfigure(0, weight=1)
         articulos_frame = ctk.CTkFrame(articulos_tab) # Este marco no necesita scroll, la lista interna sí
@@ -1211,13 +1250,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
             'Cliente', 'Numero_Documento_Cliente', 'Persona_de_Contacto', 'Email_de_Contacto',
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
-            'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo'
+            'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica'
         ]
         
         for campo in campos_a_insertar:
             entry = getattr(self, f"entry_{campo}")
-            # Si es optionmenu, usa .get(). Si es Entry, usa .get()
-            valor = entry.get() if hasattr(entry, 'get') else entry.cget("text")
+            # Obtener el valor según el tipo de widget
+            try:
+                if isinstance(entry, ctk.CTkTextbox):
+                    valor = entry.get("1.0", "end-1c").strip()
+                elif hasattr(entry, 'get'):
+                    valor = entry.get()
+                else:
+                    valor = entry.cget("text")
+            except Exception:
+                # Fallback seguro
+                try:
+                    valor = entry.get()
+                except Exception:
+                    valor = ''
             
             # Validación de obligatorios
             if campo in ["Cliente", "Numero_Documento_Cliente", "Persona_de_Contacto", "Email_de_Contacto", "motivo"] and not valor:
@@ -1356,7 +1408,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
-            'Fecha_Emision', 'Creado_Por', 'motivo'
+            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica'
         ]
 
         for campo in campos_a_recuperar:
@@ -1364,7 +1416,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if hasattr(self, entry_name):
                 entry = getattr(self, entry_name)
                 # Intenta obtener el valor de la entrada o del optionmenu
-                valor = entry.get() if hasattr(entry, 'get') else entry.cget("text")
+                # Soportar CTkTextbox (requiere índices para get)
+                try:
+                    if isinstance(entry, ctk.CTkTextbox):
+                        valor = entry.get("1.0", "end-1c").strip()
+                    elif hasattr(entry, 'get'):
+                        valor = entry.get()
+                    else:
+                        valor = entry.cget("text")
+                except Exception:
+                    # Fallback
+                    try:
+                        valor = entry.get()
+                    except Exception:
+                        valor = ''
                 
                 # Conversión especial para Autorizacion (SI/NO a 1/0)
                 if campo == 'Autorizacion':
@@ -1487,6 +1552,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     elif isinstance(entry, ctk.CTkOptionMenu):
                         if str(valor) in entry.cget("values"):  
                              entry.set(str(valor))
+                    # Tratamiento para Textbox grande (Observaciones Técnicas u otros)
+                    elif isinstance(entry, ctk.CTkTextbox):
+                        try:
+                            entry.delete("1.0", "end")
+                            entry.insert("1.0", str(valor) if valor is not None else "")
+                        except Exception:
+                            # algunos widgets CTkTextbox pueden tener métodos distintos; ignorar si falla
+                            pass
             
             # --- NUEVO: Actualizar la etiqueta del total ---
             precio_total = datos_maestro.get('precio_total_expediente', 0.0) # Obtener el valor
