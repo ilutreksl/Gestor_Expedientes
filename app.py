@@ -2299,10 +2299,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.stats_window.focus()
             return
 
-        self.stats_window = Toplevel(self) 
+        # Crear una nueva ventana modal pero independiente
+        self.stats_window = ctk.CTkToplevel(self)
         self.stats_window.title("Módulo de Estadísticas")
         self.stats_window.geometry("1600x900")
-        self.stats_window.transient(self) # Hace que la ventana de estadísticas dependa de la principal
+        self.stats_window.minsize(800, 600)  # Tamaño mínimo para asegurar legibilidad
+        
+        # Centrar la ventana en la pantalla
+        screen_width = self.stats_window.winfo_screenwidth()
+        screen_height = self.stats_window.winfo_screenheight()
+        x = (screen_width - 1600) // 2
+        y = (screen_height - 900) // 2
+        self.stats_window.geometry(f"1600x900+{x}+{y}")
 
         # Marco principal que contendrá la navegación y el contenido
         stats_frame = ctk.CTkFrame(self.stats_window)
