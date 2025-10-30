@@ -8,6 +8,11 @@ import os
 import datetime
 import webbrowser
 import docx
+import requests
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
 from PIL import Image, ImageTk
 #from tkcalendar import Calendar
 from CTkDatePicker import CTkDatePicker
@@ -25,7 +30,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.28"
+APP_VERSION = "v0.0.29"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -318,7 +323,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
                                           text="🐞 Reportar", 
-                                          command=self.abrir_formulario_email,
+                                          command=self.mostrar_formulario_github,
                                           #fg_color="gray80",
                                           #hover_color="gray70",
                                           #text_color="black", # Texto negro para contraste en fondo gris
@@ -3179,6 +3184,114 @@ class VentanaPrincipal(ctk.CTkToplevel):
     
     
     
+    # Nota: la implementación anterior de 'mostrar_formulario_github' era un duplicado
+    # y ha sido eliminada para evitar confusión. La implementación activa está más
+    # abajo en el archivo y contiene el botón de envío correctamente visible.
+        
+    def mostrar_formulario_github(self):
+        """Muestra un formulario para crear un issue en GitHub."""
+        # Crear una nueva ventana modal con tamaño fijo (no maximizable)
+        ventana_issue = ctk.CTkToplevel(self)
+        ventana_issue.title("Crear Issue en GitHub")
+        ventana_issue.geometry("500x600")  # Altura aumentada para asegurar que todo sea visible
+        ventana_issue.resizable(False, False)  # Ventana de tamaño fijo
+        ventana_issue.grab_set()  # Hace la ventana modal
+
+        # Marco con scroll para el contenido
+        scroll_frame = ctk.CTkScrollableFrame(ventana_issue)
+        scroll_frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # Marco para el contenido dentro del scroll
+        content_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True)
+
+        # Campo de nombre (autocompletado con el usuario actual)
+        ctk.CTkLabel(content_frame, text="Nombre:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=5, pady=(4,2))
+        nombre_entry = ctk.CTkEntry(content_frame)
+        nombre_entry.insert(0, self.username)
+        nombre_entry.pack(fill="x", padx=5, pady=(0,12))
+
+        # Campo de fecha (autocompletado con la fecha actual)
+        ctk.CTkLabel(content_frame, text="Fecha:").pack(anchor="w", padx=5, pady=(4,2))
+        fecha_entry = ctk.CTkEntry(content_frame)
+        fecha_entry.insert(0, datetime.datetime.now().strftime("%Y-%m-%d"))
+        fecha_entry.pack(fill="x", padx=5, pady=(0,8))
+
+        # Tipo de issue (Bug/Sugerencia)
+        ctk.CTkLabel(content_frame, text="Tipo:").pack(anchor="w", padx=5, pady=(4,2))
+        tipo_var = tk.StringVar(value="Sugerencia")
+        tipo_frame = ctk.CTkFrame(content_frame)
+        tipo_frame.pack(fill="x", padx=5, pady=(0,8))
+        ctk.CTkRadioButton(tipo_frame, text="Bug", variable=tipo_var, value="Bug").pack(side="left", padx=12)
+        ctk.CTkRadioButton(tipo_frame, text="Sugerencia", variable=tipo_var, value="Sugerencia").pack(side="left", padx=12)
+
+        # Campo de descripción
+        ctk.CTkLabel(content_frame, text="Descripción:").pack(anchor="w", padx=5, pady=(4,2))
+        desc_text = ctk.CTkTextbox(content_frame, height=160)
+        desc_text.pack(fill="both", expand=True, padx=5, pady=(0,8))
+
+        # Footer con el botón para asegurarnos que está siempre visible
+        footer = ctk.CTkFrame(ventana_issue, fg_color="transparent", height=50)
+        footer.pack(side="bottom", fill="x", padx=12, pady=8)
+        footer.pack_propagate(False)  # Mantiene la altura fija del footer
+
+        # Función para enviar el issue
+        def enviar_issue():
+            nombre = nombre_entry.get().strip()
+            fecha = fecha_entry.get().strip()
+            tipo = tipo_var.get()
+            descripcion = desc_text.get("1.0", "end-1c").strip()
+
+            if not nombre or not fecha or not descripcion:
+                messagebox.showerror("Error", "Por favor, complete todos los campos.")
+                return
+
+            titulo = f"[{tipo}] Reporte de {nombre}"
+            cuerpo = (
+                f"Reporte creado por: {nombre}\n"
+                f"Fecha: {fecha}\n"
+                f"Tipo: {tipo}\n"
+                f"Rol del usuario: {self.rol}\n"
+                f"Versión de la App: {APP_VERSION}\n\n"
+                f"Descripción:\n{descripcion}\n"
+            )
+
+            token = os.getenv('GITHUB_TOKEN')
+            if not token:
+                messagebox.showerror("Error", "No se encontró el token de GitHub. Contacte al administrador del sistema.")
+                return
+
+            try:
+                url = "https://api.github.com/repos/ilutreksl/Gestor_Expedientes/issues"
+                headers = {
+                    "Authorization": f"token {token}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
+                data = {"title": titulo, "body": cuerpo, "labels": [tipo]}
+
+                response = requests.post(url, headers=headers, json=data)
+                response.raise_for_status()
+
+                issue_number = response.json().get('number')
+                message = f"Issue creado correctamente en GitHub." if not issue_number else f"El issue #{issue_number} ha sido creado correctamente en GitHub."
+                messagebox.showinfo("Éxito", message)
+                ventana_issue.destroy()
+
+            except requests.exceptions.RequestException as e:
+                messagebox.showerror("Error", f"Error al crear el issue en GitHub: {e}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al enviar el reporte: {e}")
+
+        # Botón de enviar en el footer (posicionamiento absoluto)
+        btn_enviar = ctk.CTkButton(
+            footer, 
+            text="✉️ Enviar Issue", 
+            command=enviar_issue,
+            width=120,  # Ancho fijo para el botón
+            height=32   # Altura fija para el botón
+        )
+        btn_enviar.place(relx=0.95, rely=0.5, anchor="e")  # Posicionamiento relativo a la derecha
+
     def abrir_formulario_email(self):
         """Abre el cliente de correo por defecto con un enlace mailto preconfigurado."""
         
