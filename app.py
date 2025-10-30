@@ -30,7 +30,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.33"
+APP_VERSION = "v0.0.34"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -287,57 +287,64 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
-        # Fila 4: Espacio vacío para empujar los elementos inferiores.
-        self.sidebar_frame.grid_rowconfigure(6, weight=1) # <--- Reubicado aquí.
+        # Fila alta: Espacio vacío para empujar los elementos inferiores.
+        # Reservamos una fila alta para 'push' y colocamos la info de usuario en filas finales.
+        self.sidebar_frame.grid_rowconfigure(20, weight=1) # <--- Espaciador principal.
 
-        # Información de Usuario y Rol (Fila 6)
+        # Fila alta: Espacio vacío para empujar los elementos inferiores.
+        self.sidebar_frame.grid_rowconfigure(50, weight=1)  # Uso fila 50 para tener espacio para más botones
+
+        # Información de Usuario y Rol (al final)
         self.lbl_usuario_rol = ctk.CTkLabel(self.sidebar_frame, text=f"Usuario: {self.username} ({self.rol})", font=ctk.CTkFont(size=12))
-        self.lbl_usuario_rol.grid(row=7, column=0, padx=20, pady=(10, 5))
+        self.lbl_usuario_rol.grid(row=51, column=0, padx=20, pady=(10, 5), sticky="s")
 
-        # 💡 NUEVO: Versión de la App (Fila 7)
-        ctk.CTkLabel(self.sidebar_frame, text=f"Versión: {APP_VERSION}", font=ctk.CTkFont(size=10, slant="italic")).grid(row=8, column=0, padx=20, pady=(0, 2))
+        # Versión de la App
+        ctk.CTkLabel(self.sidebar_frame, text=f"Versión: {APP_VERSION}", font=ctk.CTkFont(size=10, slant="italic")).grid(row=52, column=0, padx=20, pady=(0, 2), sticky="s")
 
-        # 💡 NUEVO: Copyright (Fila 8)
+        # Copyright
         año_actual = datetime.datetime.now().year
-        ctk.CTkLabel(self.sidebar_frame, text=f"© {año_actual} ILUTREK, S.L.", font=ctk.CTkFont(size=10, weight="bold")).grid(row=9, column=0, padx=20, pady=(2, 10))
+        ctk.CTkLabel(self.sidebar_frame, text=f"© {año_actual} ILUTREK, S.L.", font=ctk.CTkFont(size=10, weight="bold")).grid(row=53, column=0, padx=20, pady=(2, 10), sticky="s")
         
         ctk.CTkLabel(self.sidebar_frame, text="MENÚ", font=ctk.CTkFont(family="Verdana", size=20, weight="bold")).grid(row=1, column=0, padx=20, pady=(20, 10))
-        
+
+        # Usamos índices de fila secuenciales para evitar solapamientos.
+        fila = 2
+
+        # Botón de gestión de usuarios (solo visible para administradores)
+        if str(self.rol).strip().lower() in ("admin", "administrador"):
+            self.btn_usuarios = ctk.CTkButton(self.sidebar_frame,
+                                             text="👥 Gestión Usuarios",
+                                             command=self.mostrar_gestion_usuarios,
+                                             font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+            self.btn_usuarios.grid(row=fila, column=0, padx=20, pady=10)
+            fila += 1
+
         self.btn_lista = ctk.CTkButton(self.sidebar_frame,
                                        text="📋 Listado",
                                        command=self.mostrar_lista_rma,
-                                       #fg_color="gray80",
-                                       #hover_color="gray70",
-                                       #text_color="black", # Texto negro para contraste en fondo gris
                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_lista.grid(row=2, column=0, padx=20, pady=10)
-        
-        self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
-                                        text="Backup BD", 
-                                        command=self.crear_copia_seguridad_db,
-                                        #fg_color="gray80",
-                                        #hover_color="gray70",
-                                        #text_color="black", # Texto negro para contraste en fondo gris
-                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_buscar.grid(row=5, column=0, padx=20, pady=10)
-        
-        self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
-                                          text="🐞 Reportar", 
-                                          command=self.mostrar_formulario_github,
-                                          #fg_color="gray80",
-                                          #hover_color="gray70",
-                                          #text_color="black", # Texto negro para contraste en fondo gris
-                                          font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_reportar.grid(row=4, column=0, padx=20, pady=10)
-        
+        self.btn_lista.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
+
         self.btn_estadisticas = ctk.CTkButton(self.sidebar_frame,
                                               text="📊 Filtrado",
                                               command=self.mostrar_ventana_estadisticas,
-                                              #fg_color="gray80",
-                                              #hover_color="gray70",
-                                              #text_color="black", # Texto negro para contraste en fondo gris
                                               font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_estadisticas.grid(row=3, column=0, padx=20, pady=10)
+        self.btn_estadisticas.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
+
+        self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
+                                        text="Backup BD",
+                                        command=self.crear_copia_seguridad_db,
+                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_buscar.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
+
+        self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
+                                          text="🐞 Reportar",
+                                          command=self.mostrar_formulario_github,
+                                          font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_reportar.grid(row=fila, column=0, padx=20, pady=10)
         
         # --- Contenido Principal (Columna 1) ---
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
@@ -2291,6 +2298,157 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la plantilla.\nError: {e}")
     
+    def mostrar_gestion_usuarios(self):
+        """Muestra la ventana de gestión de usuarios con opciones para añadir/editar usuarios."""
+        # Solo admin tiene permisos para gestionar usuarios
+        if str(self.rol).strip().lower() not in ("admin", "administrador"):
+            messagebox.showerror("Error", "Solo el administrador puede gestionar usuarios.")
+            return
+
+        # Crear ventana modal
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Gestión de Usuarios")
+        ventana.geometry("600x500")
+        ventana.grab_set()
+
+        # Frame principal
+        frame = ctk.CTkFrame(ventana)
+        frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Título
+        ctk.CTkLabel(frame, text="Gestión de Usuarios", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(0, 20))
+
+        # Frame para el formulario de nuevo usuario
+        form_frame = ctk.CTkFrame(frame)
+        form_frame.pack(fill="x", padx=10, pady=10)
+
+        # Campos del formulario
+        ctk.CTkLabel(form_frame, text="Nombre de Usuario:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        entry_usuario = ctk.CTkEntry(form_frame)
+        entry_usuario.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(form_frame, text="Contraseña:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        entry_password = ctk.CTkEntry(form_frame, show="*")
+        entry_password.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(form_frame, text="Rol:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        # Lista de roles disponibles
+        roles_disponibles = [
+            "usuario",        # Usuario básico
+            "admin",         # Administrador total
+            "Dpto. Tecnico", # Departamento técnico
+            "Administracion",# Administración
+            "Contabilidad",  # Contabilidad
+            "Almacen"        # Almacén
+        ]
+        combo_rol = ctk.CTkOptionMenu(form_frame, values=roles_disponibles)
+        combo_rol.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        combo_rol.set("usuario")  # Valor por defecto
+
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        def agregar_usuario():
+            username = entry_usuario.get().strip()
+            password = entry_password.get().strip()
+            rol = combo_rol.get()
+
+            if not username or not password:
+                messagebox.showerror("Error", "Por favor, complete todos los campos.")
+                return
+
+            try:
+                # Generar hash de la contraseña
+                password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+
+                # Verificar si el usuario ya existe
+                cursor.execute("SELECT nombre_usuario FROM usuarios WHERE nombre_usuario = ?", (username,))
+                if cursor.fetchone():
+                    messagebox.showerror("Error", "El nombre de usuario ya existe.")
+                    return
+
+                # Insertar nuevo usuario
+                cursor.execute(
+                    "INSERT INTO usuarios (nombre_usuario, password_hash, rol) VALUES (?, ?, ?)",
+                    (username, password_hash, rol)
+                )
+                conn.commit()
+                messagebox.showinfo("Éxito", "Usuario creado correctamente.")
+                
+                # Limpiar campos
+                entry_usuario.delete(0, 'end')
+                entry_password.delete(0, 'end')
+                combo_rol.set("usuario")
+                
+                # Actualizar lista de usuarios
+                actualizar_lista_usuarios()
+
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"Error al crear usuario: {e}")
+            finally:
+                conn.close()
+
+        # Botón para agregar usuario
+        ctk.CTkButton(form_frame, text="Agregar Usuario", command=agregar_usuario).grid(row=3, column=0, columnspan=2, pady=20)
+
+        # Frame para la lista de usuarios
+        list_frame = ctk.CTkFrame(frame)
+        list_frame.pack(fill="both", expand=True, padx=10, pady=(20,10))
+
+        # Título de la lista
+        ctk.CTkLabel(list_frame, text="Usuarios Existentes", font=ctk.CTkFont(weight="bold")).pack(pady=10)
+
+        # Crear un frame scrollable para la lista de usuarios
+        scroll_frame = ctk.CTkScrollableFrame(list_frame)
+        scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        def actualizar_lista_usuarios():
+            # Limpiar lista actual
+            for widget in scroll_frame.winfo_children():
+                widget.destroy()
+
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("SELECT nombre_usuario, rol FROM usuarios")
+                usuarios = cursor.fetchall()
+
+                for i, (usuario, rol) in enumerate(usuarios):
+                    row_frame = ctk.CTkFrame(scroll_frame)
+                    row_frame.pack(fill="x", padx=5, pady=2)
+                    
+                    ctk.CTkLabel(row_frame, text=f"{usuario} ({rol})").pack(side="left", padx=5)
+                    
+                    if usuario != "admin":  # No permitir eliminar al usuario admin
+                        def make_delete(u=usuario):
+                            return lambda: eliminar_usuario(u)
+                        
+                        ctk.CTkButton(row_frame, text="❌", width=30, command=make_delete(usuario)).pack(side="right", padx=5)
+
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"Error al cargar usuarios: {e}")
+            finally:
+                conn.close()
+
+        def eliminar_usuario(username):
+            if messagebox.askyesno("Confirmar", f"¿Está seguro de eliminar al usuario {username}?"):
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM usuarios WHERE nombre_usuario = ?", (username,))
+                    conn.commit()
+                    messagebox.showinfo("Éxito", "Usuario eliminado correctamente.")
+                    actualizar_lista_usuarios()
+                except sqlite3.Error as e:
+                    messagebox.showerror("Error", f"Error al eliminar usuario: {e}")
+                finally:
+                    conn.close()
+
+        # Cargar lista inicial de usuarios
+        actualizar_lista_usuarios()
+
     def mostrar_ventana_estadisticas(self):
         """Crea y muestra la ventana Toplevel y la estructura de navegación interna para estadísticas."""
         
