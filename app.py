@@ -30,7 +30,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.29"
+APP_VERSION = "v0.0.32"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -3050,13 +3050,99 @@ class VentanaPrincipal(ctk.CTkToplevel):
             ctk.CTkLabel(frame, text="No se encontraron datos para esta estadística.", text_color="gray").pack(pady=20)
             return
 
+        # Función para abrir el expediente al hacer clic en el código RMA
+        def abrir_expediente(codigo_rma):
+            """Abre el expediente en una nueva ventana independiente para consulta/edición.
+
+            La ventana muestra un resumen y permite abrir el expediente en el panel principal si
+            el usuario prefiere editar en la interfaz habitual.
+            """
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
+
+            try:
+                # Obtener datos maestro
+                cursor.execute("SELECT id, codigo_rma, cliente, fecha_gestion, motivo FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+                maestro = cursor.fetchone()
+                if not maestro:
+                    messagebox.showerror("Error", f"No se encontró el expediente con código {codigo_rma}")
+                    return
+
+                rma_id = maestro[0]
+                codigo = maestro[1]
+                cliente = maestro[2]
+                fecha = maestro[3]
+                motivo = maestro[4]
+
+                # Crear ventana independiente
+                vent = ctk.CTkToplevel(self)
+                vent.title(f"Expediente {codigo}")
+                vent.geometry("900x700")
+                vent.minsize(700, 500)
+
+                # Contenedor principal
+                cont = ctk.CTkFrame(vent)
+                cont.pack(fill="both", expand=True, padx=12, pady=12)
+
+                # Cabecera
+                ctk.CTkLabel(cont, text=f"Nº EXPEDIENTE: {codigo}", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w")
+                ctk.CTkLabel(cont, text=f"Cliente: {cliente}").pack(anchor="w", pady=(4,0))
+                ctk.CTkLabel(cont, text=f"Fecha Gestión: {fecha}").pack(anchor="w", pady=(0,6))
+                ctk.CTkLabel(cont, text="Motivo:").pack(anchor="w")
+                txt_motivo = ctk.CTkTextbox(cont, height=80)
+                txt_motivo.pack(fill="x", pady=(0,8))
+                try:
+                    txt_motivo.insert("1.0", str(motivo) if motivo is not None else "")
+                except Exception:
+                    pass
+
+                # Mostrar artículos relacionados (lista simple)
+                ctk.CTkLabel(cont, text="Artículos asociados:", font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(6,4))
+                art_frame = ctk.CTkScrollableFrame(cont)
+                art_frame.pack(fill="both", expand=True, pady=(0,8))
+
+                cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                detalles = cursor.fetchall()
+                if detalles:
+                    for d in detalles:
+                        ref = d[0]
+                        cant_doc = d[1]
+                        cant_ent = d[2]
+                        estado = d[3]
+                        ctk.CTkLabel(art_frame, text=f"{ref} — Doc: {cant_doc} — Ent: {cant_ent} — Estado: {estado}").pack(anchor="w", padx=8, pady=2)
+                else:
+                    ctk.CTkLabel(art_frame, text="No hay artículos registrados.").pack(pady=8)
+
+                # Botones en el footer de la ventana
+                footer = ctk.CTkFrame(cont)
+                footer.pack(fill="x", pady=(8,0))
+
+                def abrir_en_panel():
+                    try:
+                        self.mostrar_nuevo_rma(rma_id)
+                        vent.destroy()
+                    except Exception as e:
+                        messagebox.showerror("Error", f"No se pudo abrir en el panel principal: {e}")
+
+                ctk.CTkButton(footer, text="✏️ Editar en panel principal", command=abrir_en_panel).pack(side="left")
+                ctk.CTkButton(footer, text="Cerrar", command=vent.destroy).pack(side="right")
+
+            except sqlite3.Error as e:
+                messagebox.showerror("Error de Base de Datos", f"Error al consultar el expediente: {e}")
+            finally:
+                conn.close()
+
+        # Mensaje informativo para el usuario
+        ctk.CTkLabel(frame, text="Pulse el Nº EXPEDIENTE (primera columna) para abrirlo en una nueva ventana.", text_color="gray").pack(pady=(6,4))
+
         # 1. Botón de Exportar
         btn_export = ctk.CTkButton(
             frame, 
             text="💾 Exportar a Excel", 
             command=lambda: self.exportar_a_excel(datos, columnas, export_filename) # Llama al método de exportación
         )
-        btn_export.pack(pady=(5, 15))
+        btn_export.pack(pady=(5, 8))
 
         # 2. Contenedor de la Tabla
         tabla_scroll_frame = ctk.CTkScrollableFrame(frame, label_text="Resultados")
@@ -3096,11 +3182,45 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Alineación del contenido
                 sticky = "w" if col_idx == 0 else "e"
                 
-                ctk.CTkLabel(
-                    tabla_scroll_frame, 
+                # Crear el label como widget para poder bindear eventos
+                label_widget = ctk.CTkLabel(
+                    tabla_scroll_frame,
                     text=text_to_display,
                     justify="left"
-                ).grid(row=row_idx + 1, column=col_idx, padx=10, pady=2, sticky=sticky)
+                )
+                label_widget.grid(row=row_idx + 1, column=col_idx, padx=10, pady=2, sticky=sticky)
+
+                # Si es la primera columna (código RMA), hacerlo clicable
+                if col_idx == 0:
+                    # Cambiar cursor a mano y subrayar/colorear al hover
+                    try:
+                        original_color = label_widget.cget("text_color")
+                    except Exception:
+                        original_color = None
+
+                    # Set cursor to hand2 if supported
+                    try:
+                        label_widget.configure(cursor="hand2")
+                    except Exception:
+                        pass
+
+                    def on_enter(e):
+                        try:
+                            label_widget.configure(text_color="#1a73e8")
+                        except Exception:
+                            pass
+
+                    def on_leave(e):
+                        try:
+                            if original_color is not None:
+                                label_widget.configure(text_color=original_color)
+                        except Exception:
+                            pass
+
+                    # Bind click to abrir_expediente using the displayed text (codigo)
+                    label_widget.bind("<Button-1>", lambda e, code=text_to_display: abrir_expediente(code))
+                    label_widget.bind("<Enter>", on_enter)
+                    label_widget.bind("<Leave>", on_leave)
     
     def abrir_cliente_correo_con_mailto(self, email_acontacto, asunto, cuerpo):
         """Prepara el enlace mailto y lo abre con el cliente de correo por defecto."""
