@@ -30,7 +30,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.32"
+APP_VERSION = "v0.0.33"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -3085,10 +3085,42 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 cont = ctk.CTkFrame(vent)
                 cont.pack(fill="both", expand=True, padx=12, pady=12)
 
-                # Cabecera
-                ctk.CTkLabel(cont, text=f"Nº EXPEDIENTE: {codigo}", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w")
-                ctk.CTkLabel(cont, text=f"Cliente: {cliente}").pack(anchor="w", pady=(4,0))
-                ctk.CTkLabel(cont, text=f"Fecha Gestión: {fecha}").pack(anchor="w", pady=(0,6))
+                # Cabecera - campos editables
+                header_frame = ctk.CTkFrame(cont)
+                header_frame.pack(fill="x", pady=(0,6))
+
+                ctk.CTkLabel(header_frame, text=f"Nº EXPEDIENTE: {codigo}", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,6))
+
+                ctk.CTkLabel(header_frame, text="Cliente:").grid(row=1, column=0, sticky="w")
+                entry_cliente = ctk.CTkEntry(header_frame)
+                entry_cliente.grid(row=1, column=1, sticky="ew", padx=(8,0))
+                entry_cliente.insert(0, str(cliente) if cliente is not None else "")
+
+                ctk.CTkLabel(header_frame, text="Nº Documento:").grid(row=2, column=0, sticky="w")
+                entry_num_doc = ctk.CTkEntry(header_frame)
+                entry_num_doc.grid(row=2, column=1, sticky="ew", padx=(8,0))
+                # intentar rellenar si existe
+                try:
+                    entry_num_doc.insert(0, str(maestro[3]) if maestro[3] is not None else "")
+                except Exception:
+                    pass
+
+                ctk.CTkLabel(header_frame, text="Fecha Gestión:").grid(row=3, column=0, sticky="w")
+                entry_fecha = ctk.CTkEntry(header_frame)
+                entry_fecha.grid(row=3, column=1, sticky="ew", padx=(8,0))
+                entry_fecha.insert(0, str(fecha) if fecha is not None else "")
+
+                ctk.CTkLabel(header_frame, text="Email contacto:").grid(row=4, column=0, sticky="w")
+                entry_email = ctk.CTkEntry(header_frame)
+                entry_email.grid(row=4, column=1, sticky="ew", padx=(8,0))
+                # maestro[6] será email si está presente
+                try:
+                    entry_email.insert(0, str(maestro[6]) if len(maestro) > 6 and maestro[6] is not None else "")
+                except Exception:
+                    pass
+
+                header_frame.grid_columnconfigure(1, weight=1)
+
                 ctk.CTkLabel(cont, text="Motivo:").pack(anchor="w")
                 txt_motivo = ctk.CTkTextbox(cont, height=80)
                 txt_motivo.pack(fill="x", pady=(0,8))
@@ -3102,15 +3134,64 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 art_frame = ctk.CTkScrollableFrame(cont)
                 art_frame.pack(fill="both", expand=True, pady=(0,8))
 
-                cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                # Obtener detalles incluyendo su id para permitir edición
+                cursor.execute("SELECT id, referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto FROM rma_detalles WHERE rma_id = ?", (rma_id,))
                 detalles = cursor.fetchall()
                 if detalles:
                     for d in detalles:
-                        ref = d[0]
-                        cant_doc = d[1]
-                        cant_ent = d[2]
-                        estado = d[3]
-                        ctk.CTkLabel(art_frame, text=f"{ref} — Doc: {cant_doc} — Ent: {cant_ent} — Estado: {estado}").pack(anchor="w", padx=8, pady=2)
+                        det_id = d[0]
+                        ref = d[1]
+                        cant_doc = d[2]
+                        cant_ent = d[3]
+                        estado = d[4]
+
+                        row_fr = ctk.CTkFrame(art_frame)
+                        row_fr.pack(fill="x", padx=4, pady=2)
+
+                        lbl = ctk.CTkLabel(row_fr, text=f"{ref} — Doc: {cant_doc} — Ent: {cant_ent} — Estado: {estado}")
+                        lbl.pack(side="left", anchor="w")
+
+                        def make_editar(did, lbl_widget):
+                            def editar():
+                                ed_win = ctk.CTkToplevel(vent)
+                                ed_win.title(f"Editar artículo {ref}")
+                                ed_win.geometry("420x200")
+
+                                ctk.CTkLabel(ed_win, text=f"Referencia: {ref}").pack(anchor="w", padx=8, pady=(8,4))
+                                ctk.CTkLabel(ed_win, text="Cantidad Entregada:").pack(anchor="w", padx=8)
+                                ent_cant = ctk.CTkEntry(ed_win)
+                                ent_cant.pack(fill="x", padx=8, pady=(0,6))
+                                ent_cant.insert(0, str(cant_ent) if cant_ent is not None else "")
+
+                                ctk.CTkLabel(ed_win, text="Estado Producto:").pack(anchor="w", padx=8)
+                                ent_estado = ctk.CTkEntry(ed_win)
+                                ent_estado.pack(fill="x", padx=8, pady=(0,6))
+                                ent_estado.insert(0, str(estado) if estado is not None else "")
+
+                                def guardar_detalle():
+                                    new_cant = ent_cant.get().strip()
+                                    new_estado = ent_estado.get().strip()
+                                    try:
+                                        conn2 = sqlite3.connect(DB_NAME)
+                                        cur2 = conn2.cursor()
+                                        cur2.execute("UPDATE rma_detalles SET cantidad_entregada = ?, estado_producto = ? WHERE id = ?", (new_cant, new_estado, did))
+                                        conn2.commit()
+                                        conn2.close()
+                                        # Actualizar etiqueta
+                                        lbl_widget.configure(text=f"{ref} — Doc: {cant_doc} — Ent: {new_cant} — Estado: {new_estado}")
+                                        ed_win.destroy()
+                                        # Refrescar los datos de la tabla
+                                        refrescar_estadisticas()
+                                    except sqlite3.Error as e:
+                                        messagebox.showerror("Error BD", f"No se pudo actualizar el detalle: {e}")
+
+                                ctk.CTkButton(ed_win, text="Guardar", command=guardar_detalle).pack(side="left", padx=12, pady=12)
+                                ctk.CTkButton(ed_win, text="Cerrar", command=ed_win.destroy).pack(side="right", padx=12, pady=12)
+
+                            return editar
+
+                        btn_ed = ctk.CTkButton(row_fr, text="Editar", command=make_editar(det_id, lbl))
+                        btn_ed.pack(side="right")
                 else:
                     ctk.CTkLabel(art_frame, text="No hay artículos registrados.").pack(pady=8)
 
@@ -3118,14 +3199,48 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 footer = ctk.CTkFrame(cont)
                 footer.pack(fill="x", pady=(8,0))
 
+                # Botones en el footer de la ventana
+                # Función para refrescar la tabla de estadísticas
+                def refrescar_estadisticas():
+                    """Refresca los datos de la tabla de estadísticas."""
+                    # Limpiar y recargar los datos
+                    try:
+                        # Re-ejecutar la carga de datos actual
+                        self._cargar_datos_articulos_incidencia()
+                    except Exception as e:
+                        print(f"Error al refrescar estadísticas: {e}")
+
+                def guardar_maestro():
+                    new_cliente = entry_cliente.get().strip()
+                    new_num_doc = entry_num_doc.get().strip()
+                    new_fecha = entry_fecha.get().strip()
+                    new_email = entry_email.get().strip()
+                    new_motivo = txt_motivo.get("1.0", "end-1c").strip()
+
+                    try:
+                        conn2 = sqlite3.connect(DB_NAME)
+                        cur2 = conn2.cursor()
+                        cur2.execute(
+                            "UPDATE rma_maestro SET cliente = ?, numero_documento_cliente = ?, fecha_gestion = ?, motivo = ?, email_de_contacto = ? WHERE id = ?",
+                            (new_cliente, new_num_doc, new_fecha, new_motivo, new_email, rma_id)
+                        )
+                        conn2.commit()
+                        conn2.close()
+                        messagebox.showinfo("Guardado", "Expediente actualizado correctamente.")
+                        # Refrescar datos de la tabla
+                        refrescar_estadisticas()
+                    except sqlite3.Error as e:
+                        messagebox.showerror("Error BD", f"No se pudo actualizar el expediente: {e}")
+
                 def abrir_en_panel():
                     try:
                         self.mostrar_nuevo_rma(rma_id)
-                        vent.destroy()
+                        vent.destroy()  # Cerrar la ventana actual al abrir en panel principal
                     except Exception as e:
                         messagebox.showerror("Error", f"No se pudo abrir en el panel principal: {e}")
 
-                ctk.CTkButton(footer, text="✏️ Editar en panel principal", command=abrir_en_panel).pack(side="left")
+                ctk.CTkButton(footer, text="Guardar cambios", command=guardar_maestro).pack(side="left")
+                ctk.CTkButton(footer, text="✏️ Abrir en panel principal", command=abrir_en_panel).pack(side="left", padx=8)
                 ctk.CTkButton(footer, text="Cerrar", command=vent.destroy).pack(side="right")
 
             except sqlite3.Error as e:
