@@ -192,6 +192,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.title(f"Gestión de Expedientes - Bienvenido {self.username} ({self.rol})")
         self.geometry("1200x700")
         
+        # Abrir la ventana en modo maximizado/pantalla completa
+        self.state('zoomed')
+        
         # ----------------------------------------------------
         # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️
         # ----------------------------------------------------
