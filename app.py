@@ -42,8 +42,57 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.36"
+APP_VERSION = "v0.0.38"
 DB_FILENAME = "rma_app.db"
+
+# Session global para Turso (reutiliza conexiones HTTP)
+_turso_session = None
+
+# Caché simple para consultas frecuentes (estados, etc.)
+_query_cache = {}
+_cache_timeout = 300  # 5 minutos
+
+def _get_turso_session():
+    """Obtiene o crea una sesión HTTP persistente para Turso"""
+    global _turso_session
+    if _turso_session is None:
+        import requests
+        _turso_session = requests.Session()
+        _turso_session.headers.update({
+            "Content-Type": "application/json"
+        })
+    return _turso_session
+
+def _get_cached_query(cache_key, query_func, ttl=None):
+    """Sistema de caché para queries frecuentes (estados, usuarios, etc.)"""
+    import time
+    global _query_cache
+    
+    if ttl is None:
+        ttl = _cache_timeout
+    
+    now = time.time()
+    
+    # Verificar si existe en caché y no ha expirado
+    if cache_key in _query_cache:
+        cached_data, timestamp = _query_cache[cache_key]
+        if now - timestamp < ttl:
+            return cached_data
+    
+    # Si no está en caché o expiró, ejecutar query y guardar
+    result = query_func()
+    _query_cache[cache_key] = (result, now)
+    return result
+
+def invalidate_cache(pattern=None):
+    """Invalida caché completo o por patrón"""
+    global _query_cache
+    if pattern is None:
+        _query_cache.clear()
+    else:
+        keys_to_delete = [k for k in _query_cache.keys() if pattern in k]
+        for key in keys_to_delete:
+            del _query_cache[key]
 
 # --- Conector unificado: Turso (libSQL) si hay credenciales, si no SQLite local ---
 def connect_db(timeout: float | None = None):
@@ -60,9 +109,10 @@ def connect_db(timeout: float | None = None):
             import json
 
             class TursoCursor:
-                def __init__(self, url: str, token: str):
+                def __init__(self, url: str, token: str, connection=None):
                     self._url = url
                     self._token = token
+                    self._connection = connection
                     self._result = None
                     self.lastrowid = None
                     self.rowcount = -1
@@ -77,14 +127,17 @@ def connect_db(timeout: float | None = None):
                     else:
                         args = []
                     
+                    # Usar session persistente para mejor rendimiento
+                    session = _get_turso_session()
+                    
                     # Hacer request a la API REST de Turso (v2/pipeline format)
-                    response = requests.post(
+                    response = session.post(
                         self._url,
                         headers={
-                            "Authorization": f"Bearer {self._token}",
-                            "Content-Type": "application/json"
+                            "Authorization": f"Bearer {self._token}"
                         },
-                        json={"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]}
+                        json={"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]},
+                        timeout=10  # Timeout de 10 segundos
                     )
                     
                     if response.status_code != 200:
@@ -114,6 +167,50 @@ def connect_db(timeout: float | None = None):
                         self.description = None
                     
                     self._fetch_idx = 0
+                    return self
+                
+                def executemany(self, sql: str, params_list: list):
+                    """Ejecuta múltiples queries en un solo batch (mucho más rápido)"""
+                    if not params_list:
+                        return self
+                    
+                    # Construir batch de requests para pipeline
+                    requests_batch = []
+                    for params in params_list:
+                        if params:
+                            args = [{"type": "text", "value": str(v)} for v in params]
+                        else:
+                            args = []
+                        requests_batch.append({
+                            "type": "execute",
+                            "stmt": {"sql": sql, "args": args}
+                        })
+                    
+                    session = _get_turso_session()
+                    response = session.post(
+                        self._url,
+                        headers={
+                            "Authorization": f"Bearer {self._token}"
+                        },
+                        json={"requests": requests_batch},
+                        timeout=30  # Timeout mayor para batch
+                    )
+                    
+                    if response.status_code != 200:
+                        raise Exception(f"Turso API error: {response.status_code} - {response.text}")
+                    
+                    # Para executemany, solo guardamos el último resultado
+                    data = response.json()
+                    results = data.get("results", [])
+                    if results and len(results) > 0:
+                        last_result = results[-1].get("response", {}).get("result", {})
+                        self._result = last_result
+                        self.lastrowid = last_result.get("last_insert_rowid")
+                        self.rowcount = sum(
+                            r.get("response", {}).get("result", {}).get("rows_affected", 0)
+                            for r in results
+                        )
+                    
                     return self
 
                 def fetchall(self):
@@ -151,13 +248,15 @@ def connect_db(timeout: float | None = None):
                     self._token = token
 
                 def cursor(self):
-                    return TursoCursor(self._url, self._token)
+                    return TursoCursor(self._url, self._token, connection=self)
 
                 def commit(self):
                     # No-op: Turso auto-commits
                     pass
 
                 def close(self):
+                    # No cerramos la session para que se reutilice entre conexiones
+                    # La session se mantendrá viva durante toda la ejecución de la app
                     pass
 
             # Convertir URL: libsql://xxx o wss://xxx -> https://xxx
@@ -173,6 +272,40 @@ def connect_db(timeout: float | None = None):
             return sqlite3.connect(DB_NAME, timeout=timeout if timeout is not None else 5)
     # Fallback por defecto: SQLite local
     return sqlite3.connect(DB_NAME, timeout=timeout if timeout is not None else 5)
+
+def optimize_database():
+    """Crea índices en la base de datos para mejorar el rendimiento de consultas"""
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # Índices para búsquedas frecuentes en rma_maestro
+        indices = [
+            "CREATE INDEX IF NOT EXISTS idx_rma_codigo ON rma_maestro(codigo_rma)",
+            "CREATE INDEX IF NOT EXISTS idx_rma_cliente ON rma_maestro(cliente)",
+            "CREATE INDEX IF NOT EXISTS idx_rma_estado ON rma_maestro(estado)",
+            "CREATE INDEX IF NOT EXISTS idx_rma_doc_cliente ON rma_maestro(numero_documento_cliente)",
+            "CREATE INDEX IF NOT EXISTS idx_rma_fecha ON rma_maestro(fecha_emision)",
+            # Índices para rma_detalles
+            "CREATE INDEX IF NOT EXISTS idx_detalle_rma_id ON rma_detalles(rma_id)",
+            # Índices para rma_historial
+            "CREATE INDEX IF NOT EXISTS idx_historial_rma_id ON rma_historial(rma_id)",
+            # Índices para rma_adjuntos
+            "CREATE INDEX IF NOT EXISTS idx_adjuntos_rma_id ON rma_adjuntos(rma_id)",
+        ]
+        
+        for idx_sql in indices:
+            try:
+                cursor.execute(idx_sql)
+            except Exception as e:
+                # Algunos índices pueden fallar en Turso, continuar
+                print(f"Info: {e}")
+        
+        conn.commit()
+        conn.close()
+        print("✅ Índices de base de datos optimizados")
+    except Exception as e:
+        print(f"Error al crear índices: {e}")
 
 # --- NUEVA VARIABLE GLOBAL ---
 ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
@@ -730,13 +863,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
         cursor = conn.cursor()
         
         try:
-            # 1. OBTENER ESTADOS ÚNICOS PARA EL FILTRO
+            # 1. OBTENER ESTADOS ÚNICOS PARA EL FILTRO - CON CACHÉ
             # Solo hacemos esto si el filtro_estado ya existe (es decir, en mostrar_lista_rma ya se creó la interfaz)
             if hasattr(self, 'filtro_estado'):
                 try:
-                    # Consultar todos los valores únicos y no nulos de la columna 'estado'
-                    cursor.execute("SELECT DISTINCT estado FROM rma_maestro WHERE estado IS NOT NULL AND estado != '' ORDER BY estado ASC")
-                    estados_db = [fila[0] for fila in cursor.fetchall()]
+                    # Usar caché para estados (se actualiza cada 5 minutos o al invalidar)
+                    def query_estados():
+                        cursor.execute("SELECT DISTINCT estado FROM rma_maestro WHERE estado IS NOT NULL AND estado != '' ORDER BY estado ASC")
+                        return [fila[0] for fila in cursor.fetchall()]
+                    
+                    estados_db = _get_cached_query('estados_rma', query_estados)
                     
                     # Crear la lista final de opciones: "Todos" + estados únicos de la DB
                     estados_posibles = ["Todos"] + estados_db
@@ -1825,21 +1961,28 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Obtener el ID del RMA recién creado
             rma_id_generado = cursor.lastrowid
             
-            # 3b. Inserción en rma_detalles
+            # 3b. Inserción en rma_detalles - OPTIMIZADO con executemany
             if self.articulos_data:
+                # Preparar todos los artículos para inserción batch
+                primer_articulo = self.articulos_data[0].copy()
+                primer_articulo['rma_id'] = rma_id_generado
+                
+                columnas_detalle = ', '.join(primer_articulo.keys())
+                placeholders_detalle = ', '.join('?' * len(primer_articulo))
+                
+                # Preparar lista de valores para executemany
+                valores_batch = []
                 for articulo in self.articulos_data:
-                    articulo['rma_id'] = rma_id_generado
-                    
-                    # Mapeo simple de diccionario a tupla de valores
-                    columnas_detalle = ', '.join(articulo.keys())
-                    placeholders_detalle = ', '.join('?' * len(articulo))
-                    valores_detalle = tuple(articulo.values())
-                    
-                    cursor.execute(f"""
-                        INSERT INTO rma_detalles ({columnas_detalle}) 
-                        VALUES ({placeholders_detalle})
-                    """, valores_detalle)
-                print(f"✅ Detalles de {len(self.articulos_data)} artículos guardados.")
+                    articulo_copia = articulo.copy()
+                    articulo_copia['rma_id'] = rma_id_generado
+                    valores_batch.append(tuple(articulo_copia.values()))
+                
+                # Insertar todos los artículos en una sola llamada (mucho más rápido con Turso)
+                cursor.executemany(f"""
+                    INSERT INTO rma_detalles ({columnas_detalle}) 
+                    VALUES ({placeholders_detalle})
+                """, valores_batch)
+                print(f"✅ Detalles de {len(self.articulos_data)} artículos guardados (batch).")
 
             # 3c. Inserción en rma_historial (modificar descripción si no hay artículos)
             num_articulos = len(self.articulos_data)
@@ -1850,6 +1993,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
             """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
 
             conn.commit()
+            
+            # Invalidar caché de estados (puede que se haya creado un nuevo estado)
+            invalidate_cache('estados_rma')
+            
             print(f"✅ RMA {datos_maestro['codigo_rma']} guardado exitosamente.")
             messagebox.showinfo("Expediente Guardado", "El expediente se ha guardado correctamente.")
             
@@ -2151,24 +2298,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn.close()
                 return
 
-        # 5. Actualizar rma_detalles (Borrar antiguos e Insertar nuevos)
+        # 5. Actualizar rma_detalles (Borrar antiguos e Insertar nuevos) - OPTIMIZADO
         try:
             # Borrar todos los detalles existentes
             cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
             
-            # Insertar los detalles de la lista temporal del formulario
+            # Insertar los detalles de la lista temporal del formulario - BATCH
             if self.articulos_data:
+                primer_articulo = self.articulos_data[0].copy()
+                primer_articulo['rma_id'] = rma_id
+                
+                columnas_detalle = ', '.join(primer_articulo.keys())
+                placeholders_detalle = ', '.join('?' * len(primer_articulo))
+                
+                # Preparar lista de valores para executemany
+                valores_batch = []
                 for articulo in self.articulos_data:
-                    articulo['rma_id'] = rma_id
-                    
-                    columnas_detalle = ', '.join(articulo.keys())
-                    placeholders_detalle = ', '.join('?' * len(articulo))
-                    valores_detalle = tuple(articulo.values())
-                    
-                    cursor.execute(f"""
-                        INSERT INTO rma_detalles ({columnas_detalle}) 
-                        VALUES ({placeholders_detalle})
-                    """, valores_detalle)
+                    articulo_copia = articulo.copy()
+                    articulo_copia['rma_id'] = rma_id
+                    valores_batch.append(tuple(articulo_copia.values()))
+                
+                # Insertar todos los artículos en batch (mucho más rápido)
+                cursor.executemany(f"""
+                    INSERT INTO rma_detalles ({columnas_detalle}) 
+                    VALUES ({placeholders_detalle})
+                """, valores_batch)
                     
                 self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", f"Lista Nueva ({len(self.articulos_data)} items)")
             
@@ -2184,9 +2338,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             conn.close()
             return
             
-        # 6. Commit final y retorno a la lista
+        # 6. Commit final, invalidar caché y retorno a la lista
         conn.commit()
         conn.close()
+        
+        # Invalidar caché de estados (puede que se haya actualizado el estado)
+        invalidate_cache('estados_rma')
         self.mostrar_lista_rma()
     
     def mostrar_historial(self, parent_frame):
@@ -4400,6 +4557,10 @@ if __name__ == "__main__":
         print("🚨 Error Crítico: No se encuentra el archivo de base de datos 'rma_app.db'.")
         print("Asegúrate de ejecutar primero 'python db_setup.py'.")
         sys.exit(1)
-        
+    
+    # Optimizar base de datos al inicio (crear índices)
+    print("🔧 Optimizando base de datos...")
+    optimize_database()
+    
     app = LoginApp()
     app.mainloop()
