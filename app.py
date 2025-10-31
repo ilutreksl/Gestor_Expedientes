@@ -37,6 +37,14 @@ try:
 except Exception:
     ToastNotifier = None
 
+# Módulo para rellenado de PDFs
+try:
+    from lib.pdf_fill import fill_pdf_for_rma, get_pdf_field_names
+except Exception:
+    # Si no está instalado/ disponible aún, seguiremos sin la funcionalidad
+    fill_pdf_for_rma = None
+    get_pdf_field_names = None
+
 # Definición de las variables globales de la base de datos
 DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
@@ -1559,6 +1567,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.entry_Obs_Tecnica = ctk.CTkTextbox(info_tecnica_frame, height=120, wrap="word")
         self.entry_Obs_Tecnica.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
 
+        # Botón para generar la Solicitud de RMA desde la plantilla PDF
+        ctk.CTkButton(
+            info_tecnica_frame,
+            text="Generar Solicitud de RMA",
+            command=self.autorrellena_pdf
+        ).grid(row=5, column=1, padx=10, pady=(8, 12), sticky="e")
+
         # C) PESTAÑA ARTÍCULOS (Mantener la lógica de listado y añadir artículo)
         articulos_tab.grid_columnconfigure(0, weight=1)
         articulos_frame = ctk.CTkFrame(articulos_tab) # Este marco no necesita scroll, la lista interna sí
@@ -2075,6 +2090,141 @@ class VentanaPrincipal(ctk.CTkToplevel):
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
         
         return datos_maestro
+
+    def autorrellena_pdf(self):
+        """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda como adjunto.
+
+        Busca primero 'Plantilla_RMA.pdf' en la carpeta plantillas/. Si no existe, abre
+        un diálogo para seleccionar la plantilla. Luego llama a la función de librería
+        para rellenar el PDF y registra el archivo en la tabla rma_adjuntos.
+        """
+        # Validaciones
+        if not hasattr(self, 'current_rma_id') or not self.current_rma_id:
+            messagebox.showwarning("Guardar primero", "Guarde el expediente antes de generar el PDF.")
+            return
+
+        # Obtener código RMA del label
+        try:
+            codigo_rma = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        except Exception:
+            messagebox.showerror("Error", "No se pudo determinar el código RMA.")
+            return
+
+        # Determinar plantilla por defecto
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        plantilla_def = os.path.join(base_dir, 'plantillas', 'Plantilla_RMA.pdf')
+        if os.path.exists(plantilla_def):
+            plantilla_path = plantilla_def
+        else:
+            # Pedir al usuario que seleccione la plantilla
+            plantilla_path = filedialog.askopenfilename(title='Seleccionar plantilla PDF', initialdir=os.path.join(base_dir, 'plantillas'), filetypes=[('PDF files', '*.pdf')])
+            if not plantilla_path:
+                return
+
+        # Comprobar que la función de relleno esté disponible
+        if fill_pdf_for_rma is None:
+            messagebox.showerror("Dependencia falta", "La funcionalidad de rellenado PDF no está disponible. Instala la dependencia o revisa el módulo lib.pdf_fill.")
+            return
+
+        # Preparar rutas de salida
+        carpeta_destino = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        # Nombre base requerido por el usuario: <CODIGO_RMA>_Solicitud_RMA.pdf
+        nombre_base = f"{codigo_rma}_Solicitud_RMA.pdf"
+        nombre_salida = nombre_base
+        # Si el archivo ya existe, añadimos timestamp para evitar sobrescribir
+        if os.path.exists(os.path.join(carpeta_destino, nombre_salida)):
+            fecha_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            nombre_salida = f"{codigo_rma}_Solicitud_RMA_{fecha_str}.pdf"
+        ruta_salida = os.path.join(carpeta_destino, nombre_salida)
+
+        # Llamar a la librería para rellenar y aplanar según requisitos del usuario
+        try:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_NAME)
+            # Mapping explícito solicitado:
+            mapping = {
+                # Asignar el campo PDF "Ubicación de las fuentes en la instalación" a db:obs_tecnica
+                'Ubicación de las fuentes en la instalación': 'db:obs_tecnica',
+                # Serial
+                'N mero de serie': 'db:n_serie',
+                # Referencia para devolución -> código RMA
+                'Referencia para devoluci n': 'db:codigo_rma',
+                'Referencia para devolución': 'db:codigo_rma',
+                # No mapear Email para preservar el valor que ya contiene la plantilla (se indica en skip_fields)
+            }
+
+            # Campos que queremos que queden editables en el PDF final
+            exclude_from_flatten = [
+                'Cantidad afectada', 'N Pedido', 'Nº RMA', 'N° RMA', 'N RMA', 'N� RMA',
+                'N� de pedido  Albar�n', 'N� de pedido Albar�n', 'N Pedido Albarán', 'N� de pedido Albaran'
+            ]
+
+            # Forzar que ciertos campos queden vacíos y editables
+            force_empty = [
+                'Cantidad afectada', 'N Pedido', 'N� de pedido  Albar�n', 'N� de pedido Albar�n',
+                'N Pedido Albarán', 'N� de pedido Albaran', 'Nº RMA'
+            ]
+
+            # Campos a NO sobreescribir (preservar tal como están en la plantilla)
+            skip_fields = [
+                'Empresa', 'Dirección de entrega', 'Persona de contactoDepartamento', 'Teléfono', 'Email',
+                'Nº de pedido  Albarán', 'Nº de pedido Albarán', 'N Pedido Albarán', 'Nº de pedido Albaran'
+            ]
+
+            salida_generada = fill_pdf_for_rma(
+                db_path, codigo_rma, plantilla_path, ruta_salida,
+                mapping=mapping,
+                flatten=True,
+                exclude_from_flatten=exclude_from_flatten,
+                force_empty_fields=force_empty,
+                skip_fields=skip_fields
+            )
+        except Exception as e:
+            messagebox.showerror("Error Rellenado", f"Error al rellenar la plantilla: {e}")
+            return
+
+        # Registrar en la base de datos como adjunto
+        ruta_relativa = os.path.join(codigo_rma, nombre_salida)
+        try:
+            conn, cursor = self.master.conectar_db()
+            cursor.execute("""
+                INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                self.current_rma_id,
+                nombre_salida,
+                ruta_relativa,
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                self.username
+            ))
+            # También registrar entrada en rma_historial
+            cursor.execute("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (
+                self.current_rma_id,
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                self.username,
+                f"Generada Solicitud RMA: {nombre_salida}"
+            ))
+
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            messagebox.showwarning("Aviso", f"PDF generado en disco, pero no se pudo registrar en la BD: {e}")
+            return
+
+        # Refrescar lista de adjuntos
+        try:
+            self.cargar_lista_adjuntos(self.current_rma_id)
+        except Exception:
+            pass
+
+        # Feedback al usuario
+        try:
+            messagebox.showinfo("Éxito", f"Solicitud generada y adjuntada: {ruta_relativa}")
+        except Exception:
+            # En entornos sin GUI activo, ignorar
+            pass
 
 
     def cargar_datos_rma(self, rma_id):
