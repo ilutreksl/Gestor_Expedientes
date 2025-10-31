@@ -1,96 +1,39 @@
 import customtkinter as ctk
 import tkinter.messagebox as messagebox
 from tkinter import Toplevel
-import sqlite3
 import os
-try:
-    # Carga variables de entorno desde .env si existe (opcional)
-    from dotenv import load_dotenv  # type: ignore
-    load_dotenv()
-except Exception:
-    pass
-import bcrypt
-import sys
-import os 
+import sqlite3
 import datetime
-import webbrowser
-import docx
-import requests
-from dotenv import load_dotenv
-
-# Cargar variables de entorno
-load_dotenv()
-from PIL import Image, ImageTk
-#from tkcalendar import Calendar
-from CTkDatePicker import CTkDatePicker
-
 import tkinter as tk
+from PIL import Image
 
-import pandas as pd
-import locale
-import shutil # Para copiar archivos
-import tkinter.filedialog as filedialog # Para el diálogo de selección de archivos
-import subprocess # Para abrir archivos en diferentes OS
-# Notificaciones nativas (Windows)
+# Optional imports with safe fallbacks
 try:
     from win10toast import ToastNotifier
 except Exception:
     ToastNotifier = None
-
-# Módulo para rellenado de PDFs
 try:
-    from lib.pdf_fill import fill_pdf_for_rma, get_pdf_field_names
+    import bcrypt
 except Exception:
-    # Si no está instalado/ disponible aún, seguiremos sin la funcionalidad
-    fill_pdf_for_rma = None
-    get_pdf_field_names = None
+    bcrypt = None
 
-# Definición de las variables globales de la base de datos
-DB_NAME = "rma_app.db"
-# Mensaje de advertencia sobre la limitación de SQLite en red compartida
-ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
-
-APP_VERSION = "v0.0.40"
+# Nombre del archivo de base de datos por defecto
 DB_FILENAME = "rma_app.db"
+# Ruta absoluta usada internamente para conexiones SQLite
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_FILENAME)
 
-# Session global para Turso (reutiliza conexiones HTTP)
-_turso_session = None
-
-# Caché simple para consultas frecuentes (estados, etc.)
+# Caché simple para queries frecuentes
 _query_cache = {}
-_cache_timeout = 300  # 5 minutos
 
-def _get_turso_session():
-    """Obtiene o crea una sesión HTTP persistente para Turso"""
-    global _turso_session
-    if _turso_session is None:
-        import requests
-        _turso_session = requests.Session()
-        _turso_session.headers.update({
-            "Content-Type": "application/json"
-        })
-    return _turso_session
+# Versión de la aplicación (visible en UI)
+APP_VERSION = "0.0.42"
 
-def _get_cached_query(cache_key, query_func, ttl=None):
-    """Sistema de caché para queries frecuentes (estados, usuarios, etc.)"""
-    import time
-    global _query_cache
-    
-    if ttl is None:
-        ttl = _cache_timeout
-    
-    now = time.time()
-    
-    # Verificar si existe en caché y no ha expirado
-    if cache_key in _query_cache:
-        cached_data, timestamp = _query_cache[cache_key]
-        if now - timestamp < ttl:
-            return cached_data
-    
-    # Si no está en caché o expiró, ejecutar query y guardar
-    result = query_func()
-    _query_cache[cache_key] = (result, now)
-    return result
+from tkinter import filedialog
+import shutil
+import subprocess
+import sys
+import webbrowser
+import locale
 
 def invalidate_cache(pattern=None):
     """Invalida caché completo o por patrón"""
@@ -652,14 +595,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.btn_tareas.grid(row=fila, column=0, padx=20, pady=10)
         fila += 1
 
-        # Botón Gestión RMP (Proveedores -> Expedientes)
-        self.btn_gestion_rmp = ctk.CTkButton(self.sidebar_frame,
-                                             text="🔁 Gestión RMP",
-                                             command=self.mostrar_gestion_rmp,
-                                             font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_gestion_rmp.grid(row=fila, column=0, padx=20, pady=10)
-        fila += 1
-
         self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
                                         text="Backup BD",
                                         command=self.crear_copia_seguridad_db,
@@ -672,7 +607,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                           command=self.mostrar_formulario_github,
                                           font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
         self.btn_reportar.grid(row=fila, column=0, padx=20, pady=10)
-        
+        fila += 1
+
+        # Botón para Gestión RMP (lista de proveedores y expedientes asociados)
+        self.btn_gestion_rmp = ctk.CTkButton(self.sidebar_frame,
+                                            text="🔁 Gestión RMP",
+                                            command=self.mostrar_gestion_rmp,
+                                            font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_gestion_rmp.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
         # --- Contenido Principal (Columna 1) ---
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
@@ -3439,204 +3382,241 @@ class VentanaPrincipal(ctk.CTkToplevel):
         actualizar_lista_tareas()
 
     def mostrar_gestion_rmp(self):
-        """Ventana para listar proveedores (rmp_proveedores) y permitir acciones: búsqueda, orden, editar estado y ver expedientes asociados."""
-        # Evitar abrir múltiples instancias
-        if hasattr(self, 'gestion_rmp_window') and getattr(self, 'gestion_rmp_window').winfo_exists():
-            getattr(self, 'gestion_rmp_window').focus()
+        """Abre una ventana con el listado de proveedores (columna rma_proveedor).
+        Al hacer click en un proveedor se abre una segunda ventana con los expedientes
+        asociados. Desde esa ventana se puede abrir un expediente para editarlo en la
+        vista principal.
+        """
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Gestión RMP - Proveedores")
+        ventana.geometry("480x600")
+        ventana.grab_set()
+
+        frame = ctk.CTkFrame(ventana)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(frame, text="Proveedores (rma_proveedor)", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(0,10))
+
+        # Campo de búsqueda de proveedores
+        buscador_frame = ctk.CTkFrame(frame)
+        buscador_frame.pack(fill="x", padx=8, pady=(0,8))
+        ctk.CTkLabel(buscador_frame, text="Buscar proveedor:").grid(row=0, column=0, padx=(4,8), pady=4, sticky="w")
+        prov_search_var = ctk.StringVar()
+        prov_search_entry = ctk.CTkEntry(buscador_frame, textvariable=prov_search_var, placeholder_text="Nombre proveedor...", width=320)
+        prov_search_entry.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+        scroll = ctk.CTkScrollableFrame(frame)
+        scroll.pack(fill="both", expand=True)
+
+        try:
+            conn = connect_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT rma_proveedor FROM rma_maestro WHERE rma_proveedor IS NOT NULL AND rma_proveedor != '' ORDER BY rma_proveedor ASC")
+            proveedores = [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            messagebox.showerror("Error BD", f"Error cargando proveedores: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
             return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
-        self.gestion_rmp_window = ctk.CTkToplevel(self)
-        win = self.gestion_rmp_window
-        win.title("Gestión RMP - Proveedores")
-        win.geometry("1000x650")
-        win.grab_set()
+        proveedores_display = []
 
-        main = ctk.CTkFrame(win)
-        main.pack(fill="both", expand=True, padx=12, pady=12)
-
-        header = ctk.CTkFrame(main)
-        header.pack(fill="x", pady=(0,8))
-
-        ctk.CTkLabel(header, text="Listado de Proveedores", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
-
-        # Búsqueda
-        ctk.CTkLabel(header, text="Buscar:").grid(row=1, column=0, sticky="w", pady=(8,0))
-        entry_buscar = ctk.CTkEntry(header, placeholder_text="Escriba parte del nombre del proveedor...")
-        entry_buscar.grid(row=1, column=1, sticky="ew", padx=(8,0), pady=(8,0))
-        header.grid_columnconfigure(1, weight=1)
-
-        btn_buscar = ctk.CTkButton(header, text="🔎", width=40)
-        btn_buscar.grid(row=1, column=2, padx=(8,0), pady=(8,0))
-
-        list_frame = ctk.CTkFrame(main)
-        list_frame.pack(fill="both", expand=True)
-
-        scroll = ctk.CTkScrollableFrame(list_frame)
-        scroll.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Estado de ordenación
-        sort_state = {'col': 'nombre', 'dir': 'asc'}
-
-        def cargar_proveedores():
-            """Carga la lista de proveedores EXTRAÍDOS de rma_maestro.rma_proveedor (DISTINCT)."""
+        def actualizar_proveedores():
+            # Filtrar por texto
+            term = prov_search_var.get().strip().lower()
             for w in scroll.winfo_children():
                 w.destroy()
-            filtro = entry_buscar.get().strip()
+
+            if term:
+                filt = [p for p in proveedores if term in str(p).lower()]
+            else:
+                filt = proveedores[:]
+
+            if not filt:
+                ctk.CTkLabel(scroll, text="No se encontraron proveedores.", text_color="gray").pack(pady=10)
+                return
+
+            for prov in filt:
+                btn = ctk.CTkButton(scroll, text=str(prov), anchor="w",
+                                    command=lambda p=prov, w=ventana: self.mostrar_expedientes_proveedor(p, w))
+                btn.pack(fill="x", padx=8, pady=4)
+
+        # Bind búsqueda
+        prov_search_entry.bind("<KeyRelease>", lambda e: actualizar_proveedores())
+
+        # Mostrar inicialmente
+        actualizar_proveedores()
+
+    def mostrar_expedientes_proveedor(self, proveedor, proveedores_window=None):
+        """Muestra los expedientes asociados a un proveedor. Al pinchar 'Editar'
+        se cierra la(s) ventana(s) modales y se abre el expediente en el editor
+        principal usando mostrar_nuevo_rma(rma_id).
+        """
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Expedientes - {proveedor}")
+        ventana.geometry("900x600")
+        ventana.grab_set()
+
+        frame = ctk.CTkFrame(ventana)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(frame, text=f"Expedientes para: {proveedor}", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(0,8))
+
+        scroll = ctk.CTkScrollableFrame(frame)
+        scroll.pack(fill="both", expand=True)
+
+        try:
+            conn = connect_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, codigo_rma, cliente, estado, fecha_emision FROM rma_maestro WHERE rma_proveedor = ?",
+                (proveedor,)
+            )
+            registros = cursor.fetchall()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"Error cargando expedientes: {e}")
             try:
-                conn = connect_db()
-                cur = conn.cursor()
-
-                sql = "SELECT DISTINCT rma_proveedor FROM rma_maestro WHERE rma_proveedor IS NOT NULL AND rma_proveedor != ''"
-                params = ()
-                if filtro:
-                    sql += " AND lower(rma_proveedor) LIKE ?"
-                    params = (f"%{filtro.lower()}%",)
-
-                # Orden por proveedor (asc/desc)
-                direction = 'ASC' if sort_state.get('dir', 'asc') == 'asc' else 'DESC'
-                sql += f" ORDER BY rma_proveedor {direction}"
-
-                cur.execute(sql, params)
-                rows = cur.fetchall()
                 conn.close()
-
-                # Encabezado simple
-                header_row = ctk.CTkFrame(scroll)
-                header_row.pack(fill="x", padx=5, pady=(0,5))
-                header_row.grid_columnconfigure(0, weight=1)
-                header_row.grid_columnconfigure(1, weight=0, minsize=120)
-
-                hf = ctk.CTkFont(weight="bold")
-                lbl_nom = ctk.CTkLabel(header_row, text="PROVEEDOR", font=hf, anchor="w", cursor="hand2")
-                lbl_nom.grid(row=0, column=0, padx=5, sticky="w")
-                ctk.CTkLabel(header_row, text="ACCIONES", font=hf, anchor="center").grid(row=0, column=1, padx=5)
-
-                # Alternar orden al pinchar encabezado
-                def toggle_sort():
-                    sort_state['dir'] = 'desc' if sort_state.get('dir', 'asc') == 'asc' else 'asc'
-                    cargar_proveedores()
-
-                lbl_nom.bind("<Button-1>", lambda e: toggle_sort())
-
-                # Filas
-                colors = ("#FFFFFF", "#F7F7F7")
-                for idx, (prov,) in enumerate(rows):
-                    nombre = prov
-                    bg = colors[idx % 2]
-                    row = ctk.CTkFrame(scroll, fg_color=bg)
-                    row.pack(fill="x", padx=5, pady=2)
-                    row.grid_columnconfigure(0, weight=1)
-                    row.grid_columnconfigure(1, weight=0, minsize=120)
-
-                    lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
-                    lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
-
-                    acciones = ctk.CTkFrame(row, fg_color="transparent")
-                    acciones.grid(row=0, column=1, padx=5)
-                    # Botón Ver Expedientes
-                    ctk.CTkButton(acciones, text="Ver", width=60, command=lambda nombre=nombre: mostrar_expedientes_proveedor(nombre)).pack(side="left", padx=4)
-
-                    # Hover
-                    def on_enter(e, r=row):
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
-                    def on_leave(e, r=row, original_bg=bg):
-                        r.configure(fg_color=original_bg)
-
-                    row.bind("<Enter>", on_enter)
-                    row.bind("<Leave>", on_leave)
-                    lbl_nombre.bind("<Enter>", on_enter)
-                    lbl_nombre.bind("<Leave>", on_leave)
-
-                    # Click en nombre abre expedientes
-                    lbl_nombre.bind("<Button-1>", lambda e, nombre=nombre: mostrar_expedientes_proveedor(nombre))
-
-            except sqlite3.Error as e:
-                messagebox.showerror("Error BD", f"No se pudo cargar lista de proveedores: {e}")
-
-        def mostrar_expedientes_proveedor(proveedor_nombre):
-            # Ventana que lista rma_maestro asociados al proveedor y permite editar (doble-clic)
-            vent = ctk.CTkToplevel(self)
-            vent.title(f"Expedientes - {proveedor_nombre}")
-            vent.geometry("1000x650")
-            vent.grab_set()
-
-            cont = ctk.CTkFrame(vent)
-            cont.pack(fill="both", expand=True, padx=10, pady=10)
-
-            ctk.CTkLabel(cont, text=f"Expedientes asociados a: {proveedor_nombre}", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0,8))
-
-            sf = ctk.CTkScrollableFrame(cont)
-            sf.pack(fill="both", expand=True)
-
+            except Exception:
+                pass
+            return
+        finally:
             try:
-                conn = connect_db()
-                cur = conn.cursor()
-                # Buscamos coincidencias por nombre (case-insensitive) o por id/string
-                cur.execute("SELECT id, codigo_rma, cliente, fecha_emision, estado FROM rma_maestro WHERE lower(Rma_Proveedor)=? OR Rma_Proveedor=? ORDER BY fecha_emision DESC", (proveedor_nombre.lower(), proveedor_nombre))
-                filas = cur.fetchall()
                 conn.close()
+            except Exception:
+                pass
 
-                # Encabezado
-                head = ctk.CTkFrame(sf)
-                head.pack(fill="x", padx=5, pady=(0,5))
-                head.grid_columnconfigure(0, weight=1, minsize=180)
-                head.grid_columnconfigure(1, weight=2, minsize=300)
-                head.grid_columnconfigure(2, weight=1, minsize=140)
-                head.grid_columnconfigure(3, weight=1, minsize=140)
+        if not registros:
+            ctk.CTkLabel(scroll, text="No se encontraron expedientes para este proveedor.", text_color="gray").pack(pady=10)
+            return
 
-                hf = ctk.CTkFont(weight="bold")
-                ctk.CTkLabel(head, text="CÓDIGO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="FECHA", font=hf).grid(row=0, column=2, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="ESTADO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
+        # Variables de estado para ordenación
+        sort_by = None  # 'codigo', 'cliente', 'estado', 'fecha'
+        sort_dir = 1    # 1 asc, -1 desc
 
-                colors = ("#FFFFFF", "#F7F7F7")
-                for idx, (rma_id, codigo, cliente, fecha, estado) in enumerate(filas):
-                    bg = colors[idx % 2]
-                    row = ctk.CTkFrame(sf, fg_color=bg)
-                    row.pack(fill="x", padx=5, pady=2)
-                    row.grid_columnconfigure(0, weight=1, minsize=180)
-                    row.grid_columnconfigure(1, weight=2, minsize=300)
-                    row.grid_columnconfigure(2, weight=1, minsize=140)
-                    row.grid_columnconfigure(3, weight=1, minsize=140)
-                    row.grid_columnconfigure(4, weight=0, minsize=100)
+        # Encabezado (frame separado para botones de orden)
+        # Dar un fondo suave para que el texto del header sea siempre visible
+        header_bg = "#ECEFF1"  # tono gris claro y neutro
+        header = ctk.CTkFrame(scroll, fg_color=header_bg)
+        header.pack(fill="x", padx=4, pady=(4,6))
+        # Configurar columnas del header para que coincidan con las de las filas
+        # Usamos minsize/weight similares a los rows para mantener alineación
+        header.grid_columnconfigure(0, weight=2, minsize=140)  # Código
+        header.grid_columnconfigure(1, weight=3, minsize=220)  # Cliente
+        header.grid_columnconfigure(2, weight=1, minsize=120)  # Estado
+        header.grid_columnconfigure(3, weight=1, minsize=140)  # Fecha
+        header.grid_columnconfigure(4, weight=0, minsize=100)  # Acciones
 
-                    lbl_codigo = ctk.CTkLabel(row, text=codigo, anchor="w", cursor="hand2")
-                    lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
-                    lbl_cliente = ctk.CTkLabel(row, text=cliente if cliente else "-", anchor="w")
-                    lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
-                    lbl_fecha = ctk.CTkLabel(row, text=fecha if fecha else "-", anchor="w")
-                    lbl_fecha.grid(row=0, column=2, padx=5, sticky="w")
-                    lbl_estado = ctk.CTkLabel(row, text=estado if estado else "-", anchor="w")
-                    lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
+        rows_widgets = []
 
-                    acciones = ctk.CTkFrame(row, fg_color="transparent")
-                    acciones.grid(row=0, column=4, padx=5)
-                    # Botón Editar que abre el expediente en el panel principal
-                    ctk.CTkButton(acciones, text="Editar", width=80, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
+        def ordenar_registros(key):
+            nonlocal sort_by, sort_dir, registros
+            if sort_by == key:
+                sort_dir *= -1
+            else:
+                sort_by = key
+                sort_dir = 1
 
-                    # Hover
-                    def on_enter(e, r=row):
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
-                    def on_leave(e, r=row, original_bg=bg):
-                        r.configure(fg_color=original_bg)
+            key_map = {
+                'codigo': lambda r: (r[1] or ""),
+                'cliente': lambda r: (r[2] or ""),
+                'estado': lambda r: (r[3] or ""),
+                'fecha': lambda r: (r[4] or "")
+            }
+            kfunc = key_map.get(key, lambda r: r[0])
+            registros = sorted(registros, key=kfunc, reverse=(sort_dir == -1))
+            draw_rows()
 
-                    row.bind("<Enter>", on_enter)
-                    row.bind("<Leave>", on_leave)
+        # Encabezados interactivos (click para ordenar)
+        header_font = ctk.CTkFont(weight="bold")
+        for idx, (text, key) in enumerate([("CÓDIGO RMA", 'codigo'), ("CLIENTE", 'cliente'), ("ESTADO", 'estado'), ("FECHA EMISIÓN", 'fecha'), ("ACCIONES", None)]):
+            if key:
+                # Botones con fondo igual al header (sin borde) y texto oscuro para legibilidad
+                btn = ctk.CTkButton(
+                    header,
+                    text=text,
+                    command=lambda k=key: ordenar_registros(k),
+                    fg_color=header_bg,
+                    hover_color="#E0E0E0",
+                    text_color="#222222",
+                    corner_radius=0,
+                    border_width=0
+                )
+                btn.grid(row=0, column=idx, padx=6, sticky="w")
+            else:
+                ctk.CTkLabel(header, text=text, font=header_font, text_color="#222222").grid(row=0, column=idx, padx=6, sticky="w")
 
-                    # Doble clic también abre editor del RMA
-                    row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
-                    lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+        def draw_rows():
+            # Limpiar filas previas
+            for w in rows_widgets:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            rows_widgets.clear()
 
-            except sqlite3.Error as e:
-                messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}")
+            for i, reg in enumerate(registros):
+                rma_id, codigo_rma, cliente, estado, fecha_emision = reg
+                # Alternating background (single color string)
+                bg = "#FBFBFB" if i % 2 == 0 else "transparent"
+                row_frame = ctk.CTkFrame(scroll, fg_color=bg)
+                row_frame.pack(fill="x", padx=4, pady=2)
+                rows_widgets.append(row_frame)
 
-        # Vincular búsqueda
-        btn_buscar.configure(command=cargar_proveedores)
-        entry_buscar.bind("<Return>", lambda e: cargar_proveedores())
+                # Configure columns to match header so alignment is preserved
+                row_frame.grid_columnconfigure(0, weight=2, minsize=140)
+                row_frame.grid_columnconfigure(1, weight=3, minsize=220)
+                row_frame.grid_columnconfigure(2, weight=1, minsize=120)
+                row_frame.grid_columnconfigure(3, weight=1, minsize=140)
+                row_frame.grid_columnconfigure(4, weight=0, minsize=100)
+                lbl_codigo = ctk.CTkLabel(row_frame, text=codigo_rma, anchor="w")
+                lbl_codigo.grid(row=0, column=0, padx=6, sticky="w")
+                lbl_cliente = ctk.CTkLabel(row_frame, text=cliente, anchor="w")
+                lbl_cliente.grid(row=0, column=1, padx=6, sticky="w")
+                lbl_estado = ctk.CTkLabel(row_frame, text=estado, anchor="w")
+                lbl_estado.grid(row=0, column=2, padx=6, sticky="w")
+                lbl_fecha = ctk.CTkLabel(row_frame, text=fecha_emision, anchor="w")
+                lbl_fecha.grid(row=0, column=3, padx=6, sticky="w")
 
-        # Cargar inicialmente
-        cargar_proveedores()
+                def make_open(rid=rma_id, w1=ventana, w2=proveedores_window):
+                    def _open(e=None):
+                        # Cerrar modales si existen
+                        try:
+                            w1.destroy()
+                        except Exception:
+                            pass
+                        try:
+                            if w2 and isinstance(w2, (ctk.CTkToplevel, Toplevel)):
+                                w2.destroy()
+                        except Exception:
+                            pass
+
+                        # Abrir el expediente en la vista principal
+                        try:
+                            self.mostrar_nuevo_rma(rid)
+                        except Exception as e:
+                            messagebox.showerror("Error", f"No se pudo abrir el expediente: {e}")
+
+                    return _open
+
+                # Edit button
+                btn_edit = ctk.CTkButton(row_frame, text="Editar", width=80, command=make_open())
+                btn_edit.grid(row=0, column=4, padx=6)
+
+                # Double-click to open
+                row_frame.bind("<Double-Button-1>", make_open())
+                lbl_codigo.bind("<Double-Button-1>", make_open())
+                lbl_cliente.bind("<Double-Button-1>", make_open())
+
+        # Initial draw
+        draw_rows()
 
     def comprobar_tareas_vencidas(self):
         """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
