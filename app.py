@@ -466,7 +466,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # ---------------------
         
         self.title(f"Gestión de Expedientes - Bienvenido {self.username} ({self.rol})")
-        self.geometry("1200x700")
+        
+        # Maximizar ventana al abrir (el usuario puede minimizar si quiere)
+        self.state('zoomed')  # Windows
+        # self.attributes('-zoomed', True)  # Linux (descomentar si se usa Linux)
+        
         # Inicializar notificador de sistema si está disponible
         try:
             if ToastNotifier:
