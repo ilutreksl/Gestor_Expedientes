@@ -9,3 +9,10 @@ __pycache__/
 # Archivos del sistema
 .DS_Store
 Thumbs.db
+# Carpetas a ignorar
+Adjuntos_RMA/
+plantillas/
+
+# Archivos a ignorar
+rma_app.db
+APP_Gestor.pyw
