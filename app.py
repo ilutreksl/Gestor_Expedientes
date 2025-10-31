@@ -42,7 +42,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.38"
+APP_VERSION = "v0.0.40"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -352,9 +352,13 @@ class LoginApp(ctk.CTk):
 
         self.username_entry = ctk.CTkEntry(login_frame, placeholder_text="Nombre de Usuario")
         self.username_entry.pack(pady=12, padx=10)
+        # Permitir login con ENTER desde el campo de usuario
+        self.username_entry.bind("<Return>", lambda event: self.verificar_login())
 
         self.password_entry = ctk.CTkEntry(login_frame, placeholder_text="Contraseña", show="*")
         self.password_entry.pack(pady=12, padx=10)
+        # Permitir login con ENTER desde el campo de contraseña
+        self.password_entry.bind("<Return>", lambda event: self.verificar_login())
 
         login_button = ctk.CTkButton(login_frame, 
                                   text="Iniciar Sesión", 
@@ -3172,21 +3176,79 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 filas = cur.fetchall()
                 conn.close()
 
-                for tid, codigo, titulo, desc, fecha_v, estado, creador in filas:
-                    row = ctk.CTkFrame(scroll)
-                    row.pack(fill="x", padx=5, pady=3)
-                    lbl = ctk.CTkLabel(row, text=f"{titulo} [{codigo}] - {estado} - Vence: {fecha_v if fecha_v else 'Sin fecha'}")
-                    lbl.pack(side="left", padx=5)
-                    # Hacer clic en el label para abrir el expediente asociado
-                    lbl.bind("<Button-1>", lambda e, c=codigo: abrir_expediente_por_codigo(c))
-                    # Botones acción
+                # Encabezados de tabla con estructura en columnas
+                header = ctk.CTkFrame(scroll)
+                header.pack(fill="x", padx=5, pady=(0, 5))
+                header.grid_columnconfigure(0, weight=2, minsize=200)  # Título
+                header.grid_columnconfigure(1, weight=1, minsize=100)  # Código
+                header.grid_columnconfigure(2, weight=1, minsize=120)  # Estado
+                header.grid_columnconfigure(3, weight=1, minsize=120)  # Vencimiento
+                header.grid_columnconfigure(4, weight=0, minsize=80)   # Acciones
+                
+                header_font = ctk.CTkFont(weight="bold")
+                ctk.CTkLabel(header, text="TÍTULO", font=header_font, anchor="w").grid(row=0, column=0, padx=5, sticky="w")
+                ctk.CTkLabel(header, text="CÓDIGO", font=header_font, anchor="w").grid(row=0, column=1, padx=5, sticky="w")
+                ctk.CTkLabel(header, text="ESTADO", font=header_font, anchor="w").grid(row=0, column=2, padx=5, sticky="w")
+                ctk.CTkLabel(header, text="VENCIMIENTO", font=header_font, anchor="w").grid(row=0, column=3, padx=5, sticky="w")
+                ctk.CTkLabel(header, text="ACCIONES", font=header_font, anchor="center").grid(row=0, column=4, padx=5)
+
+                # Filas de datos
+                for tid, codigo, titulo, desc, fecha_v, estado_tarea, creador in filas:
+                    row = ctk.CTkFrame(scroll, fg_color="transparent")
+                    row.pack(fill="x", padx=5, pady=2)
+                    
+                    # Configurar columnas igual que header
+                    row.grid_columnconfigure(0, weight=2, minsize=200)
+                    row.grid_columnconfigure(1, weight=1, minsize=100)
+                    row.grid_columnconfigure(2, weight=1, minsize=120)
+                    row.grid_columnconfigure(3, weight=1, minsize=120)
+                    row.grid_columnconfigure(4, weight=0, minsize=80)
+                    
+                    # Título - clickeable
+                    titulo_lbl = ctk.CTkLabel(row, text=titulo, anchor="w", cursor="hand2")
+                    titulo_lbl.grid(row=0, column=0, padx=5, sticky="w")
+                    
+                    # Código RMA - clickeable
+                    codigo_lbl = ctk.CTkLabel(row, text=codigo, anchor="w", cursor="hand2")
+                    codigo_lbl.grid(row=0, column=1, padx=5, sticky="w")
+                    
+                    # Estado
+                    estado_lbl = ctk.CTkLabel(row, text=estado_tarea, anchor="w")
+                    estado_lbl.grid(row=0, column=2, padx=5, sticky="w")
+                    
+                    # Fecha vencimiento
+                    fecha_lbl = ctk.CTkLabel(row, text=fecha_v if fecha_v else "Sin fecha", anchor="w")
+                    fecha_lbl.grid(row=0, column=3, padx=5, sticky="w")
+                    
+                    # Efectos hover para toda la fila
+                    def on_enter(e, r=row):
+                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    def on_leave(e, r=row):
+                        r.configure(fg_color="transparent")
+                    
+                    row.bind("<Enter>", on_enter)
+                    row.bind("<Leave>", on_leave)
+                    titulo_lbl.bind("<Enter>", on_enter)
+                    titulo_lbl.bind("<Leave>", on_leave)
+                    codigo_lbl.bind("<Enter>", on_enter)
+                    codigo_lbl.bind("<Leave>", on_leave)
+                    
+                    # Click para abrir expediente
+                    titulo_lbl.bind("<Button-1>", lambda e, c=codigo: abrir_expediente_por_codigo(c))
+                    codigo_lbl.bind("<Button-1>", lambda e, c=codigo: abrir_expediente_por_codigo(c))
+                    
+                    # Botones de acción
+                    acciones_frame = ctk.CTkFrame(row, fg_color="transparent")
+                    acciones_frame.grid(row=0, column=4, padx=5)
+                    
                     def make_done(tid=tid):
                         return lambda: marcar_completada(tid)
                     def make_delete(tid=tid):
                         return lambda: eliminar_tarea(tid)
-                    if estado != "Completado":
-                        ctk.CTkButton(row, text="✅", width=30, command=make_done(tid)).pack(side="right", padx=5)
-                    ctk.CTkButton(row, text="❌", width=30, command=make_delete(tid)).pack(side="right", padx=5)
+                    
+                    if estado_tarea != "Completado":
+                        ctk.CTkButton(acciones_frame, text="✅", width=30, command=make_done(tid)).pack(side="left", padx=2)
+                    ctk.CTkButton(acciones_frame, text="❌", width=30, command=make_delete(tid)).pack(side="left", padx=2)
 
             except sqlite3.Error as e:
                 messagebox.showerror("Error", f"Error cargando tareas: {e}")
