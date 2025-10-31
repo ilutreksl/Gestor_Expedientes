@@ -3459,14 +3459,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         ctk.CTkLabel(header, text="Listado de Proveedores", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
 
-        # Búsqueda
+        # Búsqueda y filtro por estado
         ctk.CTkLabel(header, text="Buscar:").grid(row=1, column=0, sticky="w", pady=(8,0))
         entry_buscar = ctk.CTkEntry(header, placeholder_text="Escriba parte del nombre del proveedor...")
         entry_buscar.grid(row=1, column=1, sticky="ew", padx=(8,0), pady=(8,0))
+        # Filtro por estado
+        ctk.CTkLabel(header, text="Filtrar estado:").grid(row=1, column=2, sticky="w", padx=(12,6), pady=(8,0))
+        estado_filter = ctk.CTkOptionMenu(header, values=["Todos", "En Progreso", "Enviado", "Completado"])
+        estado_filter.set("Todos")
+        estado_filter.grid(row=1, column=3, sticky="w", padx=(0,6), pady=(8,0))
         header.grid_columnconfigure(1, weight=1)
 
         btn_buscar = ctk.CTkButton(header, text="🔎", width=40)
-        btn_buscar.grid(row=1, column=2, padx=(8,0), pady=(8,0))
+        btn_buscar.grid(row=1, column=4, padx=(8,0), pady=(8,0))
 
         list_frame = ctk.CTkFrame(main)
         list_frame.pack(fill="both", expand=True)
@@ -3486,18 +3491,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn = connect_db()
                 cur = conn.cursor()
 
-                sql = "SELECT DISTINCT rma_proveedor FROM rma_maestro WHERE rma_proveedor IS NOT NULL AND rma_proveedor != ''"
-                params = ()
-                if filtro:
-                    sql += " AND lower(rma_proveedor) LIKE ?"
-                    params = (f"%{filtro.lower()}%",)
-
-                # Orden por proveedor (asc/desc)
-                direction = 'ASC' if sort_state.get('dir', 'asc') == 'asc' else 'DESC'
-                sql += f" ORDER BY rma_proveedor {direction}"
-
-                cur.execute(sql, params)
-                rows = cur.fetchall()
                 # Asegurar que exista la tabla de proveedores para persistir estados
                 try:
                     cur.execute("CREATE TABLE IF NOT EXISTS rma_proveedor (id INTEGER PRIMARY KEY, proveedor TEXT UNIQUE, estado TEXT)")
@@ -3505,6 +3498,39 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 except Exception:
                     # Si no podemos crearla en Turso u otro backend, seguimos sin persistencia
                     pass
+
+                # Construir consulta: obtenemos proveedores distintos de rma_maestro
+                # y left-join con rma_proveedor para traer el estado si existe.
+                params = []
+                search_clause = ""
+                if filtro:
+                    search_clause = " AND lower(rma_proveedor) LIKE ?"
+                    params.append(f"%{filtro.lower()}%")
+
+                direction = 'ASC' if sort_state.get('dir', 'asc') == 'asc' else 'DESC'
+
+                sql = (
+                    "SELECT p.proveedor, COALESCE(r.estado, '') as estado "
+                    "FROM (SELECT DISTINCT rma_proveedor AS proveedor FROM rma_maestro WHERE rma_proveedor IS NOT NULL AND rma_proveedor != ''"
+                    + search_clause + ") p "
+                    "LEFT JOIN rma_proveedor r ON lower(p.proveedor) = lower(r.proveedor) "
+                )
+
+                # Aplicar filtro por estado si no es 'Todos'
+                estado_sel = None
+                try:
+                    estado_sel = estado_filter.get()
+                except Exception:
+                    estado_sel = "Todos"
+
+                if estado_sel and estado_sel != "Todos":
+                    sql += " WHERE r.estado = ?"
+                    params.append(estado_sel)
+
+                sql += f" ORDER BY p.proveedor {direction}"
+
+                cur.execute(sql, tuple(params))
+                rows = cur.fetchall()
 
                 conn.close()
 
@@ -3528,7 +3554,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Filas con estado editable (si es posible)
                 colors = ("#FFFFFF", "#F7F7F7")
-                for idx, (prov,) in enumerate(rows):
+                for idx, (prov, estado_actual) in enumerate(rows):
                     nombre = prov
                     bg = colors[idx % 2]
                     row = ctk.CTkFrame(scroll, fg_color=bg)
@@ -3538,20 +3564,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                     lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
                     lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
-
-                    # Obtener estado actual (si existe) desde rma_proveedor
-                    estado_actual = ""
-                    try:
-                        conn2 = connect_db()
-                        cur2 = conn2.cursor()
-                        cur2.execute("SELECT estado FROM rma_proveedor WHERE lower(proveedor)=?", (str(nombre).lower(),))
-                        rr = cur2.fetchone()
-                        if rr:
-                            estado_actual = rr[0] or ""
-                        conn2.close()
-                    except Exception:
-                        estado_actual = ""
-
                     opciones_estado = ["", "En Progreso", "Enviado", "Completado"]
                     try:
                         opt = ctk.CTkOptionMenu(row, values=opciones_estado)
@@ -3690,6 +3702,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Vincular búsqueda
         btn_buscar.configure(command=cargar_proveedores)
+        try:
+            estado_filter.configure(command=lambda v=None: cargar_proveedores())
+        except Exception:
+            pass
         entry_buscar.bind("<Return>", lambda e: cargar_proveedores())
 
         # Cargar inicialmente
