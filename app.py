@@ -24,6 +24,11 @@ import locale
 import shutil # Para copiar archivos
 import tkinter.filedialog as filedialog # Para el diálogo de selección de archivos
 import subprocess # Para abrir archivos en diferentes OS
+# Notificaciones nativas (Windows)
+try:
+    from win10toast import ToastNotifier
+except Exception:
+    ToastNotifier = None
 
 # Definición de las variables globales de la base de datos
 DB_NAME = "rma_app.db"
@@ -186,11 +191,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.articulos_data = [] # Lista temporal para los artículos en el formulario
         
         self.crear_tabla_adjuntos() # Aseguramos que la tabla exista
+        self.crear_tabla_tareas()  # Aseguramos que la tabla de tareas exista
         self.verificar_columna_motivo() # NUEVA LÍNEA: Asegura la columna 'motivo' en la DB
         # ---------------------
         
         self.title(f"Gestión de Expedientes - Bienvenido {self.username} ({self.rol})")
         self.geometry("1200x700")
+        # Inicializar notificador de sistema si está disponible
+        try:
+            if ToastNotifier:
+                self.toaster = ToastNotifier()
+            else:
+                self.toaster = None
+        except Exception:
+            self.toaster = None
         
         # ----------------------------------------------------
         # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️
@@ -209,6 +223,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self.cerrar_app)
         
         self.crear_diseno()
+        # Iniciar comprobación periódica de tareas (notificaciones para el creador)
+        try:
+            self.programar_chequeo_tareas()
+        except Exception:
+            pass
 
     def verificar_columna_motivo(self):
         """
@@ -331,6 +350,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                               command=self.mostrar_ventana_estadisticas,
                                               font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
         self.btn_estadisticas.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
+
+        # Botón de Tareas (lista y creación de tareas por expediente)
+        self.btn_tareas = ctk.CTkButton(self.sidebar_frame,
+                                        text="🗒️ Tareas",
+                                        command=self.mostrar_gestion_tareas,
+                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_tareas.grid(row=fila, column=0, padx=20, pady=10)
         fila += 1
 
         self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
@@ -759,6 +786,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.current_rma_id = None
         
         es_edicion = rma_id is not None
+
+        # Garantizar que exista el atributo antes de llamar (evita AttributeError si la función se define más abajo)
+        if not hasattr(self, 'cargar_lista_tareas_rma'):
+            self.cargar_lista_tareas_rma = lambda: None
         
         # --- Cabecera ---
         titulo_texto = "EDITAR EXPEDIENTE" if es_edicion else "CREAR NUEVO EXPEDIENTE"
@@ -793,18 +824,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
         fila1_control_frame.grid_columnconfigure(1, weight=1) # Expansiva para los comentarios
 
         # A) NÚMERO DE EXPEDIENTE (Columna 0)
-        codigo_rma_mostrar = "Cargando..." if es_edicion else self.obtener_siguiente_rma()
+        if es_edicion:
+            # Consultar el código RMA real desde la base de datos
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            cur.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
+            row = cur.fetchone()
+            conn.close()
+            codigo_rma_mostrar = row[0] if row else "(Desconocido)"
+        else:
+            codigo_rma_mostrar = self.obtener_siguiente_rma()
         self.lbl_codigo_rma = ctk.CTkLabel(fila1_control_frame, text=f"Nº EXPEDIENTE: {codigo_rma_mostrar}", 
                      font=ctk.CTkFont(size=18, weight="bold"), 
                      text_color="grey30")
-        # ⚠️ Cambiamos el contenedor a fila1_control_frame
         self.lbl_codigo_rma.grid(row=0, column=0, padx=10, pady=5, sticky="w") 
         
         
         # B) CAJA DE COMENTARIOS (Columna 1)
         comentarios_frame = ctk.CTkFrame(fila1_control_frame, fg_color="transparent") 
         # Cambiamos el contenedor a fila1_control_frame y lo ponemos en column=1
-        comentarios_frame.grid(row=0, column=1, sticky="ew", padx=(20, 10), pady=5)
+        comentarios_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
         comentarios_frame.grid_columnconfigure(0, weight=1) 
 
         # Etiqueta
@@ -856,6 +895,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         info_tecnica_tab = self.tabview.add("🔧 Información Técnica")
         adjuntos_tab = self.tabview.add("📎 Adjuntos (Pendiente)")
         historial_tab = self.tabview.add("📜 Historial de Cambios")
+        # Pestaña de Tareas por RMA (creación/edición desde la ficha del expediente)
+        tareas_tab = self.tabview.add("🗒️ Tareas")
         self.historial_tab = historial_tab
 
         # Configurar todas las pestañas con un marco scrollable (excepto Adjuntos/Historial, si es necesario)
@@ -888,9 +929,277 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # El historial solo se muestra si estamos editando
         if es_edicion:
             self.mostrar_historial(historial_tab)
-        else:
-            self.tabview.delete("📜 Historial de Cambios")
-            self.tabview.delete("📎 Adjuntos (Pendiente)")
+            
+        # Configurar la pestaña de Tareas - siempre visible pero muestra mensaje diferente si es nuevo
+        tareas_scroll = ctk.CTkScrollableFrame(tareas_tab, label_text="Tareas asociadas")
+        tareas_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        tareas_frame = ctk.CTkFrame(tareas_scroll, fg_color="transparent")
+        tareas_frame.pack(fill="x", padx=10, pady=10)
+
+        # Lista de tareas para este RMA
+        # Crear solo una vez el frame y el título
+        self.tareas_list_frame = ctk.CTkFrame(tareas_frame)
+        self.tareas_list_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        tareas_frame.grid_columnconfigure(0, weight=1)
+        self.tareas_title_label = ctk.CTkLabel(self.tareas_list_frame, text="Tareas asociadas", font=("Arial", 14, "bold"))
+        self.tareas_title_label.pack(pady=(10, 5))
+        # Si no es edición, mostramos un mensaje informativo
+        if not es_edicion:
+            ctk.CTkLabel(self.tareas_list_frame, text="Guarde el expediente para poder crear tareas.").pack(pady=10)
+        # Siempre refrescar la lista de tareas al abrir la ficha
+        self.cargar_lista_tareas_rma()
+
+        # Función para refrescar historial tras operaciones
+        def refrescar_historial():
+            self.mostrar_historial(historial_tab)
+
+        # Exponer la función para uso en otras partes
+        self.refrescar_historial = refrescar_historial
+
+        # Botón para crear nueva tarea (auto-llena código RMA y creador)
+        def crear_tarea_en_rma():
+            # Solo permitir si el RMA fue guardado
+            if self.current_rma_id is None:
+                messagebox.showwarning("Guardar primero", "Guarde el expediente antes de crear tareas.")
+                return
+
+            # Abrir un pequeño diálogo para título, descripción y fecha
+            dlg = ctk.CTkToplevel(self)
+            dlg.title("Crear tarea")
+            dlg.geometry("400x300")
+            dlg.grab_set()
+
+            ctk.CTkLabel(dlg, text=f"RMA: {self.lbl_codigo_rma.cget('text').split(': ')[1]}").pack(pady=5)
+            ctk.CTkLabel(dlg, text=f"Creador: {self.username}").pack(pady=5)
+
+            ctk.CTkLabel(dlg, text="Título:").pack(pady=(10,0))
+            titulo_entry = ctk.CTkEntry(dlg)
+            titulo_entry.pack(padx=10, pady=5, fill='x')
+
+            ctk.CTkLabel(dlg, text="Descripción:").pack(pady=(10,0))
+            desc_text = tk.Text(dlg, height=5)
+            desc_text.pack(padx=10, pady=5, fill='both', expand=True)
+
+            ctk.CTkLabel(dlg, text="Fecha Vencimiento (YYYY-MM-DD):").pack(pady=(5,0))
+            fecha_entry = ctk.CTkEntry(dlg)
+            fecha_entry.pack(padx=10, pady=5, fill='x')
+
+            def confirmar_crear():
+                titulo = titulo_entry.get().strip()
+                descripcion = desc_text.get("1.0", "end").strip()
+                fecha_v = fecha_entry.get().strip() or None
+                codigo_rma = self.lbl_codigo_rma.cget('text').split(': ')[1]
+                
+                if not titulo:
+                    messagebox.showerror("Error", "El título es obligatorio.")
+                    return
+                    
+                # Validar formato de fecha
+                if fecha_v:
+                    try:
+                        fecha_obj = datetime.datetime.strptime(fecha_v, "%Y-%m-%d")
+                        if fecha_obj.date() < datetime.date.today():
+                            if not messagebox.askyesno("Advertencia", 
+                                "La fecha de vencimiento es anterior a hoy. ¿Desea continuar?"):
+                                return
+                    except ValueError:
+                        messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD")
+                        return
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT INTO tareas (codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por, creado_en, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                        (codigo_rma, titulo, descripcion, fecha_v, 'Pendiente', self.username, datetime.datetime.now().isoformat())
+                    )
+                    conn.commit()
+                    
+                    # Registrar en historial del RMA
+                    cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+                    rma_row = cur.fetchone()
+                    if rma_row:
+                        rma_id = rma_row[0]
+                        cur.execute("""
+                            INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                            VALUES (?, ?, ?, ?)
+                        """, (rma_id, datetime.datetime.now().isoformat(), self.username,
+                             f"Nueva tarea creada: {titulo}"))
+                        conn.commit()
+                        conn.close()
+                    
+                    dlg.destroy()
+                    # Recargar la lista e historial si corresponde
+                    if hasattr(self, 'cargar_lista_tareas_rma'):
+                        self.cargar_lista_tareas_rma()
+                    if hasattr(self, 'refrescar_historial'):
+                        self.refrescar_historial()
+                    messagebox.showinfo("Éxito", "✅ Tarea creada correctamente")
+                except sqlite3.Error as e:
+                    messagebox.showerror("Error BD", f"No se pudo crear la tarea: {e}")
+                    if 'conn' in locals():
+                        conn.close()
+
+            ctk.CTkButton(dlg, text="Crear", command=confirmar_crear).pack(pady=10)
+
+        # Mostrar el botón de crear solo en modo edición
+        if es_edicion:
+            ctk.CTkButton(tareas_frame, text="➕ Crear Tarea", command=crear_tarea_en_rma).grid(row=1, column=0, sticky="w", padx=5, pady=(5,15))
+
+        def editar_tarea_dialog(task):
+                # task is a dict with task fields
+                dlg = ctk.CTkToplevel(self)
+                dlg.title("Editar tarea")
+                dlg.geometry("420x360")
+                dlg.grab_set()
+
+                ctk.CTkLabel(dlg, text=f"ID: {task['id']} - RMA: {task['codigo_rma']}").pack(pady=5)
+                ctk.CTkLabel(dlg, text="Título:").pack(pady=(10,0))
+                titulo_entry = ctk.CTkEntry(dlg)
+                titulo_entry.insert(0, task['titulo'])
+                titulo_entry.pack(padx=10, pady=5, fill='x')
+
+                ctk.CTkLabel(dlg, text="Descripción:").pack(pady=(10,0))
+                desc_text = tk.Text(dlg, height=6)
+                desc_text.insert('1.0', task['descripcion'] or '')
+                desc_text.pack(padx=10, pady=5, fill='both', expand=True)
+
+                ctk.CTkLabel(dlg, text="Fecha Vencimiento (YYYY-MM-DD):").pack(pady=(5,0))
+                fecha_entry = ctk.CTkEntry(dlg)
+                fecha_entry.insert(0, task.get('fecha_vencimiento') or '')
+                fecha_entry.pack(padx=10, pady=5, fill='x')
+
+                estado_var = ctk.StringVar(value=task.get('estado', 'Pendiente'))
+                estado_opt = ctk.CTkOptionMenu(dlg, values=["Pendiente", "En Progreso", "Completado"], variable=estado_var)
+                estado_opt.pack(pady=5)
+
+                def guardar_edicion():
+                    nuevo_titulo = titulo_entry.get().strip()
+                    nueva_desc = desc_text.get('1.0', 'end').strip()
+                    nueva_fecha = fecha_entry.get().strip() or None
+                    nuevo_estado = estado_var.get()
+                    try:
+                        conn = sqlite3.connect(DB_NAME)
+                        cur = conn.cursor()
+                        cur.execute("UPDATE tareas SET titulo = ?, descripcion = ?, fecha_vencimiento = ?, estado = ? WHERE id = ?",
+                                    (nuevo_titulo, nueva_desc, nueva_fecha, nuevo_estado, task['id']))
+                        conn.commit()
+                        # Registrar en historial del RMA
+                        try:
+                            # Obtener el ID del RMA para el historial
+                            cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (task['codigo_rma'],))
+                            rma_row = cur.fetchone()
+                            if rma_row:
+                                rma_id = rma_row[0]
+                                # Registrar el cambio en el historial
+                                cur.execute("""
+                                    INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                                    VALUES (?, ?, ?, ?)
+                                """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                                     self.username, 
+                                     f"Tarea ID {task['id']} editada - {task['titulo']} -> {nuevo_titulo} (Estado: {nuevo_estado})")
+                                )
+                                conn.commit()
+                        except sqlite3.Error as e:
+                            print(f"Error al registrar historial de tarea: {e}")
+                        conn.close()
+                        dlg.destroy()
+                        self.cargar_lista_tareas_rma()
+                        messagebox.showinfo("Éxito", "✅ Tarea actualizada correctamente")
+                    except sqlite3.Error as e:
+                        messagebox.showerror("Error BD", f"No se pudo actualizar la tarea: {e}")
+
+                ctk.CTkButton(dlg, text="Guardar", command=guardar_edicion).pack(pady=10)
+
+        def eliminar_tarea_rma(task_id, codigo_rma=None, titulo=None):
+            if not messagebox.askyesno("Confirmar", "¿Eliminar esta tarea? Esta acción no se puede deshacer."):
+                return
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                cur.execute("DELETE FROM tareas WHERE id = ?", (task_id,))
+                # Registrar en el historial la eliminación
+                try:
+                    cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+                    rma_row = cur.fetchone()
+                    if rma_row and titulo:
+                        rma_id = rma_row[0]
+                        cur.execute("""
+                            INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                            VALUES (?, ?, ?, ?)
+                        """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                             self.username,
+                             f"Tarea eliminada: {titulo}")
+                        )
+                except Exception as e:
+                    print(f"Error al registrar eliminación en historial: {e}")
+                conn.commit()
+                conn.close()
+                if hasattr(self, 'cargar_lista_tareas_rma'):
+                    self.cargar_lista_tareas_rma()
+                messagebox.showinfo("Eliminada", "❌ Tarea eliminada correctamente")
+            except sqlite3.Error as e:
+                messagebox.showerror("Error BD", f"No se pudo eliminar la tarea: {e}")
+
+        def mostrar_tarea_row(task):
+            row = ctk.CTkFrame(self.tareas_list_frame)
+            row.pack(fill="x", padx=5, pady=3)
+            # Determinar color según vencimiento y estado
+            fecha_v = task.get('fecha_vencimiento')
+            estado = task.get('estado')
+            color_texto = "black"
+            if estado == "Completado":
+                color_texto = "green"
+            elif fecha_v:
+                try:
+                    fecha_venc = datetime.datetime.strptime(fecha_v, "%Y-%m-%d").date()
+                    hoy = datetime.date.today()
+                    dias_restantes = (fecha_venc - hoy).days
+                    if dias_restantes < 0:
+                        color_texto = "red"  # Vencida
+                    elif dias_restantes <= 3:
+                        color_texto = "orange"  # Próxima a vencer
+                except ValueError:
+                    pass
+
+            ctk.CTkLabel(row, 
+                        text=f"{task['titulo']} - Vence: {fecha_v or 'Sin fecha'} - Estado: {estado}",
+                        text_color=color_texto).pack(side='left', padx=5)
+            ctk.CTkButton(row, text="Editar", width=60, command=lambda t=task: editar_tarea_dialog(t)).pack(side='right', padx=5)
+            ctk.CTkButton(row, text="Eliminar", width=60, command=lambda t=task: eliminar_tarea_rma(t['id'], t['codigo_rma'], t['titulo'])).pack(side='right', padx=5)
+
+        def cargar_lista_tareas_rma():
+            # Limpiar solo las filas de tareas, no el título
+            for w in self.tareas_list_frame.winfo_children():
+                if w != self.tareas_title_label:
+                    w.destroy()
+
+            if self.current_rma_id is None:
+                ctk.CTkLabel(self.tareas_list_frame, text="Guarde el expediente para ver las tareas.").pack(pady=10)
+                return
+            try:
+                # Usar el código RMA actual de la ficha
+                codigo = self.lbl_codigo_rma.cget('text').split(': ')[1].strip()
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas WHERE codigo_rma = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (codigo,))
+                filas = cur.fetchall()
+                conn.close()
+
+                if not filas:
+                    ctk.CTkLabel(self.tareas_list_frame, text="No hay tareas asociadas a este RMA.", text_color="gray").pack(pady=10)
+                    return
+                for tid, codigo_rma, titulo, desc, fecha_v, estado, creador in filas:
+                    task = {'id': tid, 'codigo_rma': codigo_rma, 'titulo': titulo, 'descripcion': desc, 'fecha_vencimiento': fecha_v, 'estado': estado, 'creado_por': creador}
+                    mostrar_tarea_row(task)
+            except sqlite3.Error as e:
+                messagebox.showerror("Error BD", f"Error cargando tareas: {e}")
+
+        # Exponer la función para recarga externa
+        self.cargar_lista_tareas_rma = cargar_lista_tareas_rma
+        # Cargar las tareas si estamos en edición
+        if es_edicion:
+            self.cargar_lista_tareas_rma()
+    # Nota: No recrear tareas_scroll aquí para evitar duplicados en la pestaña de Tareas.
             
         # -----------------------------------------------------------
         # -- 2. MOVER LLAMADAS A crear_campo A SUS NUEVOS FRAMES --
@@ -1216,17 +1525,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
         header_frame = ctk.CTkFrame(self.articulos_list_frame)
         header_frame.pack(fill="x")
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado Producto", "P. Unitario", "Acción"]
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unitario", "Acción"]
         weights = [2, 1, 1, 2, 1, 1]
         
         for i, col in enumerate(cols):
-            ctk.CTkLabel(header_frame, text=col, font=ctk.CTkFont(weight="bold")).grid(row=0, column=i, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(header_frame, text=col, font=header_font).grid(row=0, column=i, padx=5, pady=5, sticky="w")
             header_frame.grid_columnconfigure(i, weight=weights[i])
 
         for i, item in enumerate(self.articulos_data):
             row_frame = ctk.CTkFrame(self.articulos_list_frame)
-            row_frame.pack(fill="x")
-            
+            row_frame.pack(fill="x", padx=5, pady=2)
+
             ctk.CTkLabel(row_frame, text=item["referencia_articulo"]).grid(row=0, column=0, padx=5, pady=2, sticky="w")
             ctk.CTkLabel(row_frame, text=item["cantidad_segun_documento"]).grid(row=0, column=1, padx=5, pady=2, sticky="w")
             ctk.CTkLabel(row_frame, text=item["cantidad_entregada"]).grid(row=0, column=2, padx=5, pady=2, sticky="w")
@@ -1236,8 +1545,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             ctk.CTkButton(row_frame, text="X", width=30, fg_color="red", hover_color="darkred", 
                           command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=0, column=5, padx=5, pady=2, sticky="w")
             
-            for j in range(6):
-                row_frame.grid_columnconfigure(j, weight=weights[j])
         # --- NUEVO: Calcular y actualizar el Precio Total en la etiqueta de Contabilidad ---
         precio_total = sum(item.get('cantidad_entregada', 0) * item.get('precio_unitario', 0.0) for item in self.articulos_data)
         
@@ -1444,7 +1751,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         valor = ''
                 
                 # Conversión especial para Autorizacion (SI/NO a 1/0)
-                if campo == 'Autorizacion':
+                if columna == 'Autorizacion':
                     datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
                 else:
                     datos_maestro[campo.lower()] = valor
@@ -1589,6 +1896,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Registra un cambio de un campo en la tabla de historial."""
         conn, cursor = self.master.conectar_db()
         if not conn: return
+
         cursor = conn.cursor()
         
         descripcion = f"Campo '{campo}' modificado: '{valor_antiguo}' -> '{valor_nuevo}'"
@@ -1621,6 +1929,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         rma_id = self.rma_actual_id
         
         # 1. Obtener datos antiguos de la DB
+        cursor.execute("SELECT * FROM rma_maestro WHERE id = ?", (rma_id,))
+        columnas_maestro_db = [col[0] for col in cursor.description]
+        datos_antiguos = dict(zip(columnas_maestro_db, cursor.fetchone()))
+        
+        # 2. Obtener datos nuevos del formulario
         cursor.execute("SELECT * FROM rma_maestro WHERE id = ?", (rma_id,))
         columnas_maestro_db = [col[0] for col in cursor.description]
         datos_antiguos = dict(zip(columnas_maestro_db, cursor.fetchone()))
@@ -1824,6 +2137,33 @@ class VentanaPrincipal(ctk.CTkToplevel):
             print("Tabla 'rma_adjuntos' verificada/creada.")
         except sqlite3.Error as e:
             print(f"Error al crear la tabla 'rma_adjuntos': {e}")
+        finally:
+            conn.close()
+
+
+    def crear_tabla_tareas(self):
+        """Crea la tabla 'tareas' si no existe. Asociada a RMA por código o libre."""
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            return
+        try:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tareas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    codigo_rma TEXT,
+                    titulo TEXT NOT NULL,
+                    descripcion TEXT,
+                    fecha_vencimiento TEXT,
+                    estado TEXT DEFAULT 'Pendiente',
+                    creado_por TEXT,
+                    creado_en TEXT,
+                    notificado INTEGER DEFAULT 0
+                )
+            ''')
+            conn.commit()
+            print("Tabla 'tareas' verificada/creada.")
+        except sqlite3.Error as e:
+            print(f"Error al crear la tabla 'tareas': {e}")
         finally:
             conn.close()
     
@@ -2448,7 +2788,158 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Cargar lista inicial de usuarios
         actualizar_lista_usuarios()
+        # Cargar lista inicial de usuarios
+        actualizar_lista_usuarios()
 
+    def mostrar_gestion_tareas(self):
+        """Ventana para crear y listar tareas relacionadas con expedientes."""
+        # Mostrar solo el listado de tareas y filtros (la creación se hace desde la ficha del expediente)
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Listado de Tareas")
+        ventana.geometry("700x550")
+        ventana.grab_set()
+
+        frame = ctk.CTkFrame(ventana)
+        frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        ctk.CTkLabel(frame, text="Listado de Tareas", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(0,10))
+
+        # Filtros y lista
+        controls = ctk.CTkFrame(frame)
+        controls.pack(fill="x", padx=5, pady=(0,10))
+
+        ctk.CTkLabel(controls, text="Filtrar por estado:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        filtro_estado = ctk.CTkOptionMenu(controls, values=["Todos", "Pendiente", "En Progreso", "Completado"]) 
+        filtro_estado.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        filtro_estado.set("Todos")
+
+        list_frame = ctk.CTkFrame(frame)
+        list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        scroll = ctk.CTkScrollableFrame(list_frame)
+        scroll.pack(fill="both", expand=True, padx=5, pady=5)
+
+        def abrir_expediente_por_codigo(codigo):
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo,))
+                row = cur.fetchone()
+                conn.close()
+                if row:
+                    rma_id = row[0]
+                    # Abrir en panel principal
+                    self.mostrar_nuevo_rma(rma_id=rma_id)
+                    ventana.destroy()
+                else:
+                    messagebox.showwarning("No encontrado", f"No se encontró expediente con código {codigo}")
+            except sqlite3.Error as e:
+                messagebox.showerror("Error BD", f"Error buscando expediente: {e}")
+
+        def actualizar_lista_tareas():
+            for w in scroll.winfo_children():
+                w.destroy()
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                estado = filtro_estado.get()
+                if estado == "Todos":
+                    cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC")
+                else:
+                    cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas WHERE estado = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (estado,))
+                filas = cur.fetchall()
+                conn.close()
+
+                for tid, codigo, titulo, desc, fecha_v, estado, creador in filas:
+                    row = ctk.CTkFrame(scroll)
+                    row.pack(fill="x", padx=5, pady=3)
+                    lbl = ctk.CTkLabel(row, text=f"{titulo} [{codigo}] - {estado} - Vence: {fecha_v if fecha_v else 'Sin fecha'}")
+                    lbl.pack(side="left", padx=5)
+                    # Hacer clic en el label para abrir el expediente asociado
+                    lbl.bind("<Button-1>", lambda e, c=codigo: abrir_expediente_por_codigo(c))
+                    # Botones acción
+                    def make_done(tid=tid):
+                        return lambda: marcar_completada(tid)
+                    def make_delete(tid=tid):
+                        return lambda: eliminar_tarea(tid)
+                    if estado != "Completado":
+                        ctk.CTkButton(row, text="✅", width=30, command=make_done(tid)).pack(side="right", padx=5)
+                    ctk.CTkButton(row, text="❌", width=30, command=make_delete(tid)).pack(side="right", padx=5)
+
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"Error cargando tareas: {e}")
+
+        def marcar_completada(task_id):
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                cur.execute("UPDATE tareas SET estado = 'Completado', notificado = 1 WHERE id = ?", (task_id,))
+                conn.commit()
+                conn.close()
+                actualizar_lista_tareas()
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"No se pudo actualizar la tarea: {e}")
+
+        def eliminar_tarea(task_id):
+            if not messagebox.askyesno("Confirmar", "¿Eliminar esta tarea?"):
+                return
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                cur.execute("DELETE FROM tareas WHERE id = ?", (task_id,))
+                conn.commit()
+                conn.close()
+                actualizar_lista_tareas()
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"No se pudo eliminar la tarea: {e}")
+
+        filtro_estado.configure(command=lambda v=None: actualizar_lista_tareas())
+        actualizar_lista_tareas()
+
+    def comprobar_tareas_vencidas(self):
+        """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
+        try:
+            hoy = datetime.date.today().strftime("%Y-%m-%d")
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            cur.execute("SELECT id, codigo_rma, titulo, fecha_vencimiento FROM tareas WHERE creado_por = ? AND notificado = 0 AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= ?", (self.username, hoy))
+            filas = cur.fetchall()
+            if filas:
+                mensajes = []
+                ids = []
+                for tid, codigo, titulo, fecha in filas:
+                    mensajes.append(f"{fecha} - {titulo} [{codigo}]")
+                    ids.append(tid)
+                texto = "Tienes tareas vencidas o para hoy:\n" + "\n".join(mensajes)
+                # Intentar notificación nativa en Windows
+                try:
+                    if hasattr(self, 'toaster') and self.toaster:
+                        # win10toast limita longitud, mostramos un resumen
+                        resumen = "; ".join(mensajes[:5])
+                        self.toaster.show_toast("Tareas vencidas/hoy", resumen, duration=10, threaded=True)
+                    else:
+                        raise Exception("No toaster")
+                except Exception:
+                    # Fallback a messagebox si no hay toaster
+                    messagebox.showinfo("Tareas vencidas / hoy", texto)
+
+                # Marcar como notificado para no repetir
+                for tid in ids:
+                    cur.execute("UPDATE tareas SET notificado = 1 WHERE id = ?", (tid,))
+                conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Error comprobando tareas vencidas: {e}")
+
+    def programar_chequeo_tareas(self, intervalo_ms=1_800_000):
+        """Programa la comprobación periódica de tareas vencidas (por defecto cada 30 minutos)."""
+        try:
+            # Llamamos a la comprobación
+            self.comprobar_tareas_vencidas()
+            # Reprogramar
+            self.after(intervalo_ms, lambda: self.programar_chequeo_tareas(intervalo_ms))
+        except Exception as e:
+            print(f"Error programando chequeo tareas: {e}")
     def mostrar_ventana_estadisticas(self):
         """Crea y muestra la ventana Toplevel y la estructura de navegación interna para estadísticas."""
         
