@@ -56,30 +56,86 @@ def connect_db(timeout: float | None = None):
     turso_token = os.getenv("TURSO_AUTH_TOKEN")
     if turso_url and turso_token:
         try:
-            # Cliente HTTP oficial (sin necesidad de toolchain de Rust)
-            import libsql_client as lc  # type: ignore
+            import requests
+            import json
 
             class TursoCursor:
-                def __init__(self, client: "lc.ClientSync"):
-                    self._client = client
+                def __init__(self, url: str, token: str):
+                    self._url = url
+                    self._token = token
                     self._result = None
                     self.lastrowid = None
                     self.rowcount = -1
                     self._fetch_idx = 0
+                    self.description = None  # DB-API 2.0: lista de tuplas con info de columnas
 
                 def execute(self, sql: str, params: tuple | list | None = None):
-                    args = list(params) if params else []
-                    self._result = self._client.execute(sql, args=args)
-                    # Compat
-                    self.lastrowid = getattr(self._result, "last_insert_rowid", None)
-                    self.rowcount = getattr(self._result, "rows_affected", -1)
+                    # Convertir placeholders ? a args posicionales para Turso
+                    if params:
+                        # Turso espera args como lista de objetos con {type, value}
+                        args = [{"type": "text", "value": str(v)} for v in params]
+                    else:
+                        args = []
+                    
+                    # Hacer request a la API REST de Turso (v2/pipeline format)
+                    response = requests.post(
+                        self._url,
+                        headers={
+                            "Authorization": f"Bearer {self._token}",
+                            "Content-Type": "application/json"
+                        },
+                        json={"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]}
+                    )
+                    
+                    if response.status_code != 200:
+                        raise Exception(f"Turso API error: {response.status_code} - {response.text}")
+                    
+                    data = response.json()
+                    results = data.get("results", [])
+                    if results and len(results) > 0:
+                        result = results[0].get("response", {}).get("result", {})
+                        self._result = result
+                    else:
+                        self._result = {"rows": []}
+                    
+                    # Extraer metadatos
+                    self.lastrowid = self._result.get("last_insert_rowid")
+                    self.rowcount = self._result.get("rows_affected", -1)
+                    
+                    # Construir description según DB-API 2.0
+                    # Formato: (name, type_code, display_size, internal_size, precision, scale, null_ok)
+                    cols = self._result.get("cols", [])
+                    if cols:
+                        self.description = [
+                            (col.get("name"), None, None, None, None, None, None)
+                            for col in cols
+                        ]
+                    else:
+                        self.description = None
+                    
                     self._fetch_idx = 0
                     return self
 
                 def fetchall(self):
                     if not self._result:
                         return []
-                    return [tuple(r.astuple()) for r in getattr(self._result, "rows", [])]
+                    rows = self._result.get("rows", [])
+                    # Turso devuelve cada fila como lista de objetos {"type": ..., "value": ...}
+                    # Necesitamos extraer solo los valores
+                    result_rows = []
+                    for row in rows:
+                        if isinstance(row, list):
+                            # Extraer valores de cada celda
+                            values = []
+                            for cell in row:
+                                if isinstance(cell, dict):
+                                    values.append(cell.get("value"))
+                                else:
+                                    values.append(cell)
+                            result_rows.append(tuple(values))
+                        else:
+                            result_rows.append(tuple(row))
+                    return result_rows
 
                 def fetchone(self):
                     rows = self.fetchall()
@@ -90,24 +146,27 @@ def connect_db(timeout: float | None = None):
                     return None
 
             class TursoConnection:
-                def __init__(self, client: "lc.ClientSync"):
-                    self._client = client
+                def __init__(self, url: str, token: str):
+                    self._url = url
+                    self._token = token
 
                 def cursor(self):
-                    return TursoCursor(self._client)
+                    return TursoCursor(self._url, self._token)
 
                 def commit(self):
-                    # No-op: libsql HTTP client auto-commits
+                    # No-op: Turso auto-commits
                     pass
 
                 def close(self):
-                    try:
-                        self._client.close()
-                    except Exception:
-                        pass
+                    pass
 
-            client = lc.create_client_sync(turso_url, auth_token=turso_token)
-            return TursoConnection(client)
+            # Convertir URL: libsql://xxx o wss://xxx -> https://xxx
+            api_url = turso_url.replace("libsql://", "https://").replace("wss://", "https://")
+            if not api_url.endswith("/"):
+                api_url += "/"
+            api_url += "v2/pipeline"
+            
+            return TursoConnection(api_url, turso_token)
         except Exception as e:
             # Si falla, caer a SQLite local con log sencillo
             print("[WARN] No se pudo conectar a Turso (libSQL HTTP). Usando SQLite local. Causa:", e)
@@ -311,7 +370,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """
         Verifica si la columna 'motivo' existe en rma_maestro y la añade si no.
         Esto es una migración simple para SQLite.
+        NOTA: Solo funciona con SQLite local. Turso debe tener la estructura completa desde el dump.
         """
+        # Si estamos usando Turso, saltar esta verificación (ALTER TABLE no funciona bien)
+        if os.getenv("TURSO_DATABASE_URL"):
+            print("ℹ️ Usando Turso - verificación de columnas omitida (usar dump SQL completo)")
+            return
+        
         conn, cursor = self.master.conectar_db()
         if not conn: return
 
@@ -668,22 +733,29 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # 1. OBTENER ESTADOS ÚNICOS PARA EL FILTRO
             # Solo hacemos esto si el filtro_estado ya existe (es decir, en mostrar_lista_rma ya se creó la interfaz)
             if hasattr(self, 'filtro_estado'):
-                # Consultar todos los valores únicos y no nulos de la columna 'estado'
-                cursor.execute("SELECT DISTINCT estado FROM rma_maestro WHERE estado IS NOT NULL AND estado != '' ORDER BY estado ASC")
-                estados_db = [fila[0] for fila in cursor.fetchall()]
-                
-                # Crear la lista final de opciones: "Todos" + estados únicos de la DB
-                estados_posibles = ["Todos"] + estados_db
-                
-                # Actualizar el OptionMenu (sin cambiar la selección actual si es válida)
-                seleccion_actual = self.filtro_estado.get()
-                self.filtro_estado.configure(values=estados_posibles)
-                
-                # Mantener la selección actual si todavía existe, si no, poner "Todos"
-                if seleccion_actual in estados_posibles:
-                    self.filtro_estado.set(seleccion_actual)
-                else:
-                    self.filtro_estado.set("Todos")
+                try:
+                    # Consultar todos los valores únicos y no nulos de la columna 'estado'
+                    cursor.execute("SELECT DISTINCT estado FROM rma_maestro WHERE estado IS NOT NULL AND estado != '' ORDER BY estado ASC")
+                    estados_db = [fila[0] for fila in cursor.fetchall()]
+                    
+                    # Crear la lista final de opciones: "Todos" + estados únicos de la DB
+                    estados_posibles = ["Todos"] + estados_db
+                    
+                    # Actualizar el OptionMenu (sin cambiar la selección actual si es válida)
+                    seleccion_actual = self.filtro_estado.get()
+                    self.filtro_estado.configure(values=estados_posibles)
+                    
+                    # Mantener la selección actual si todavía existe, si no, poner "Todos"
+                    if seleccion_actual in estados_posibles:
+                        self.filtro_estado.set(seleccion_actual)
+                    else:
+                        self.filtro_estado.set("Todos")
+                except Exception as e:
+                    print(f"Error al cargar estados para filtro: {e}")
+                    # Continuar con valores por defecto
+                    if hasattr(self, 'filtro_estado'):
+                        self.filtro_estado.configure(values=["Todos"])
+                        self.filtro_estado.set("Todos")
                     
             # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
             # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
@@ -707,9 +779,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
             # Ordenar y Ejecutar
             sql += " ORDER BY id DESC"
-            cursor.execute(sql, tuple(params))
+            try:
+                cursor.execute(sql, tuple(params))
+                registros = cursor.fetchall()
+            except Exception as e:
+                print(f"Error ejecutando query principal: {e}")
+                print(f"SQL: {sql}")
+                print(f"Params: {params}")
+                raise
             
-            registros = cursor.fetchall()
             conn.close()
 
             # 3. Dibujar la tabla de resultados (Encabezados y Registros)

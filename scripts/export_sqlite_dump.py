@@ -13,6 +13,15 @@ def export_dump(db_path: str, out_path: str) -> None:
     try:
         with open(out_path, "w", encoding="utf-8") as f:
             for line in con.iterdump():
+                # Filtrar comandos que causan problemas en Turso
+                if line.strip() in ('BEGIN TRANSACTION;', 'COMMIT;', 'ROLLBACK;'):
+                    continue
+                # Filtrar PRAGMA que no son necesarios
+                if line.strip().startswith('PRAGMA'):
+                    continue
+                # Filtrar operaciones sobre sqlite_sequence (tabla interna)
+                if 'sqlite_sequence' in line:
+                    continue
                 f.write(f"{line}\n")
         print(f"Dump SQL exportado a: {out_path}")
     finally:
