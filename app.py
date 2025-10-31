@@ -35,7 +35,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.34"
+APP_VERSION = "v0.0.36"
 DB_FILENAME = "rma_app.db"
 
 # --- NUEVA VARIABLE GLOBAL ---
@@ -1527,6 +1527,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         header_frame.pack(fill="x")
         cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unitario", "Acción"]
         weights = [2, 1, 1, 2, 1, 1]
+        header_font = ctk.CTkFont(weight="bold", size=12)
         
         for i, col in enumerate(cols):
             ctk.CTkLabel(header_frame, text=col, font=header_font).grid(row=0, column=i, padx=5, pady=5, sticky="w")
@@ -1535,6 +1536,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         for i, item in enumerate(self.articulos_data):
             row_frame = ctk.CTkFrame(self.articulos_list_frame)
             row_frame.pack(fill="x", padx=5, pady=2)
+            
+            # Configurar los mismos pesos de columna que el header
+            for col_idx in range(len(weights)):
+                row_frame.grid_columnconfigure(col_idx, weight=weights[col_idx])
 
             ctk.CTkLabel(row_frame, text=item["referencia_articulo"]).grid(row=0, column=0, padx=5, pady=2, sticky="w")
             ctk.CTkLabel(row_frame, text=item["cantidad_segun_documento"]).grid(row=0, column=1, padx=5, pady=2, sticky="w")
@@ -1751,7 +1756,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         valor = ''
                 
                 # Conversión especial para Autorizacion (SI/NO a 1/0)
-                if columna == 'Autorizacion':
+                if campo == 'Autorizacion':
                     datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
                 else:
                     datos_maestro[campo.lower()] = valor
