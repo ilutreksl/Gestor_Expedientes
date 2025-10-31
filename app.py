@@ -3498,6 +3498,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 cur.execute(sql, params)
                 rows = cur.fetchall()
+                # Asegurar que exista la tabla de proveedores para persistir estados
+                try:
+                    cur.execute("CREATE TABLE IF NOT EXISTS rma_proveedor (id INTEGER PRIMARY KEY, proveedor TEXT UNIQUE, estado TEXT)")
+                    conn.commit()
+                except Exception:
+                    # Si no podemos crearla en Turso u otro backend, seguimos sin persistencia
+                    pass
+
                 conn.close()
 
                 # Encabezado simple
@@ -3518,7 +3526,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 lbl_nom.bind("<Button-1>", lambda e: toggle_sort())
 
-                # Filas
+                # Filas con estado editable (si es posible)
                 colors = ("#FFFFFF", "#F7F7F7")
                 for idx, (prov,) in enumerate(rows):
                     nombre = prov
@@ -3526,15 +3534,33 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     row = ctk.CTkFrame(scroll, fg_color=bg)
                     row.pack(fill="x", padx=5, pady=2)
                     row.grid_columnconfigure(0, weight=1)
-                    row.grid_columnconfigure(1, weight=0, minsize=120)
+                    row.grid_columnconfigure(1, weight=0, minsize=220)
 
                     lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
                     lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
 
-                    acciones = ctk.CTkFrame(row, fg_color="transparent")
-                    acciones.grid(row=0, column=1, padx=5)
-                    # Botón Ver Expedientes
-                    ctk.CTkButton(acciones, text="Ver", width=60, command=lambda nombre=nombre: mostrar_expedientes_proveedor(nombre)).pack(side="left", padx=4)
+                    # Obtener estado actual (si existe) desde rma_proveedor
+                    estado_actual = ""
+                    try:
+                        conn2 = connect_db()
+                        cur2 = conn2.cursor()
+                        cur2.execute("SELECT estado FROM rma_proveedor WHERE lower(proveedor)=?", (str(nombre).lower(),))
+                        rr = cur2.fetchone()
+                        if rr:
+                            estado_actual = rr[0] or ""
+                        conn2.close()
+                    except Exception:
+                        estado_actual = ""
+
+                    opciones_estado = ["", "En Progreso", "Enviado", "Completado"]
+                    try:
+                        opt = ctk.CTkOptionMenu(row, values=opciones_estado)
+                        # Si no hay estado, dejamos en vacío (primer opción)
+                        opt.set(estado_actual if estado_actual in opciones_estado else "")
+                    except Exception:
+                        opt = ctk.CTkEntry(row)
+                        opt.insert(0, estado_actual)
+                    opt.grid(row=0, column=1, padx=5, sticky="w")
 
                     # Hover
                     def on_enter(e, r=row):
@@ -3549,6 +3575,37 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                     # Click en nombre abre expedientes
                     lbl_nombre.bind("<Button-1>", lambda e, nombre=nombre: mostrar_expedientes_proveedor(nombre))
+
+                    # Persistir cambio de estado (upsert)
+                    def make_state_updater(proveedor_nombre):
+                        def updater(selected_value):
+                            val = selected_value
+                            try:
+                                conn3 = connect_db()
+                                cur3 = conn3.cursor()
+                                # Usar upsert: insertar o actualizar el estado para el proveedor
+                                try:
+                                    cur3.execute(
+                                        "INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?) ON CONFLICT(proveedor) DO UPDATE SET estado=excluded.estado",
+                                        (proveedor_nombre, val)
+                                    )
+                                except sqlite3.Error:
+                                    # Fallback: intentar UPDATE, si no existe, INSERT
+                                    cur3.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", (val, proveedor_nombre))
+                                    if cur3.rowcount == 0:
+                                        cur3.execute("INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?)", (proveedor_nombre, val))
+                                conn3.commit()
+                                conn3.close()
+                            except Exception as e:
+                                messagebox.showerror("Error BD", f"No se pudo guardar el estado: {e}")
+                        return updater
+
+                    try:
+                        # CTkOptionMenu passes the selected value to the command
+                        opt.configure(command=make_state_updater(nombre))
+                    except Exception:
+                        if isinstance(opt, ctk.CTkEntry):
+                            opt.bind("<FocusOut>", lambda e, nombre=nombre, w=opt: make_state_updater(nombre)(w.get()))
 
             except sqlite3.Error as e:
                 messagebox.showerror("Error BD", f"No se pudo cargar lista de proveedores: {e}")
