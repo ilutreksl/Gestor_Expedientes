@@ -2,6 +2,13 @@ import customtkinter as ctk
 import tkinter.messagebox as messagebox
 from tkinter import Toplevel
 import sqlite3
+import os
+try:
+    # Carga variables de entorno desde .env si existe (opcional)
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
 import bcrypt
 import sys
 import os 
@@ -37,6 +44,76 @@ ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segur
 
 APP_VERSION = "v0.0.36"
 DB_FILENAME = "rma_app.db"
+
+# --- Conector unificado: Turso (libSQL) si hay credenciales, si no SQLite local ---
+def connect_db(timeout: float | None = None):
+    """Devuelve una conexión a la BD.
+    - Si existen TURSO_DATABASE_URL y TURSO_AUTH_TOKEN en el entorno, usa Turso (libSQL).
+    - En caso contrario, usa SQLite local (rma_app.db).
+    El API devuelto implementa DB-API 2.0 (cursor/execute/commit).
+    """
+    turso_url = os.getenv("TURSO_DATABASE_URL")
+    turso_token = os.getenv("TURSO_AUTH_TOKEN")
+    if turso_url and turso_token:
+        try:
+            # Cliente HTTP oficial (sin necesidad de toolchain de Rust)
+            import libsql_client as lc  # type: ignore
+
+            class TursoCursor:
+                def __init__(self, client: "lc.ClientSync"):
+                    self._client = client
+                    self._result = None
+                    self.lastrowid = None
+                    self.rowcount = -1
+                    self._fetch_idx = 0
+
+                def execute(self, sql: str, params: tuple | list | None = None):
+                    args = list(params) if params else []
+                    self._result = self._client.execute(sql, args=args)
+                    # Compat
+                    self.lastrowid = getattr(self._result, "last_insert_rowid", None)
+                    self.rowcount = getattr(self._result, "rows_affected", -1)
+                    self._fetch_idx = 0
+                    return self
+
+                def fetchall(self):
+                    if not self._result:
+                        return []
+                    return [tuple(r.astuple()) for r in getattr(self._result, "rows", [])]
+
+                def fetchone(self):
+                    rows = self.fetchall()
+                    if self._fetch_idx < len(rows):
+                        row = rows[self._fetch_idx]
+                        self._fetch_idx += 1
+                        return row
+                    return None
+
+            class TursoConnection:
+                def __init__(self, client: "lc.ClientSync"):
+                    self._client = client
+
+                def cursor(self):
+                    return TursoCursor(self._client)
+
+                def commit(self):
+                    # No-op: libsql HTTP client auto-commits
+                    pass
+
+                def close(self):
+                    try:
+                        self._client.close()
+                    except Exception:
+                        pass
+
+            client = lc.create_client_sync(turso_url, auth_token=turso_token)
+            return TursoConnection(client)
+        except Exception as e:
+            # Si falla, caer a SQLite local con log sencillo
+            print("[WARN] No se pudo conectar a Turso (libSQL HTTP). Usando SQLite local. Causa:", e)
+            return sqlite3.connect(DB_NAME, timeout=timeout if timeout is not None else 5)
+    # Fallback por defecto: SQLite local
+    return sqlite3.connect(DB_NAME, timeout=timeout if timeout is not None else 5)
 
 # --- NUEVA VARIABLE GLOBAL ---
 ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
@@ -103,8 +180,9 @@ class LoginApp(ctk.CTk):
     def conectar_db(self):
         """Intenta conectar a la base de datos."""
         try:
-            # Añadimos un timeout de 5 segundos para intentar manejar el bloqueo de red
-            conn = sqlite3.connect(DB_NAME, timeout=5)
+            # Añadimos un timeout de 5 segundos. Si hay variables de entorno de Turso,
+            # se conectará a Turso; en caso contrario, a SQLite local.
+            conn = connect_db(timeout=5)
             cursor = conn.cursor()
             return conn, cursor
         except sqlite3.Error as e:
@@ -826,7 +904,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # A) NÚMERO DE EXPEDIENTE (Columna 0)
         if es_edicion:
             # Consultar el código RMA real desde la base de datos
-            conn = sqlite3.connect(DB_NAME)
+            conn = connect_db()
             cur = conn.cursor()
             cur.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
             row = cur.fetchone()
@@ -1006,7 +1084,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD")
                         return
                 try:
-                    conn = sqlite3.connect(DB_NAME)
+                    conn = connect_db()
                     cur = conn.cursor()
                     cur.execute(
                         "INSERT INTO tareas (codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por, creado_en, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
@@ -1078,7 +1156,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     nueva_fecha = fecha_entry.get().strip() or None
                     nuevo_estado = estado_var.get()
                     try:
-                        conn = sqlite3.connect(DB_NAME)
+                        conn = connect_db()
                         cur = conn.cursor()
                         cur.execute("UPDATE tareas SET titulo = ?, descripcion = ?, fecha_vencimiento = ?, estado = ? WHERE id = ?",
                                     (nuevo_titulo, nueva_desc, nueva_fecha, nuevo_estado, task['id']))
@@ -1114,7 +1192,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if not messagebox.askyesno("Confirmar", "¿Eliminar esta tarea? Esta acción no se puede deshacer."):
                 return
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 cur.execute("DELETE FROM tareas WHERE id = ?", (task_id,))
                 # Registrar en el historial la eliminación
@@ -1179,7 +1257,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             try:
                 # Usar el código RMA actual de la ficha
                 codigo = self.lbl_codigo_rma.cget('text').split(': ')[1].strip()
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas WHERE codigo_rma = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (codigo,))
                 filas = cur.fetchall()
@@ -1427,7 +1505,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return
             
         try:
-            conn = sqlite3.connect(DB_NAME)
+            conn = connect_db()
             cursor = conn.cursor()
             
             # 3. Preparar los datos
@@ -2705,7 +2783,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Generar hash de la contraseña
                 password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cursor = conn.cursor()
 
                 # Verificar si el usuario ya existe
@@ -2755,7 +2833,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 widget.destroy()
 
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cursor = conn.cursor()
                 cursor.execute("SELECT nombre_usuario, rol FROM usuarios")
                 usuarios = cursor.fetchall()
@@ -2780,7 +2858,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         def eliminar_usuario(username):
             if messagebox.askyesno("Confirmar", f"¿Está seguro de eliminar al usuario {username}?"):
                 try:
-                    conn = sqlite3.connect(DB_NAME)
+                    conn = connect_db()
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM usuarios WHERE nombre_usuario = ?", (username,))
                     conn.commit()
@@ -2826,7 +2904,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         def abrir_expediente_por_codigo(codigo):
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo,))
                 row = cur.fetchone()
@@ -2845,7 +2923,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             for w in scroll.winfo_children():
                 w.destroy()
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 estado = filtro_estado.get()
                 if estado == "Todos":
@@ -2876,7 +2954,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         def marcar_completada(task_id):
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 cur.execute("UPDATE tareas SET estado = 'Completado', notificado = 1 WHERE id = ?", (task_id,))
                 conn.commit()
@@ -2889,7 +2967,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if not messagebox.askyesno("Confirmar", "¿Eliminar esta tarea?"):
                 return
             try:
-                conn = sqlite3.connect(DB_NAME)
+                conn = connect_db()
                 cur = conn.cursor()
                 cur.execute("DELETE FROM tareas WHERE id = ?", (task_id,))
                 conn.commit()
@@ -2905,7 +2983,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
         try:
             hoy = datetime.date.today().strftime("%Y-%m-%d")
-            conn = sqlite3.connect(DB_NAME)
+            conn = connect_db()
             cur = conn.cursor()
             cur.execute("SELECT id, codigo_rma, titulo, fecha_vencimiento FROM tareas WHERE creado_por = ? AND notificado = 0 AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= ?", (self.username, hoy))
             filas = cur.fetchall()
@@ -3826,7 +3904,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                     new_cant = ent_cant.get().strip()
                                     new_estado = ent_estado.get().strip()
                                     try:
-                                        conn2 = sqlite3.connect(DB_NAME)
+                                        conn2 = connect_db()
                                         cur2 = conn2.cursor()
                                         cur2.execute("UPDATE rma_detalles SET cantidad_entregada = ?, estado_producto = ? WHERE id = ?", (new_cant, new_estado, did))
                                         conn2.commit()
@@ -3872,7 +3950,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     new_motivo = txt_motivo.get("1.0", "end-1c").strip()
 
                     try:
-                        conn2 = sqlite3.connect(DB_NAME)
+                        conn2 = connect_db()
                         cur2 = conn2.cursor()
                         cur2.execute(
                             "UPDATE rma_maestro SET cliente = ?, numero_documento_cliente = ?, fecha_gestion = ?, motivo = ?, email_de_contacto = ? WHERE id = ?",
@@ -4021,7 +4099,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             messagebox.showwarning("Advertencia", "Debe seleccionar o tener abierto un expediente RMA para enviar un email.")
             return
 
-        conn = sqlite3.connect(DB_NAME)
+        conn = connect_db()
         cursor = conn.cursor()
         
         try:
