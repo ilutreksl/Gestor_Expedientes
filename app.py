@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.45"
+APP_VERSION = "v0.0.46"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -968,35 +968,58 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
                 return
 
-            # Registros
+            # Registros (filas cebra)
+            colors = ("#FFFFFF", "#F3F4F6")
             for i, reg in enumerate(registros):
                 rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
                 row = i + 1
-                
-                # Mapeo de color según estado
+
+                # Mapeo de color según estado (para la etiqueta de estado)
                 color = {"Pendiente de Autorizacion": "orange", "Autorizado": "blue", "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
-                
-                # 0: Código RMA
-                ctk.CTkLabel(self.lista_rma_frame, text=codigo_rma).grid(row=row, column=0, padx=5, pady=2, sticky="w")
-                # 1: Cliente
-                ctk.CTkLabel(self.lista_rma_frame, text=cliente).grid(row=row, column=1, padx=5, pady=2, sticky="w")
-                
-                # 💡 ¡NUEVO CAMPO en Columna 2!
-                ctk.CTkLabel(self.lista_rma_frame, text=numero_documento_cliente).grid(row=row, column=2, padx=5, pady=2, sticky="w")
-                
-                # 3: Estado (Se desplaza a Columna 3)
-                ctk.CTkLabel(self.lista_rma_frame, text=estado, text_color=color).grid(row=row, column=3, padx=5, pady=2, sticky="w")
-                # 4: Fecha Emisión (Se desplaza a Columna 4)
-                ctk.CTkLabel(self.lista_rma_frame, text=fecha_emision).grid(row=row, column=4, padx=5, pady=2, sticky="w")
-                
-                # 5: Botón Editar (Se desplaza a Columna 5)
-                ctk.CTkButton(self.lista_rma_frame, 
-                              text="✏️ Editar", 
-                              width=100,
-                              #fg_color="gray80",        # Fondo del botón: Gris claro
-                              #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
-                              #text_color="black",                              
-                              command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+
+                bg = colors[i % 2]
+                # Crear un frame por columna para alinear exactamente con los encabezados
+                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+
+                # Colocar cada columna en la grilla principal para que se alinee con encabezados
+                f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=1)
+                f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=1)
+                f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=1)
+                f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=1)
+                f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=1)
+                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=1)
+
+                # Contenido de cada columna con padding reducido para filas más finas
+                ctk.CTkLabel(f0, text=codigo_rma).pack(anchor="w", padx=4, pady=1)
+                ctk.CTkLabel(f1, text=cliente).pack(anchor="w", padx=4, pady=1)
+                ctk.CTkLabel(f2, text=numero_documento_cliente).pack(anchor="w", padx=4, pady=1)
+                ctk.CTkLabel(f3, text=estado, text_color=color).pack(anchor="w", padx=4, pady=1)
+                ctk.CTkLabel(f4, text=fecha_emision).pack(anchor="w", padx=4, pady=1)
+                ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=1)
+
+                # Hover efectos para toda la fila: aplicar a cada columna
+                cols = [f0, f1, f2, f3, f4, f5]
+                def _on_enter(e, cols=cols):
+                    for rf in cols:
+                        try:
+                            rf.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                        except Exception:
+                            pass
+                def _on_leave(e, cols=cols, original=bg):
+                    for rf in cols:
+                        try:
+                            rf.configure(fg_color=original)
+                        except Exception:
+                            pass
+
+                for rf in cols:
+                    rf.bind("<Enter>", _on_enter)
+                    rf.bind("<Leave>", _on_leave)
             
         except Exception as e:
             print(f"Error al cargar lista de RMA: {e}")
