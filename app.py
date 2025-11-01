@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.46"
+APP_VERSION = "v0.0.47"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -469,26 +469,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.master = master
         self.username = username
         self.rol = rol
-        self.rma_actual_id = None # ID del RMA que se está editando (None para nuevo)
-        self.articulos_data = [] # Lista temporal para los artículos en el formulario
-        
-        self.crear_tabla_adjuntos() # Aseguramos que la tabla exista
-        self.crear_tabla_tareas()  # Aseguramos que la tabla de tareas exista
-        self.verificar_columna_motivo() # NUEVA LÍNEA: Asegura la columna 'motivo' en la DB
-        # ---------------------
-        
-        self.title(f"Gestión de Expedientes - Bienvenido {self.username} ({self.rol})")
-        
-        # Maximizar ventana al abrir (el usuario puede minimizar si quiere)
-        self.state('zoomed')  # Windows
-        # self.attributes('-zoomed', True)  # Linux (descomentar si se usa Linux)
-        
-        # Inicializar notificador de sistema si está disponible
         try:
-            if ToastNotifier:
-                self.toaster = ToastNotifier()
-            else:
-                self.toaster = None
+            self.toaster = ToastNotifier() if ToastNotifier else None
         except Exception:
             self.toaster = None
         
@@ -3552,6 +3534,87 @@ class VentanaPrincipal(ctk.CTkToplevel):
         prov_next.configure(command=_prov_next)
         prov_size_opt.configure(command=_prov_size_changed)
 
+        # Función para mostrar historial completo de un proveedor y añadir comentarios
+        def mostrar_historial_proveedor(proveedor_nombre):
+            try:
+                vent_hist = ctk.CTkToplevel(self)
+                vent_hist.title(f"Historial - {proveedor_nombre}")
+                vent_hist.geometry("700x500")
+                vent_hist.grab_set()
+
+                cont = ctk.CTkFrame(vent_hist)
+                cont.pack(fill="both", expand=True, padx=10, pady=10)
+
+                sf = ctk.CTkScrollableFrame(cont)
+                sf.pack(fill="both", expand=True)
+
+                # Cargar historial
+                try:
+                    connh = connect_db()
+                    curh = connh.cursor()
+                    curh.execute("SELECT fecha, usuario, estado, comentario FROM rma_proveedor_hist WHERE lower(proveedor)=? OR proveedor=? ORDER BY fecha DESC", (proveedor_nombre.lower(), proveedor_nombre))
+                    hist_rows = curh.fetchall()
+                    connh.close()
+                except Exception:
+                    hist_rows = []
+
+                
+                if not hist_rows:
+                    try:
+                        import sqlite3 as _sqlite
+                        local_db = os.path.join(os.path.dirname(__file__), DB_NAME)
+                        if os.path.exists(local_db):
+                            conn_local = _sqlite.connect(local_db)
+                            cur_local = conn_local.cursor()
+                            cur_local.execute("SELECT fecha, usuario, estado, comentario FROM rma_proveedor_hist WHERE lower(proveedor)=? OR proveedor=? ORDER BY fecha DESC", (proveedor_nombre.lower(), proveedor_nombre))
+                            hist_rows = cur_local.fetchall()
+                            conn_local.close()
+                    except Exception:
+                        hist_rows = []
+
+                # Mostrar cada entrada
+                for idx, (fecha, usuario, estado_h, comentario) in enumerate(hist_rows):
+                    rowf = ctk.CTkFrame(sf, fg_color="#FFFFFF" if idx % 2 == 0 else "#F7F7F7")
+                    rowf.pack(fill="x", padx=5, pady=3)
+                    txt = f"{fecha} - {usuario} - {estado_h or ''}"
+                    ctk.CTkLabel(rowf, text=txt, font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=6, pady=(4,0))
+                    if comentario:
+                        ctk.CTkLabel(rowf, text=comentario, wraplength=650).pack(anchor="w", padx=6, pady=(0,6))
+
+                # Area para añadir comentario
+                ctk.CTkLabel(cont, text="Añadir comentario:").pack(anchor="w", pady=(8,2))
+                comment_box = ctk.CTkTextbox(cont, height=80)
+                comment_box.pack(fill="x", pady=(0,8))
+
+                def _add_comment():
+                    text = comment_box.get("0.0", "end").strip()
+                    if not text:
+                        messagebox.showwarning("Vacío", "Escribe un comentario antes de añadirlo.")
+                        return
+                    try:
+                        connc = connect_db()
+                        curc = connc.cursor()
+                        # Asegurar la tabla existe (por si acaso)
+                        curc.execute("CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                        curc.execute("INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)", (proveedor_nombre, '', text, getattr(self, 'username', 'unknown')))
+                        connc.commit()
+                        connc.close()
+                        messagebox.showinfo("Añadido", "Comentario añadido al historial.")
+                        # refrescar la ventana
+                        vent_hist.destroy()
+                        mostrar_historial_proveedor(proveedor_nombre)
+                        # refrescar la lista principal
+                        try:
+                            cargar_proveedores()
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        messagebox.showerror("Error BD", f"No se pudo añadir el comentario: {e}")
+
+                ctk.CTkButton(cont, text="Añadir comentario", command=_add_comment).pack(anchor="e")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error mostrando historial: {e}")
+
         def cargar_proveedores():
             """Carga la lista de proveedores EXTRAÍDOS de rma_maestro.rma_proveedor (DISTINCT)."""
             for w in scroll.winfo_children():
@@ -3564,6 +3627,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Asegurar que exista la tabla de proveedores para persistir estados
                 try:
                     cur.execute("CREATE TABLE IF NOT EXISTS rma_proveedor (id INTEGER PRIMARY KEY, proveedor TEXT UNIQUE, estado TEXT)")
+                    # Tabla de historial de proveedores: proveedor, estado, comentario, usuario, fecha
+                    cur.execute(
+                        "CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+                    )
                     conn.commit()
                 except Exception:
                     # Si no podemos crearla en Turso u otro backend, seguimos sin persistencia
@@ -3643,14 +3710,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Encabezado simple
                 header_row = ctk.CTkFrame(scroll)
                 header_row.pack(fill="x", padx=5, pady=(0,5))
-                # Anchos mínimos solicitados: Proveedor ≈360, Estado/Acciones ≈260
-                header_row.grid_columnconfigure(0, weight=1, minsize=360)
+                # Ajuste de anchos: reducir PROVEEDOR a la mitad y dar espacio al HISTORIAL
+                # PROVEEDOR ~180 (antes 360), ACCIONES ~260, HISTORIAL ~440 (antes 260)
+                header_row.grid_columnconfigure(0, weight=1, minsize=180)
                 header_row.grid_columnconfigure(1, weight=0, minsize=260)
+                header_row.grid_columnconfigure(2, weight=0, minsize=440)
+                # Columna extra para botón/ver historial
+                header_row.grid_columnconfigure(3, weight=0, minsize=120)
 
                 hf = ctk.CTkFont(weight="bold")
                 lbl_nom = ctk.CTkLabel(header_row, text="PROVEEDOR", font=hf, anchor="w", cursor="hand2")
                 lbl_nom.grid(row=0, column=0, padx=5, sticky="w")
                 ctk.CTkLabel(header_row, text="ACCIONES", font=hf, anchor="center").grid(row=0, column=1, padx=5)
+                ctk.CTkLabel(header_row, text="HISTORIAL", font=hf, anchor="center").grid(row=0, column=2, padx=5)
+                ctk.CTkLabel(header_row, text="VER", font=hf, anchor="center").grid(row=0, column=3, padx=5)
 
                 # Alternar orden al pinchar encabezado
                 def toggle_sort():
@@ -3675,9 +3748,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     bg = colors[idx % 2]
                     row = ctk.CTkFrame(scroll, fg_color=bg)
                     row.pack(fill="x", padx=5, pady=2)
-                    # Mantener los minsize solicitados para columnas
-                    row.grid_columnconfigure(0, weight=1, minsize=360)
+                    # Mantener los minsize solicitados para columnas (consistentes con header)
+                    row.grid_columnconfigure(0, weight=1, minsize=180)
                     row.grid_columnconfigure(1, weight=0, minsize=260)
+                    row.grid_columnconfigure(2, weight=0, minsize=440)
+                    row.grid_columnconfigure(3, weight=0, minsize=120)
 
                     lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
                     lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
@@ -3690,6 +3765,59 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         opt = ctk.CTkEntry(row)
                         opt.insert(0, estado_actual)
                     opt.grid(row=0, column=1, padx=5, sticky="w")
+
+                    # Última entrada de historial (mostrar último comentario/estado corto)
+                    try:
+                        conn_h = connect_db()
+                        cur_h = conn_h.cursor()
+                        cur_h.execute(
+                            "SELECT estado, comentario, usuario, fecha FROM rma_proveedor_hist WHERE lower(proveedor)=? OR proveedor=? ORDER BY fecha DESC LIMIT 1",
+                            (nombre.lower(), nombre)
+                        )
+                        last_hist = cur_h.fetchone()
+                        conn_h.close()
+                    except Exception:
+                        last_hist = None
+
+                    
+                    if not last_hist:
+                        try:
+                            import sqlite3 as _sqlite
+                            local_db = os.path.join(os.path.dirname(__file__), DB_NAME)
+                            if os.path.exists(local_db):
+                                conn_local = _sqlite.connect(local_db)
+                                cur_local = conn_local.cursor()
+                                cur_local.execute(
+                                    "SELECT estado, comentario, usuario, fecha FROM rma_proveedor_hist WHERE lower(proveedor)=? OR proveedor=? ORDER BY fecha DESC LIMIT 1",
+                                    (nombre.lower(), nombre)
+                                )
+                                last_hist = cur_local.fetchone()
+                                conn_local.close()
+                        except Exception:
+                            pass
+
+                    hist_text = ""
+                    if last_hist:
+                        lh_estado, lh_coment, lh_user, lh_fecha = last_hist
+                        if lh_coment:
+                            hist_text = f"{lh_fecha} - {lh_user}: {lh_coment}"
+                        else:
+                            hist_text = f"{lh_fecha} - {lh_user}: {lh_estado}"
+
+                    # Mostrar columna de historial con acceso al historial completo
+                    # Mostrar el texto completo pero permitiendo wrap para no descuadrar columnas
+                    hist_lbl_text = hist_text or ""
+                    hist_lbl = ctk.CTkLabel(row, text=hist_lbl_text, anchor="w", cursor="hand2", wraplength=420)
+                    hist_lbl.grid(row=0, column=2, padx=5, sticky="w")
+                    hist_lbl.bind("<Button-1>", lambda e, n=nombre: mostrar_historial_proveedor(n))
+
+                    # Botón para abrir la ventana completa de historial
+                    try:
+                        btn_hist = ctk.CTkButton(row, text="Ver historial", width=110, command=lambda n=nombre: mostrar_historial_proveedor(n))
+                        btn_hist.grid(row=0, column=3, padx=5)
+                    except Exception:
+                        # Si falla la creación del botón, ignoramos para no romper el listado
+                        pass
 
                     # Hover
                     def on_enter(e, r=row):
