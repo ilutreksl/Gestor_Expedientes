@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.44"
+APP_VERSION = "v0.0.45"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3574,9 +3574,45 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     sql += " WHERE r.estado = ?"
                     params.append(estado_sel)
 
+                # Primero calcular total (COUNT) usando la misma subconsulta
+                try:
+                    count_sql = "SELECT COUNT(*) FROM (" + sql + ") as _sub"
+                    cur.execute(count_sql, tuple(params))
+                    raw_total = cur.fetchone()[0]
+                    try:
+                        total = int(raw_total) if raw_total is not None else 0
+                    except Exception:
+                        # Algunos adaptadores devuelven resultados como strings
+                        try:
+                            total = int(str(raw_total))
+                        except Exception:
+                            total = 0
+                except Exception:
+                    total = 0
+                prov_page['total'] = int(total)
+
+                # Aplicar orden y paginación (LIMIT/OFFSET)
                 sql += f" ORDER BY p.proveedor {direction}"
 
-                cur.execute(sql, tuple(params))
+                # Asegurar página válida
+                try:
+                    page_size = int(prov_page.get('page_size', 20))
+                except Exception:
+                    page_size = 20
+                if page_size <= 0:
+                    page_size = 20
+
+                total_pages = max(1, (total + page_size - 1) // page_size)
+                if prov_page['page'] > total_pages:
+                    prov_page['page'] = total_pages
+                if prov_page['page'] < 1:
+                    prov_page['page'] = 1
+
+                offset = (prov_page['page'] - 1) * page_size
+                sql += " LIMIT ? OFFSET ?"
+                params_with_limit = list(params) + [page_size, offset]
+
+                cur.execute(sql, tuple(params_with_limit))
                 rows = cur.fetchall()
 
                 conn.close()
@@ -3602,6 +3638,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Filas con estado editable (si es posible)
                 colors = ("#FFFFFF", "#F3F4F6")
+                # Actualizar etiqueta y estados de botones
+                try:
+                    total_pages = max(1, (prov_page['total'] + page_size - 1) // page_size)
+                    prov_page_lbl.configure(text=f"Página {prov_page['page']} de {total_pages} ({prov_page['total']})")
+                    prov_prev.configure(state="normal" if prov_page['page'] > 1 else "disabled")
+                    prov_next.configure(state="normal" if prov_page['page'] < total_pages else "disabled")
+                except Exception:
+                    prov_page_lbl.configure(text=f"Página {prov_page.get('page',1)}")
+
                 for idx, (prov, estado_actual) in enumerate(rows):
                     nombre = prov
                     bg = colors[idx % 2]
