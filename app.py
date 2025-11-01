@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.43"
+APP_VERSION = "v0.0.44"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3457,11 +3457,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         header = ctk.CTkFrame(main)
         header.pack(fill="x", pady=(0,8))
 
-        ctk.CTkLabel(header, text="Listado de Proveedores", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(header, text="Listado de RMA - Proveedores", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
 
         # Búsqueda y filtro por estado
         ctk.CTkLabel(header, text="Buscar:").grid(row=1, column=0, sticky="w", pady=(8,0))
-        entry_buscar = ctk.CTkEntry(header, placeholder_text="Escriba parte del nombre del proveedor...")
+        entry_buscar = ctk.CTkEntry(header, placeholder_text="Escriba parte del numero RMA proveedor...")
         entry_buscar.grid(row=1, column=1, sticky="ew", padx=(8,0), pady=(8,0))
         # Filtro por estado
         ctk.CTkLabel(header, text="Filtrar estado:").grid(row=1, column=2, sticky="w", padx=(12,6), pady=(8,0))
@@ -3481,6 +3481,53 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Estado de ordenación
         sort_state = {'col': 'nombre', 'dir': 'asc'}
+
+        # Controles de paginación para proveedores
+        prov_page = {'page': 1, 'page_size': 20, 'total': 0}
+        prov_pframe = ctk.CTkFrame(main)
+        prov_pframe.pack(fill="x", padx=12, pady=(6,8))
+        prov_prev = ctk.CTkButton(prov_pframe, text="◀ Anterior", width=100)
+        prov_prev.pack(side="left", padx=(0,8))
+        prov_page_lbl = ctk.CTkLabel(prov_pframe, text=f"Página {prov_page['page']}")
+        prov_page_lbl.pack(side="left")
+        prov_next = ctk.CTkButton(prov_pframe, text="Siguiente ▶", width=100)
+        prov_next.pack(side="left", padx=8)
+        prov_size_opt = ctk.CTkOptionMenu(prov_pframe, values=["10","20","50","100"], width=80)
+        prov_size_opt.set(str(prov_page['page_size']))
+        prov_size_opt.pack(side="right")
+        ctk.CTkLabel(prov_pframe, text="Registros por página:").pack(side="right", padx=(0,8))
+
+        # Handlers mínimos: actualizan prov_page y recargan la lista
+        def _prov_prev():
+            if prov_page['page'] > 1:
+                prov_page['page'] -= 1
+                try:
+                    cargar_proveedores()
+                except Exception:
+                    pass
+
+        def _prov_next():
+            # no conocemos aún prov_page['total'], simplemente incrementamos y dejamos que la consulta limite
+            prov_page['page'] += 1
+            try:
+                cargar_proveedores()
+            except Exception:
+                pass
+
+        def _prov_size_changed(v):
+            try:
+                prov_page['page_size'] = int(v)
+            except Exception:
+                prov_page['page_size'] = 20
+            prov_page['page'] = 1
+            try:
+                cargar_proveedores()
+            except Exception:
+                pass
+
+        prov_prev.configure(command=_prov_prev)
+        prov_next.configure(command=_prov_next)
+        prov_size_opt.configure(command=_prov_size_changed)
 
         def cargar_proveedores():
             """Carga la lista de proveedores EXTRAÍDOS de rma_maestro.rma_proveedor (DISTINCT)."""
@@ -3537,8 +3584,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Encabezado simple
                 header_row = ctk.CTkFrame(scroll)
                 header_row.pack(fill="x", padx=5, pady=(0,5))
-                header_row.grid_columnconfigure(0, weight=1)
-                header_row.grid_columnconfigure(1, weight=0, minsize=120)
+                # Anchos mínimos solicitados: Proveedor ≈360, Estado/Acciones ≈260
+                header_row.grid_columnconfigure(0, weight=1, minsize=360)
+                header_row.grid_columnconfigure(1, weight=0, minsize=260)
 
                 hf = ctk.CTkFont(weight="bold")
                 lbl_nom = ctk.CTkLabel(header_row, text="PROVEEDOR", font=hf, anchor="w", cursor="hand2")
@@ -3553,14 +3601,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 lbl_nom.bind("<Button-1>", lambda e: toggle_sort())
 
                 # Filas con estado editable (si es posible)
-                colors = ("#FFFFFF", "#F7F7F7")
+                colors = ("#FFFFFF", "#F3F4F6")
                 for idx, (prov, estado_actual) in enumerate(rows):
                     nombre = prov
                     bg = colors[idx % 2]
                     row = ctk.CTkFrame(scroll, fg_color=bg)
                     row.pack(fill="x", padx=5, pady=2)
-                    row.grid_columnconfigure(0, weight=1)
-                    row.grid_columnconfigure(1, weight=0, minsize=220)
+                    # Mantener los minsize solicitados para columnas
+                    row.grid_columnconfigure(0, weight=1, minsize=360)
+                    row.grid_columnconfigure(1, weight=0, minsize=260)
 
                     lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
                     lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
