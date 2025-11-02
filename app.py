@@ -25,6 +25,8 @@ from PIL import Image, ImageTk
 from CTkDatePicker import CTkDatePicker
 
 import tkinter as tk
+from tkinter import ttk
+import threading
 
 import pandas as pd
 import locale
@@ -50,7 +52,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.56"
+APP_VERSION = "v0.0.57"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4456,14 +4458,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         header.pack(fill="x", pady=(0,8))
         ctk.CTkLabel(header, text="Listado de Artículos", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
 
-        # Frame para la lista con scroll
+        # Frame para la lista con scroll (con búsqueda, paginación y carga en background)
         list_frame = ctk.CTkFrame(main)
         list_frame.pack(fill="both", expand=True)
 
         canvas = ctk.CTkCanvas(list_frame, borderwidth=0, highlightthickness=0)
-        # Use a native Frame inside a canvas for scrollable content
         try:
-            # If customtkinter doesn't expose CTkCanvas in user's version, fallback to tkinter.Canvas
             from tkinter import Canvas as _Canvas
             canvas = _Canvas(list_frame, borderwidth=0, highlightthickness=0)
         except Exception:
@@ -4475,8 +4475,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
         canvas.pack(side="left", fill="both", expand=True)
 
         sf = ctk.CTkFrame(canvas)
-        # Create window inside canvas
-        # Create window inside canvas and ensure it resizes to canvas width so headers and rows align
         try:
             window_id = canvas.create_window((0,0), window=sf, anchor="nw")
         except Exception:
@@ -4497,71 +4495,165 @@ class VentanaPrincipal(ctk.CTkToplevel):
         sf.bind("<Configure>", on_sf_configure)
         canvas.bind("<Configure>", on_canvas_config)
 
-        # Consultar DB: contar expedientes por referencia de artículo
+        # Controles de búsqueda y paginación en el header
+        search_var = tk.StringVar()
+        page_state = {"page": 1, "total_pages": 1}
+
+        ctk.CTkLabel(header, text="Buscar:").grid(row=1, column=0, sticky="w", pady=(6,0))
+        search_entry = ctk.CTkEntry(header, textvariable=search_var, placeholder_text="Referencia...", width=300)
+        search_entry.grid(row=1, column=1, sticky="w", padx=(8,0), pady=(6,0))
+
+        page_size_opt = ctk.CTkOptionMenu(header, values=["10","25","50","100"])
+        page_size_opt.set("50")
+        page_size_opt.grid(row=1, column=2, padx=(12,0), pady=(6,0))
+
+        btn_prev = ctk.CTkButton(header, text="◀", width=40)
+        btn_prev.grid(row=1, column=3, padx=(12,2), pady=(6,0))
+        page_label = ctk.CTkLabel(header, text="Página 1/1")
+        page_label.grid(row=1, column=4, padx=(2,6), pady=(6,0))
+        btn_next = ctk.CTkButton(header, text="▶", width=40)
+        btn_next.grid(row=1, column=5, padx=(2,0), pady=(6,0))
+
+        # Progress indicator (ttk indeterminate progressbar)
+        pb = ttk.Progressbar(header, mode="indeterminate", length=120)
         try:
-            conn = connect_db()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT referencia_articulo, COUNT(DISTINCT rma_maestro.id) as expedientes_count
-                FROM rma_detalles
-                INNER JOIN rma_maestro ON rma_detalles.rma_id = rma_maestro.id
-                WHERE referencia_articulo IS NOT NULL AND TRIM(referencia_articulo) != ''
-                GROUP BY referencia_articulo
-                ORDER BY expedientes_count DESC, referencia_articulo ASC
-            """)
-            filas = cur.fetchall()
-            conn.close()
-        except Exception as e:
-            messagebox.showerror("Error BD", f"No se pudieron cargar los artículos: {e}")
-            return
+            pb.grid(row=1, column=6, padx=(8,0), pady=(6,0))
+        except Exception:
+            pass
 
-        # Encabezado (usar grid y configurar pesos para alinear con las filas)
-        header_frame = ctk.CTkFrame(sf)
-        header_frame.pack(fill="x", padx=5, pady=(0,4))
-        hf = ctk.CTkFont(weight="bold")
-        header_frame.grid_columnconfigure(0, weight=3, minsize=300)
-        header_frame.grid_columnconfigure(1, weight=1, minsize=80)
-        ctk.CTkLabel(header_frame, text="REFERENCIA ARTÍCULO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
-        ctk.CTkLabel(header_frame, text="EXPEDIENTES", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+        # Container for rows so we can clear it on reload
+        rows_container = ctk.CTkFrame(sf)
+        rows_container.pack(fill="both", expand=True)
 
-        colors = ("#FFFFFF", "#F3F4F6")
-        for idx, row in enumerate(filas):
+        def render_rows(filas, page, total_count, page_size):
+            # Clear previous rows
+            for w in rows_container.winfo_children():
+                w.destroy()
+
+            hf = ctk.CTkFont(weight="bold")
+            header_frame = ctk.CTkFrame(rows_container)
+            header_frame.pack(fill="x", padx=5, pady=(0,4))
+            header_frame.grid_columnconfigure(0, weight=3, minsize=300)
+            header_frame.grid_columnconfigure(1, weight=1, minsize=80)
+            ctk.CTkLabel(header_frame, text="REFERENCIA ARTÍCULO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+            ctk.CTkLabel(header_frame, text="EXPEDIENTES", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+
+            colors = ("#FFFFFF", "#F3F4F6")
+            for idx, row in enumerate(filas):
+                try:
+                    referencia, cnt = row[0], row[1]
+                except Exception:
+                    vals = list(row)
+                    referencia = vals[0] if len(vals) > 0 else ''
+                    cnt = vals[1] if len(vals) > 1 else 0
+
+                bg = colors[idx % 2]
+                rf = ctk.CTkFrame(rows_container, fg_color=bg)
+                rf.pack(fill="x", padx=5, pady=2)
+                rf.grid_columnconfigure(0, weight=3, minsize=300)
+                rf.grid_columnconfigure(1, weight=1, minsize=80)
+
+                lbl_ref = ctk.CTkLabel(rf, text=referencia or '-', anchor="w", cursor="hand2")
+                lbl_ref.grid(row=0, column=0, padx=5, sticky="w")
+                lbl_cnt = ctk.CTkLabel(rf, text=str(cnt), anchor="w")
+                lbl_cnt.grid(row=0, column=1, padx=5, sticky="w")
+
+                ctk.CTkButton(rf, text="Ver Expedientes", width=140, command=lambda r=referencia: self.mostrar_expedientes_por_articulo(r)).grid(row=0, column=2, padx=6)
+
+                def on_enter(e, w=rf):
+                    try:
+                        w.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    except Exception:
+                        pass
+                def on_leave(e, w=rf, original=bg):
+                    try:
+                        w.configure(fg_color=original)
+                    except Exception:
+                        pass
+
+                rf.bind("<Enter>", on_enter)
+                rf.bind("<Leave>", on_leave)
+                lbl_ref.bind("<Double-Button-1>", lambda e, r=referencia: self.mostrar_expedientes_por_articulo(r))
+
+            # Ensure numeric types for pagination calculation
             try:
-                referencia, cnt = row[0], row[1]
+                total_count = int(total_count or 0)
             except Exception:
-                vals = list(row)
-                referencia = vals[0] if len(vals) > 0 else ''
-                cnt = vals[1] if len(vals) > 1 else 0
-
-            bg = colors[idx % 2]
-            rf = ctk.CTkFrame(sf, fg_color=bg)
-            rf.pack(fill="x", padx=5, pady=2)
-            rf.grid_columnconfigure(0, weight=3, minsize=300)
-            rf.grid_columnconfigure(1, weight=1, minsize=80)
-
-            lbl_ref = ctk.CTkLabel(rf, text=referencia or '-', anchor="w", cursor="hand2")
-            lbl_ref.grid(row=0, column=0, padx=5, sticky="w")
-            lbl_cnt = ctk.CTkLabel(rf, text=str(cnt), anchor="w")
-            lbl_cnt.grid(row=0, column=1, padx=5, sticky="w")
-
-            btn_ver = ctk.CTkButton(rf, text="Ver Expedientes", width=140, command=lambda r=referencia: self.mostrar_expedientes_por_articulo(r))
-            btn_ver.grid(row=0, column=2, padx=6)
-
-            # Hover effect
-            def on_enter(e, w=rf):
                 try:
-                    w.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    total_count = int(float(total_count))
+                except Exception:
+                    total_count = 0
+            try:
+                page_size = int(page_size)
+            except Exception:
+                page_size = 50
+
+            # Update page info label
+            total_pages = max(1, (total_count + page_size - 1) // page_size)
+            page_state["page"] = page
+            page_state["total_pages"] = total_pages
+            page_label.configure(text=f"Página {page}/{total_pages}")
+
+        def load_articles_thread(page=1):
+            try:
+                self.after(0, lambda: pb.start())
+                search = search_var.get().strip()
+                page_size = int(page_size_opt.get())
+                offset = (page - 1) * page_size
+
+                conn = connect_db()
+                cur = conn.cursor()
+
+                # Count total
+                try:
+                    if search:
+                        cur.execute("SELECT COUNT(DISTINCT referencia_articulo) FROM rma_detalles WHERE referencia_articulo LIKE ?", (f"%{search}%",))
+                    else:
+                        cur.execute("SELECT COUNT(DISTINCT referencia_articulo) FROM rma_detalles")
+                    total = cur.fetchone()[0]
+                except Exception:
+                    total = 0
+
+                # Main query with limit/offset
+                params = []
+                where = ""
+                if search:
+                    where = "WHERE referencia_articulo LIKE ?"
+                    params.append(f"%{search}%")
+
+                sql = f"SELECT referencia_articulo, COUNT(DISTINCT rma_maestro.id) as expedientes_count FROM rma_detalles INNER JOIN rma_maestro ON rma_detalles.rma_id = rma_maestro.id {where} GROUP BY referencia_articulo ORDER BY expedientes_count DESC, referencia_articulo ASC LIMIT ? OFFSET ?"
+                params.extend([page_size, offset])
+                cur.execute(sql, tuple(params))
+                filas = cur.fetchall()
+                conn.close()
+                # Schedule UI update
+                self.after(0, lambda: (pb.stop(), render_rows(filas, page, total, page_size)))
+            except Exception as e:
+                try:
+                    pb.stop()
                 except Exception:
                     pass
-            def on_leave(e, w=rf, original=bg):
-                try:
-                    w.configure(fg_color=original)
-                except Exception:
-                    pass
+                self.after(0, lambda: messagebox.showerror("Error BD", f"No se pudieron cargar los artículos: {e}"))
 
-            rf.bind("<Enter>", on_enter)
-            rf.bind("<Leave>", on_leave)
-            lbl_ref.bind("<Double-Button-1>", lambda e, r=referencia: self.mostrar_expedientes_por_articulo(r))
+        def start_load(page=1):
+            threading.Thread(target=load_articles_thread, args=(page,), daemon=True).start()
+
+        def goto_prev():
+            p = max(1, page_state.get("page", 1) - 1)
+            start_load(p)
+
+        def goto_next():
+            p = page_state.get("page", 1) + 1
+            if page_state.get("total_pages", 1) and p > page_state.get("total_pages"):
+                return
+            start_load(p)
+
+        btn_prev.configure(command=goto_prev)
+        btn_next.configure(command=goto_next)
+        search_entry.bind("<Return>", lambda e: start_load(1))
+
+        # Cargar inicialmente
+        start_load(1)
 
     def mostrar_expedientes_por_articulo(self, referencia):
         """Muestra una ventana con los expedientes asociados a una referencia de artículo."""
@@ -4618,85 +4710,178 @@ class VentanaPrincipal(ctk.CTkToplevel):
         sf.bind("<Configure>", on_sf_config)
         canvas.bind("<Configure>", on_canvas_cfg)
 
-        # Consultar expedientes asociados
+        # Añadimos búsqueda, paginación y carga en background para la lista de expedientes
+        search_var = tk.StringVar()
+        page_state = {"page": 1, "total_pages": 1}
+
+        ctk.CTkLabel(header, text="Buscar (RMA/Cliente/Doc):").grid(row=1, column=0, sticky="w", pady=(6,0))
+        search_entry = ctk.CTkEntry(header, textvariable=search_var, placeholder_text="Texto a buscar...", width=350)
+        search_entry.grid(row=1, column=1, sticky="w", padx=(8,0), pady=(6,0))
+
+        page_size_opt = ctk.CTkOptionMenu(header, values=["10","25","50","100"])
+        page_size_opt.set("50")
+        page_size_opt.grid(row=1, column=2, padx=(12,0), pady=(6,0))
+
+        btn_prev = ctk.CTkButton(header, text="◀", width=40)
+        btn_prev.grid(row=1, column=3, padx=(12,2), pady=(6,0))
+        page_label = ctk.CTkLabel(header, text="Página 1/1")
+        page_label.grid(row=1, column=4, padx=(2,6), pady=(6,0))
+        btn_next = ctk.CTkButton(header, text="▶", width=40)
+        btn_next.grid(row=1, column=5, padx=(2,0), pady=(6,0))
+
+        pb = ttk.Progressbar(header, mode="indeterminate", length=120)
         try:
-            conn = connect_db()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT DISTINCT T2.id, T2.codigo_rma, T2.cliente, T2.numero_documento_cliente, T1.estado_producto
-                FROM rma_detalles T1
-                JOIN rma_maestro T2 ON T1.rma_id = T2.id
-                WHERE T1.referencia_articulo = ?
-                ORDER BY T2.fecha_emision DESC
-            """, (referencia,))
-            filas = cur.fetchall()
-            conn.close()
-        except Exception as e:
-            messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}")
-            return
+            pb.grid(row=1, column=6, padx=(8,0), pady=(6,0))
+        except Exception:
+            pass
 
-        # Header
-        head = ctk.CTkFrame(sf)
-        head.pack(fill="x", padx=5, pady=(0,4))
-        hf = ctk.CTkFont(weight="bold")
-        head.grid_columnconfigure(0, weight=1, minsize=160)
-        head.grid_columnconfigure(1, weight=2, minsize=300)
-        head.grid_columnconfigure(2, weight=1, minsize=140)
-        head.grid_columnconfigure(3, weight=1, minsize=140)
-        ctk.CTkLabel(head, text="RMA", font=hf).grid(row=0, column=0, padx=5, sticky="w")
-        ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
-        ctk.CTkLabel(head, text="DOCUMENTO", font=hf).grid(row=0, column=2, padx=5, sticky="w")
-        ctk.CTkLabel(head, text="ESTADO ARTÍCULO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
+        rows_container = ctk.CTkFrame(sf)
+        rows_container.pack(fill="both", expand=True)
 
-        colors = ("#FFFFFF", "#F3F4F6")
-        for idx, r in enumerate(filas):
+        def render_rows_expedientes(filas, page, total_count, page_size):
+            for w in rows_container.winfo_children():
+                w.destroy()
+
+            head = ctk.CTkFrame(rows_container)
+            head.pack(fill="x", padx=5, pady=(0,4))
+            hf = ctk.CTkFont(weight="bold")
+            head.grid_columnconfigure(0, weight=1, minsize=160)
+            head.grid_columnconfigure(1, weight=2, minsize=300)
+            head.grid_columnconfigure(2, weight=1, minsize=140)
+            head.grid_columnconfigure(3, weight=1, minsize=140)
+            ctk.CTkLabel(head, text="RMA", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="DOCUMENTO", font=hf).grid(row=0, column=2, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="ESTADO ARTÍCULO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
+
+            colors = ("#FFFFFF", "#F3F4F6")
+            for idx, r in enumerate(filas):
+                try:
+                    rma_id, codigo, cliente, num_doc, estado = r
+                except Exception:
+                    vals = list(r)
+                    rma_id = vals[0] if len(vals) > 0 else None
+                    codigo = vals[1] if len(vals) > 1 else ''
+                    cliente = vals[2] if len(vals) > 2 else ''
+                    num_doc = vals[3] if len(vals) > 3 else ''
+                    estado = vals[4] if len(vals) > 4 else ''
+
+                bg = colors[idx % 2]
+                rowf = ctk.CTkFrame(rows_container, fg_color=bg)
+                rowf.pack(fill="x", padx=5, pady=2)
+                rowf.grid_columnconfigure(0, weight=1, minsize=160)
+                rowf.grid_columnconfigure(1, weight=2, minsize=300)
+                rowf.grid_columnconfigure(2, weight=1, minsize=140)
+                rowf.grid_columnconfigure(3, weight=1, minsize=140)
+
+                lbl_codigo = ctk.CTkLabel(rowf, text=codigo or '-', anchor="w", cursor="hand2")
+                lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
+                lbl_cliente = ctk.CTkLabel(rowf, text=cliente or '-', anchor="w")
+                lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
+                lbl_doc = ctk.CTkLabel(rowf, text=num_doc or '-', anchor="w")
+                lbl_doc.grid(row=0, column=2, padx=5, sticky="w")
+                lbl_estado = ctk.CTkLabel(rowf, text=estado or '-', anchor="w")
+                lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
+
+                acciones = ctk.CTkFrame(rowf, fg_color="transparent")
+                acciones.grid(row=0, column=4, padx=5)
+                ctk.CTkButton(acciones, text="Abrir", width=90, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
+
+                def on_ent(e, r=rowf):
+                    try:
+                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    except Exception:
+                        pass
+                def on_lve(e, r=rowf, original=bg):
+                    try:
+                        r.configure(fg_color=original)
+                    except Exception:
+                        pass
+
+                rowf.bind("<Enter>", on_ent)
+                rowf.bind("<Leave>", on_lve)
+                rowf.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+
+            # Ensure numeric types for pagination calculation
             try:
-                rma_id, codigo, cliente, num_doc, estado = r
+                total_count = int(total_count or 0)
             except Exception:
-                vals = list(r)
-                rma_id = vals[0] if len(vals) > 0 else None
-                codigo = vals[1] if len(vals) > 1 else ''
-                cliente = vals[2] if len(vals) > 2 else ''
-                num_doc = vals[3] if len(vals) > 3 else ''
-                estado = vals[4] if len(vals) > 4 else ''
-
-            bg = colors[idx % 2]
-            rowf = ctk.CTkFrame(sf, fg_color=bg)
-            rowf.pack(fill="x", padx=5, pady=2)
-            rowf.grid_columnconfigure(0, weight=1, minsize=160)
-            rowf.grid_columnconfigure(1, weight=2, minsize=300)
-            rowf.grid_columnconfigure(2, weight=1, minsize=140)
-            rowf.grid_columnconfigure(3, weight=1, minsize=140)
-
-            lbl_codigo = ctk.CTkLabel(rowf, text=codigo or '-', anchor="w", cursor="hand2")
-            lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
-            lbl_cliente = ctk.CTkLabel(rowf, text=cliente or '-', anchor="w")
-            lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
-            lbl_doc = ctk.CTkLabel(rowf, text=num_doc or '-', anchor="w")
-            lbl_doc.grid(row=0, column=2, padx=5, sticky="w")
-            lbl_estado = ctk.CTkLabel(rowf, text=estado or '-', anchor="w")
-            lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
-
-            acciones = ctk.CTkFrame(rowf, fg_color="transparent")
-            acciones.grid(row=0, column=4, padx=5)
-            ctk.CTkButton(acciones, text="Abrir", width=90, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
-
-            # Hover
-            def on_ent(e, r=rowf):
                 try:
-                    r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    total_count = int(float(total_count))
+                except Exception:
+                    total_count = 0
+            try:
+                page_size = int(page_size)
+            except Exception:
+                page_size = 50
+
+            total_pages = max(1, (total_count + page_size - 1) // page_size)
+            page_state["page"] = page
+            page_state["total_pages"] = total_pages
+            page_label.configure(text=f"Página {page}/{total_pages}")
+
+        def load_expedientes_thread(page=1):
+            try:
+                self.after(0, lambda: pb.start())
+                search = search_var.get().strip()
+                page_size = int(page_size_opt.get())
+                offset = (page - 1) * page_size
+
+                conn = connect_db()
+                cur = conn.cursor()
+
+                # Count total
+                try:
+                    if search:
+                        cnt_sql = "SELECT COUNT(DISTINCT T2.id) FROM rma_detalles T1 JOIN rma_maestro T2 ON T1.rma_id = T2.id WHERE T1.referencia_articulo = ? AND (T2.codigo_rma LIKE ? OR T2.cliente LIKE ? OR T2.numero_documento_cliente LIKE ?)"
+                        cur.execute(cnt_sql, (referencia, f"%{search}%", f"%{search}%", f"%{search}%"))
+                    else:
+                        cnt_sql = "SELECT COUNT(DISTINCT T2.id) FROM rma_detalles T1 JOIN rma_maestro T2 ON T1.rma_id = T2.id WHERE T1.referencia_articulo = ?"
+                        cur.execute(cnt_sql, (referencia,))
+                    total = cur.fetchone()[0]
+                except Exception:
+                    total = 0
+
+                # Main query
+                params = [referencia]
+                where = ""
+                if search:
+                    where = "AND (T2.codigo_rma LIKE ? OR T2.cliente LIKE ? OR T2.numero_documento_cliente LIKE ?)"
+                    params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+
+                sql = f"SELECT DISTINCT T2.id, T2.codigo_rma, T2.cliente, T2.numero_documento_cliente, T1.estado_producto FROM rma_detalles T1 JOIN rma_maestro T2 ON T1.rma_id = T2.id WHERE T1.referencia_articulo = ? {where} ORDER BY T2.fecha_emision DESC LIMIT ? OFFSET ?"
+                params.extend([page_size, offset])
+                cur.execute(sql, tuple(params))
+                filas = cur.fetchall()
+                conn.close()
+                self.after(0, lambda: (pb.stop(), render_rows_expedientes(filas, page, total, page_size)))
+            except Exception as e:
+                try:
+                    pb.stop()
                 except Exception:
                     pass
-            def on_lve(e, r=rowf, original=bg):
-                try:
-                    r.configure(fg_color=original)
-                except Exception:
-                    pass
+                self.after(0, lambda: messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}"))
 
-            rowf.bind("<Enter>", on_ent)
-            rowf.bind("<Leave>", on_lve)
-            rowf.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
-            lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+        def start_load_expedientes(page=1):
+            threading.Thread(target=load_expedientes_thread, args=(page,), daemon=True).start()
+
+        def prev_page():
+            p = max(1, page_state.get("page", 1) - 1)
+            start_load_expedientes(p)
+
+        def next_page():
+            p = page_state.get("page", 1) + 1
+            if page_state.get("total_pages", 1) and p > page_state.get("total_pages"):
+                return
+            start_load_expedientes(p)
+
+        btn_prev.configure(command=prev_page)
+        btn_next.configure(command=next_page)
+        search_entry.bind("<Return>", lambda e: start_load_expedientes(1))
+
+        # Cargar inicialmente
+        start_load_expedientes(1)
 
     def comprobar_tareas_vencidas(self):
         """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
