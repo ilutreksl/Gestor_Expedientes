@@ -52,7 +52,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.57"
+APP_VERSION = "v0.0.58"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -103,6 +103,36 @@ def invalidate_cache(pattern=None):
         keys_to_delete = [k for k in _query_cache.keys() if pattern in k]
         for key in keys_to_delete:
             del _query_cache[key]
+
+
+def parse_date_to_iso(value: str) -> str:
+    """Intenta parsear una cadena de fecha en varios formatos comunes y devuelve
+    la fecha normalizada en formato ISO YYYY-MM-DD.
+
+    Lanza ValueError si no puede parsearse.
+    """
+    if value is None:
+        raise ValueError("None provided")
+    v = str(value).strip()
+    if v == "":
+        raise ValueError("Empty date")
+
+    # Intentar formatos más comunes
+    formatos = ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%m/%d/%Y"]
+    for fmt in formatos:
+        try:
+            dt = datetime.datetime.strptime(v, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            continue
+
+    # Si ninguno encaja, intentar parseo flexible usando dateutil si está disponible
+    try:
+        from dateutil import parser as _parser  # type: ignore
+        dt = _parser.parse(v, dayfirst=True)
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        raise ValueError(f"Formato de fecha no reconocido: {value}")
 
 # --- Conector unificado: Turso (libSQL) si hay credenciales, si no SQLite local ---
 def connect_db(timeout: float | None = None):
@@ -1709,19 +1739,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # B) PESTAÑA ESTADOS Y FECHAS
         # Fechas de Autorización, Recepción, Proceso y Gestión
         fila_estados = 0
-        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Autorización:", "Fecha_Autorizacion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Autorización:", "Fecha_Autorizacion", tipo="date"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Autorizado Por:", "Autorizado_Por", tipo="optionmenu", opciones=self.OPCIONES["Autorizado_Por"], valor_defecto=self.OPCIONES["Autorizado_Por"][0]); fila_estados += 1
         
         ctk.CTkLabel(estados_fechas_frame, text="--- RECEPCIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
-        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Recepción:", "Fecha_Recepcion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Recepción:", "Fecha_Recepcion", tipo="date"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Recepcionado Por:", "Recepcionado_Por"); fila_estados += 1
         
         ctk.CTkLabel(estados_fechas_frame, text="--- PROCESO ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
-        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Proceso:", "Fecha_Proceso"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Proceso:", "Fecha_Proceso", tipo="date"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Procesado Por:", "Procesado_Por"); fila_estados += 1
         
         ctk.CTkLabel(estados_fechas_frame, text="--- CIERRE/GESTIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
-        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Gestión:", "Fecha_Gestion"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Gestión:", "Fecha_Gestion", tipo="date"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Gestionado Por:", "Gestionado_Por", tipo="optionmenu", opciones=self.OPCIONES["Gestionado_Por"], valor_defecto=self.OPCIONES["Gestionado_Por"][0]); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Fecha para Factura:", "Fecha_para_factura", tipo="optionmenu", opciones=self.obtener_quincenas_futuras(), valor_defecto=self.obtener_quincenas_futuras()[0]); fila_estados += 1
 
@@ -2068,10 +2098,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         for campo in campos_a_insertar:
             entry = getattr(self, f"entry_{campo}")
-            # Obtener el valor según el tipo de widget
+            # Obtener el valor según el tipo de widget; soportar CTkDatePicker con get_date()/get()
             try:
                 if isinstance(entry, ctk.CTkTextbox):
                     valor = entry.get("1.0", "end-1c").strip()
+                elif hasattr(entry, 'get_date'):
+                    # CTkDatePicker exposes get_date() and also get() alias
+                    valor = entry.get_date()
                 elif hasattr(entry, 'get'):
                     valor = entry.get()
                 else:
@@ -2079,7 +2112,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
             except Exception:
                 # Fallback seguro
                 try:
-                    valor = entry.get()
+                    if hasattr(entry, 'get_date'):
+                        valor = entry.get_date()
+                    else:
+                        valor = entry.get()
                 except Exception:
                     valor = ''
             
@@ -2090,11 +2126,24 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Aquí deberías mostrar un mensaje de error en la interfaz
                 return
             
-            # Conversión especial para Autorizacion (SI/NO a 1/0)
-            if campo == 'Autorizacion':
-                datos_maestro[campo.lower()] = 1 if valor == "SI" else 0
+            # Para los campos de fecha, validar y normalizar a ISO YYYY-MM-DD
+            DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente'}
+            if campo in DATE_FIELDS:
+                # Permitir valor vacío
+                if valor is None or str(valor).strip() == "":
+                    datos_maestro[campo.lower()] = ''
+                else:
+                    try:
+                        datos_maestro[campo.lower()] = parse_date_to_iso(valor)
+                    except ValueError as e:
+                        messagebox.showerror("Fecha inválida", f"El campo {campo} debe ser una fecha válida. Valor: {valor}")
+                        return
             else:
-                datos_maestro[campo.lower()] = valor
+                # Conversión especial para Autorizacion (SI/NO a 1/0)
+                if campo == 'Autorizacion':
+                    datos_maestro[campo.lower()] = 1 if valor == "SI" else 0
+                else:
+                    datos_maestro[campo.lower()] = valor
 
         # Campos automáticos/calculados
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
@@ -2243,6 +2292,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 try:
                     if isinstance(entry, ctk.CTkTextbox):
                         valor = entry.get("1.0", "end-1c").strip()
+                    elif hasattr(entry, 'get_date'):
+                        valor = entry.get_date()
                     elif hasattr(entry, 'get'):
                         valor = entry.get()
                     else:
@@ -2250,15 +2301,30 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 except Exception:
                     # Fallback
                     try:
-                        valor = entry.get()
+                        if hasattr(entry, 'get_date'):
+                            valor = entry.get_date()
+                        else:
+                            valor = entry.get()
                     except Exception:
                         valor = ''
-                
-                # Conversión especial para Autorizacion (SI/NO a 1/0)
-                if campo == 'Autorizacion':
-                    datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
+
+                # Normalizar fechas si corresponde
+                DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente'}
+                if campo in DATE_FIELDS:
+                    if valor is None or str(valor).strip() == "":
+                        datos_maestro[campo.lower()] = ''
+                    else:
+                        try:
+                            datos_maestro[campo.lower()] = parse_date_to_iso(valor)
+                        except ValueError:
+                            # Guardar el texto tal cual si no se puede parsear (no recomendado), pero preferimos ''
+                            datos_maestro[campo.lower()] = str(valor)
                 else:
-                    datos_maestro[campo.lower()] = valor
+                    # Conversión especial para Autorizacion (SI/NO a 1/0)
+                    if campo == 'Autorizacion':
+                        datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
+                    else:
+                        datos_maestro[campo.lower()] = valor
         
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
         
@@ -2505,6 +2571,24 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         entry.insert(0, str(valor) if valor is not None else "")
                         
                         entry.configure(state=estado_original)
+
+                    # Tratamiento para DatePicker (CTkDatePicker o widgets similares)
+                    elif hasattr(entry, 'set_date'):
+                        try:
+                            # Si el valor es nulo, limpiar
+                            if valor is None:
+                                entry.set_date(None)
+                            else:
+                                entry.set_date(valor)
+                        except Exception:
+                            # Fallback: escribir directamente en el sub-entry si existe
+                            try:
+                                if hasattr(entry, 'date_entry'):
+                                    entry.date_entry.configure(state='normal')
+                                    entry.date_entry.delete(0, tk.END)
+                                    entry.date_entry.insert(0, str(valor) if valor is not None else '')
+                            except Exception:
+                                pass
                         
                     # Tratamiento para OptionMenu General
                     elif isinstance(entry, ctk.CTkOptionMenu):

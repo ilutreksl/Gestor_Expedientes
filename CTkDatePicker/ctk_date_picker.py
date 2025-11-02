@@ -208,6 +208,60 @@ class CTkDatePicker(ctk.CTkFrame):
 
         return self.date_entry.get()
 
+    # Convenience alias used by the application: allow widget.get() to return the date
+    def get(self):
+        return self.get_date()
+
+    def set_date(self, date_obj):
+        """
+        Set the date shown in the entry from a date or datetime object.
+
+        Parameters:
+        - date_obj (datetime.date or datetime.datetime or str): if string, it will be
+          parsed using the current date_format; if date/datetime, it will be formatted.
+        """
+        if date_obj is None:
+            # Clear the entry
+            self.date_entry.configure(state='normal')
+            self.date_entry.delete(0, tk.END)
+            return
+
+        # If a string is provided, try to parse a few common formats
+        if isinstance(date_obj, str):
+            # Try direct assignment if it already matches the format
+            try:
+                parsed = datetime.strptime(date_obj, self.date_format)
+                self.selected_date = parsed
+                self.date_entry.configure(state='normal')
+                self.date_entry.delete(0, tk.END)
+                self.date_entry.insert(0, parsed.strftime(self.date_format))
+                return
+            except Exception:
+                # Try some common variants
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                    try:
+                        parsed = datetime.strptime(date_obj, fmt)
+                        self.selected_date = parsed
+                        self.date_entry.configure(state='normal')
+                        self.date_entry.delete(0, tk.END)
+                        self.date_entry.insert(0, parsed.strftime(self.date_format))
+                        return
+                    except Exception:
+                        continue
+                # If none matched, just put the raw text (user may want to edit)
+                self.date_entry.configure(state='normal')
+                self.date_entry.delete(0, tk.END)
+                self.date_entry.insert(0, date_obj)
+                return
+
+        # If it's a date/datetime object
+        if hasattr(date_obj, 'strftime'):
+            self.selected_date = date_obj
+            self.date_entry.configure(state='normal')
+            self.date_entry.delete(0, tk.END)
+            self.date_entry.insert(0, date_obj.strftime(self.date_format))
+            return
+
     def set_allow_manual_input(self, value):
         """
         Enable or disable manual date input.
