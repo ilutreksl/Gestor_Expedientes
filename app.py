@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.52"
+APP_VERSION = "v0.0.53"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3244,14 +3244,51 @@ class VentanaPrincipal(ctk.CTkToplevel):
             try:
                 conn = connect_db()
                 cursor = conn.cursor()
-                cursor.execute("SELECT nombre_usuario, rol FROM usuarios")
+                # Asegurarnos de que la columna email exista (añadir si no)
+                try:
+                    cursor.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+                    conn.commit()
+                except Exception:
+                    # Ignorar si ya existe o si el backend no permite ALTER (p.ej. versiones restringidas)
+                    pass
+                # Seleccionamos también el email si existe
+                try:
+                    cursor.execute("SELECT nombre_usuario, rol, COALESCE(email, '') FROM usuarios")
+                except Exception:
+                    # Fallback si la columna no existe por alguna razón
+                    cursor.execute("SELECT nombre_usuario, rol FROM usuarios")
                 usuarios = cursor.fetchall()
 
-                for i, (usuario, rol) in enumerate(usuarios):
+                for i, row in enumerate(usuarios):
+                    # row can be (usuario, rol) or (usuario, rol, email)
+                    usuario = row[0] if len(row) > 0 else ''
+                    rol = row[1] if len(row) > 1 else ''
+                    display_email = row[2] if len(row) > 2 else ''
+
                     row_frame = ctk.CTkFrame(scroll_frame)
                     row_frame.pack(fill="x", padx=5, pady=2)
-                    
-                    ctk.CTkLabel(row_frame, text=f"{usuario} ({rol})").pack(side="left", padx=5)
+
+                    label_text = f"{usuario} ({rol})"
+                    if display_email:
+                        label_text += f" — {display_email}"
+                    lbl = ctk.CTkLabel(row_frame, text=label_text)
+                    lbl.pack(side="left", padx=5)
+
+                    # Hacer clic en el label abre editor de usuario, excepto para admin
+                    if usuario != "admin":
+                        def make_editor(u=usuario):
+                            return lambda e=None: editar_usuario(u)
+                        try:
+                            lbl.bind("<Button-1>", make_editor(usuario))
+                            lbl.configure(cursor="hand2")
+                        except Exception:
+                            pass
+                    else:
+                        # Mostrar cursor normal y no permitir edición
+                        try:
+                            lbl.configure(cursor="")
+                        except Exception:
+                            pass
                     
                     if usuario != "admin":  # No permitir eliminar al usuario admin
                         def make_delete(u=usuario):
@@ -3263,6 +3300,107 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 messagebox.showerror("Error", f"Error al cargar usuarios: {e}")
             finally:
                 conn.close()
+
+        def editar_usuario(username):
+            """Abrir dialogo para editar rol, password y email del usuario seleccionado."""
+            # Proteger al usuario admin: no se puede editar
+            if username == "admin":
+                messagebox.showerror("Acceso denegado", "El usuario 'admin' no se puede editar ni eliminar.")
+                return
+            try:
+                conn = connect_db()
+                cur = conn.cursor()
+                # Intentar obtener email si existe
+                try:
+                    cur.execute("SELECT nombre_usuario, rol, COALESCE(email, '') FROM usuarios WHERE nombre_usuario = ?", (username,))
+                    row = cur.fetchone()
+                    if row and len(row) >= 3:
+                        _, rol_actual, email_actual = row
+                    else:
+                        cur.execute("SELECT nombre_usuario, rol FROM usuarios WHERE nombre_usuario = ?", (username,))
+                        row2 = cur.fetchone()
+                        rol_actual = row2[1] if row2 else ''
+                        email_actual = ''
+                except Exception:
+                    # fallback
+                    cur.execute("SELECT nombre_usuario, rol FROM usuarios WHERE nombre_usuario = ?", (username,))
+                    row2 = cur.fetchone()
+                    rol_actual = row2[1] if row2 else ''
+                    email_actual = ''
+                conn.close()
+            except Exception:
+                rol_actual = ''
+                email_actual = ''
+
+            # Editor modal
+            ed = ctk.CTkToplevel(ventana)
+            ed.title(f"Editar usuario: {username}")
+            ed.geometry("420x260")
+            ed.grab_set()
+
+            f = ctk.CTkFrame(ed)
+            f.pack(fill="both", expand=True, padx=12, pady=12)
+
+            ctk.CTkLabel(f, text=f"Usuario: {username}", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,8))
+
+            ctk.CTkLabel(f, text="Rol:").grid(row=1, column=0, sticky="e", padx=5, pady=6)
+            rol_menu = ctk.CTkOptionMenu(f, values=roles_disponibles)
+            rol_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=6)
+            try:
+                rol_menu.set(rol_actual or "usuario")
+            except Exception:
+                rol_menu.set("usuario")
+
+            ctk.CTkLabel(f, text="Nueva contraseña:").grid(row=2, column=0, sticky="e", padx=5, pady=6)
+            new_pass = ctk.CTkEntry(f, show="*")
+            new_pass.grid(row=2, column=1, sticky="ew", padx=5, pady=6)
+
+            ctk.CTkLabel(f, text="Email:").grid(row=3, column=0, sticky="e", padx=5, pady=6)
+            email_entry = ctk.CTkEntry(f)
+            email_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=6)
+            try:
+                email_entry.insert(0, email_actual)
+            except Exception:
+                pass
+
+            f.grid_columnconfigure(1, weight=1)
+
+            def guardar_cambios():
+                nuevo_rol = rol_menu.get()
+                nueva_pass = new_pass.get().strip()
+                nuevo_email = email_entry.get().strip()
+                try:
+                    conn2 = connect_db()
+                    cur2 = conn2.cursor()
+                    # Si se proporcionó nueva contraseña, hashearla
+                    if nueva_pass:
+                        hashed = bcrypt.hashpw(nueva_pass.encode(), bcrypt.gensalt())
+                        try:
+                            cur2.execute("UPDATE usuarios SET password_hash = ? WHERE nombre_usuario = ?", (hashed, username))
+                        except Exception:
+                            pass
+                    # Actualizar rol y email
+                    try:
+                        cur2.execute("UPDATE usuarios SET rol = ?, email = ? WHERE nombre_usuario = ?", (nuevo_rol, nuevo_email, username))
+                    except Exception:
+                        # Si UPDATE falla porque la columna email no existe, intentar crearla y reintentar
+                        try:
+                            cur2.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+                            cur2.execute("UPDATE usuarios SET rol = ?, email = ? WHERE nombre_usuario = ?", (nuevo_rol, nuevo_email, username))
+                        except Exception:
+                            pass
+                    conn2.commit()
+                    conn2.close()
+                    messagebox.showinfo("Éxito", "Usuario actualizado correctamente.")
+                    ed.destroy()
+                    actualizar_lista_usuarios()
+                except sqlite3.Error as e:
+                    messagebox.showerror("Error", f"No se pudo actualizar usuario: {e}")
+
+            btn_frame = ctk.CTkFrame(f)
+            btn_frame.grid(row=4, column=0, columnspan=2, pady=(12,0))
+            ctk.CTkButton(btn_frame, text="Guardar", command=guardar_cambios).pack(side="left", padx=6)
+            ctk.CTkButton(btn_frame, text="Cancelar", command=ed.destroy).pack(side="left", padx=6)
 
         def eliminar_usuario(username):
             if messagebox.askyesno("Confirmar", f"¿Está seguro de eliminar al usuario {username}?"):
