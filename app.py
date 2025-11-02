@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.51"
+APP_VERSION = "v0.0.52"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3473,7 +3473,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         entry_buscar.grid(row=1, column=1, sticky="ew", padx=(8,0), pady=(8,0))
         # Filtro por estado
         ctk.CTkLabel(header, text="Filtrar estado:").grid(row=1, column=2, sticky="w", padx=(12,6), pady=(8,0))
-        estado_filter = ctk.CTkOptionMenu(header, values=["Todos", "En Progreso", "Enviado", "Completado"])
+        # Incluir 'Exportado' como una opción de filtro de estado
+        estado_filter = ctk.CTkOptionMenu(header, values=["Todos", "En Progreso", "Enviado", "Completado", "Exportado"])
         estado_filter.set("Todos")
         estado_filter.grid(row=1, column=3, sticky="w", padx=(0,6), pady=(8,0))
         header.grid_columnconfigure(1, weight=1)
@@ -3759,7 +3760,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                     lbl_nombre = ctk.CTkLabel(row, text=nombre or "-", anchor="w", cursor="hand2")
                     lbl_nombre.grid(row=0, column=0, padx=5, sticky="w")
-                    opciones_estado = ["", "En Progreso", "Enviado", "Completado"]
+                    opciones_estado = ["", "En Progreso", "Enviado", "Completado", "Exportado"]
                     try:
                         opt = ctk.CTkOptionMenu(row, values=opciones_estado)
                         # Si no hay estado, dejamos en vacío (primer opción)
@@ -4042,6 +4043,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                         pass
                                 connh.commit()
                                 connh.close()
+                                # Refrescar la lista de proveedores para que muestre el nuevo estado
+                                try:
+                                    cargar_proveedores()
+                                except Exception:
+                                    pass
                             except Exception as e:
                                 # No interrumpimos la exportación por un fallo en el historial; registramos en consola
                                 try:
