@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.49"
+APP_VERSION = "v0.0.50"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3970,9 +3970,30 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             if not messagebox.askyesno('Exportar', f'El archivo {fname} ya existe. ¿Desea sobreescribirlo?'):
                                 return
 
-                        # Guardar Excel
-                        df.to_excel(file_path, index=False)
-                        messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
+                        # Guardar Excel y ajustar anchos de columna automáticamente
+                        try:
+                            # Usamos openpyxl a través de pandas ExcelWriter para poder ajustar columnas
+                            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                                df.to_excel(writer, index=False, sheet_name='Expedientes')
+                                workbook = writer.book
+                                worksheet = writer.sheets['Expedientes']
+
+                                # Ajustar ancho: calcular longitud máxima entre valores y encabezado
+                                from openpyxl.utils import get_column_letter
+                                for i, col in enumerate(df.columns):
+                                    if df.empty:
+                                        max_len = len(str(col))
+                                    else:
+                                        # map len over stringified values, ignore None
+                                        col_max = df[col].astype(str).map(len).max()
+                                        max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
+                                    # añadir un pequeño padding y limitar a un ancho razonable
+                                    adjusted_width = min(max_len + 2, 60)
+                                    worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
+
+                            messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
+                        except Exception as e:
+                            messagebox.showerror('Exportar', f'Error exportando a Excel (asegúrate de tener openpyxl): {e}')
                     except Exception as e:
                         messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
 
