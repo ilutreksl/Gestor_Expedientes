@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.50"
+APP_VERSION = "v0.0.51"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -814,6 +814,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         estados_posibles = self.OPCIONES.get("Estado", ["Todos"])
         if "Todos" not in estados_posibles:
             estados_posibles.insert(0, "Todos")
+        # Asegurarnos de que el estado 'Exportado' esté disponible como opción de filtro
+        if 'Exportado' not in estados_posibles:
+            estados_posibles.append('Exportado')
             
         ctk.CTkLabel(filtro_frame, text="Estado:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
         self.filtro_estado = ctk.CTkOptionMenu(filtro_frame, 
@@ -3992,6 +3995,59 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                     worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
 
                             messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
+
+                            # Registrar en historial del proveedor que se exportó el listado a Excel
+                            try:
+                                connh = connect_db()
+                                curh = connh.cursor()
+                                # Conteo de expedientes y lista de códigos RMA
+                                try:
+                                    rma_codes = [str(r[1]) for r in rows if len(r) > 1 and r[1] is not None]
+                                except Exception:
+                                    rma_codes = []
+                                count = len(rows)
+                                codes_str = ', '.join(rma_codes)
+                                # Truncar si la lista es muy larga para no crear comentarios gigantes
+                                if len(codes_str) > 500:
+                                    codes_str = codes_str[:500] + '...'
+
+                                comentario = f'Exportado {count} expedientes a Excel: {os.path.basename(file_path)}'
+                                if codes_str:
+                                    comentario += f' (RMAs: {codes_str})'
+
+                                usuario = getattr(self, 'username', '') if hasattr(self, 'username') else ''
+                                # Insertamos comentario; marcamos estado como 'Exportado'
+                                curh.execute(
+                                    "INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)",
+                                    (proveedor, 'Exportado', comentario, usuario)
+                                )
+
+                                # Actualizar la tabla rma_proveedor para reflejar el nuevo estado
+                                try:
+                                    try:
+                                        curh.execute(
+                                            "INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?) ON CONFLICT(proveedor) DO UPDATE SET estado=excluded.estado",
+                                            (proveedor, 'Exportado')
+                                        )
+                                    except Exception:
+                                        # Fallback a UPDATE/INSERT si el dialecto no soporta ON CONFLICT
+                                        curh.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", ('Exportado', proveedor))
+                                        if getattr(curh, 'rowcount', 0) == 0:
+                                            curh.execute("INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?)", (proveedor, 'Exportado'))
+                                except Exception:
+                                    # No bloqueamos la exportación por este error; lo registramos en consola
+                                    try:
+                                        print('Warning: no se pudo actualizar rma_proveedor estado a Exportado')
+                                    except Exception:
+                                        pass
+                                connh.commit()
+                                connh.close()
+                            except Exception as e:
+                                # No interrumpimos la exportación por un fallo en el historial; registramos en consola
+                                try:
+                                    print('Warning: no se pudo escribir en rma_proveedor_hist:', e)
+                                except Exception:
+                                    pass
                         except Exception as e:
                             messagebox.showerror('Exportar', f'Error exportando a Excel (asegúrate de tener openpyxl): {e}')
                     except Exception as e:
