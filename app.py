@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.47"
+APP_VERSION = "v0.0.48"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3833,10 +3833,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     # Click en nombre abre expedientes
                     lbl_nombre.bind("<Button-1>", lambda e, nombre=nombre: mostrar_expedientes_proveedor(nombre))
 
-                    # Persistir cambio de estado (upsert)
-                    def make_state_updater(proveedor_nombre):
+                    # Persistir cambio de estado (upsert) y anotar en historial
+                    def make_state_updater(proveedor_nombre, prev_estado):
                         def updater(selected_value):
                             val = selected_value
+                            # Si no hay cambio, no hacemos nada
+                            try:
+                                if (prev_estado is not None) and (str(val) == str(prev_estado)):
+                                    return
+                            except Exception:
+                                pass
                             try:
                                 conn3 = connect_db()
                                 cur3 = conn3.cursor()
@@ -3849,20 +3855,51 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                 except sqlite3.Error:
                                     # Fallback: intentar UPDATE, si no existe, INSERT
                                     cur3.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", (val, proveedor_nombre))
-                                    if cur3.rowcount == 0:
+                                    if getattr(cur3, 'rowcount', 0) == 0:
                                         cur3.execute("INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?)", (proveedor_nombre, val))
-                                conn3.commit()
-                                conn3.close()
+
+                                # Añadir entrada en historial de proveedor
+                                try:
+                                    # Asegurar tabla existe
+                                    cur3.execute("CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                                except Exception:
+                                    pass
+                                try:
+                                    usuario = getattr(self, 'username', 'unknown')
+                                    # Guardar comentario explicativo del cambio de estado
+                                    if prev_estado is None or prev_estado == "":
+                                        comentario_text = f"Estado establecido a: {val}"
+                                    else:
+                                        comentario_text = f"Cambio de estado de '{prev_estado}' a '{val}'"
+                                    cur3.execute("INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)", (proveedor_nombre, val, comentario_text, usuario))
+                                except Exception:
+                                    # Si falla en este backend, intentamos igual con conexión nueva/SQLite local (no preferido)
+                                    pass
+
+                                try:
+                                    conn3.commit()
+                                except Exception:
+                                    pass
+                                try:
+                                    conn3.close()
+                                except Exception:
+                                    pass
+
+                                # Refrescar la lista para mostrar el último historial
+                                try:
+                                    cargar_proveedores()
+                                except Exception:
+                                    pass
                             except Exception as e:
                                 messagebox.showerror("Error BD", f"No se pudo guardar el estado: {e}")
                         return updater
 
                     try:
                         # CTkOptionMenu passes the selected value to the command
-                        opt.configure(command=make_state_updater(nombre))
+                        opt.configure(command=make_state_updater(nombre, estado_actual))
                     except Exception:
                         if isinstance(opt, ctk.CTkEntry):
-                            opt.bind("<FocusOut>", lambda e, nombre=nombre, w=opt: make_state_updater(nombre)(w.get()))
+                            opt.bind("<FocusOut>", lambda e, nombre=nombre, w=opt: make_state_updater(nombre, estado_actual)(w.get()))
 
             except sqlite3.Error as e:
                 messagebox.showerror("Error BD", f"No se pudo cargar lista de proveedores: {e}")
