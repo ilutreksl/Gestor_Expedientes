@@ -52,7 +52,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.58"
+APP_VERSION = "v0.0.59"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2317,8 +2317,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         try:
                             datos_maestro[campo.lower()] = parse_date_to_iso(valor)
                         except ValueError:
-                            # Guardar el texto tal cual si no se puede parsear (no recomendado), pero preferimos ''
-                            datos_maestro[campo.lower()] = str(valor)
+                            # Mostrar error y abortar la recolección para forzar corrección
+                            messagebox.showerror("Fecha inválida", f"El campo {campo} debe contener una fecha válida. Valor: {valor}")
+                            return None
                 else:
                     # Conversión especial para Autorizacion (SI/NO a 1/0)
                     if campo == 'Autorizacion':
@@ -2664,6 +2665,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # 2. Obtener datos nuevos del formulario
         datos_nuevos = self.obtener_datos_actuales_maestro()
         
+        # Si la recolección devolvió None, significa que había fechas inválidas y ya se mostró un error
+        if datos_nuevos is None:
+            conn.close()
+            return
+
         # 2.1. INTEGRACIÓN DE LA TRAZABILIDAD - Calcular el nuevo estado
         estado_nuevo = self.determinar_estado_rma(datos_nuevos)
         
