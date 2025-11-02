@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.55"
+APP_VERSION = "v0.0.56"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -617,6 +617,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                        command=self.mostrar_lista_rma,
                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
         self.btn_lista.grid(row=fila, column=0, padx=20, pady=10)
+        fila += 1
+
+        # Botón Artículos: abre ventana con listado de artículos y conteo de expedientes asociados
+        self.btn_articulos = ctk.CTkButton(self.sidebar_frame,
+                                           text="📦 Artículos",
+                                           command=self.mostrar_articulos_window,
+                                           font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+        self.btn_articulos.grid(row=fila, column=0, padx=20, pady=10)
         fila += 1
 
         self.btn_estadisticas = ctk.CTkButton(self.sidebar_frame,
@@ -4427,6 +4435,268 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Cargar inicialmente
         cargar_proveedores()
+
+    def mostrar_articulos_window(self):
+        """Muestra una ventana con el listado de artículos y la cantidad de expedientes relacionados."""
+        # Evitar múltiples instancias
+        if hasattr(self, 'articulos_window') and getattr(self, 'articulos_window').winfo_exists():
+            getattr(self, 'articulos_window').focus()
+            return
+
+        self.articulos_window = ctk.CTkToplevel(self)
+        win = self.articulos_window
+        win.title("Artículos")
+        win.geometry("800x600")
+        win.grab_set()
+
+        main = ctk.CTkFrame(win)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        header = ctk.CTkFrame(main)
+        header.pack(fill="x", pady=(0,8))
+        ctk.CTkLabel(header, text="Listado de Artículos", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        # Frame para la lista con scroll
+        list_frame = ctk.CTkFrame(main)
+        list_frame.pack(fill="both", expand=True)
+
+        canvas = ctk.CTkCanvas(list_frame, borderwidth=0, highlightthickness=0)
+        # Use a native Frame inside a canvas for scrollable content
+        try:
+            # If customtkinter doesn't expose CTkCanvas in user's version, fallback to tkinter.Canvas
+            from tkinter import Canvas as _Canvas
+            canvas = _Canvas(list_frame, borderwidth=0, highlightthickness=0)
+        except Exception:
+            pass
+
+        sb = ctk.CTkScrollbar(list_frame, orientation="vertical", command=lambda *args: canvas.yview(*args))
+        canvas.configure(yscrollcommand=lambda *args: sb.set(*args))
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        sf = ctk.CTkFrame(canvas)
+        # Create window inside canvas
+        # Create window inside canvas and ensure it resizes to canvas width so headers and rows align
+        try:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+        except Exception:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+
+        def on_sf_configure(event):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except Exception:
+                pass
+
+        def on_canvas_config(event):
+            try:
+                canvas.itemconfig(window_id, width=event.width)
+            except Exception:
+                pass
+
+        sf.bind("<Configure>", on_sf_configure)
+        canvas.bind("<Configure>", on_canvas_config)
+
+        # Consultar DB: contar expedientes por referencia de artículo
+        try:
+            conn = connect_db()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT referencia_articulo, COUNT(DISTINCT rma_maestro.id) as expedientes_count
+                FROM rma_detalles
+                INNER JOIN rma_maestro ON rma_detalles.rma_id = rma_maestro.id
+                WHERE referencia_articulo IS NOT NULL AND TRIM(referencia_articulo) != ''
+                GROUP BY referencia_articulo
+                ORDER BY expedientes_count DESC, referencia_articulo ASC
+            """)
+            filas = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"No se pudieron cargar los artículos: {e}")
+            return
+
+        # Encabezado (usar grid y configurar pesos para alinear con las filas)
+        header_frame = ctk.CTkFrame(sf)
+        header_frame.pack(fill="x", padx=5, pady=(0,4))
+        hf = ctk.CTkFont(weight="bold")
+        header_frame.grid_columnconfigure(0, weight=3, minsize=300)
+        header_frame.grid_columnconfigure(1, weight=1, minsize=80)
+        ctk.CTkLabel(header_frame, text="REFERENCIA ARTÍCULO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+        ctk.CTkLabel(header_frame, text="EXPEDIENTES", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+
+        colors = ("#FFFFFF", "#F3F4F6")
+        for idx, row in enumerate(filas):
+            try:
+                referencia, cnt = row[0], row[1]
+            except Exception:
+                vals = list(row)
+                referencia = vals[0] if len(vals) > 0 else ''
+                cnt = vals[1] if len(vals) > 1 else 0
+
+            bg = colors[idx % 2]
+            rf = ctk.CTkFrame(sf, fg_color=bg)
+            rf.pack(fill="x", padx=5, pady=2)
+            rf.grid_columnconfigure(0, weight=3, minsize=300)
+            rf.grid_columnconfigure(1, weight=1, minsize=80)
+
+            lbl_ref = ctk.CTkLabel(rf, text=referencia or '-', anchor="w", cursor="hand2")
+            lbl_ref.grid(row=0, column=0, padx=5, sticky="w")
+            lbl_cnt = ctk.CTkLabel(rf, text=str(cnt), anchor="w")
+            lbl_cnt.grid(row=0, column=1, padx=5, sticky="w")
+
+            btn_ver = ctk.CTkButton(rf, text="Ver Expedientes", width=140, command=lambda r=referencia: self.mostrar_expedientes_por_articulo(r))
+            btn_ver.grid(row=0, column=2, padx=6)
+
+            # Hover effect
+            def on_enter(e, w=rf):
+                try:
+                    w.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                except Exception:
+                    pass
+            def on_leave(e, w=rf, original=bg):
+                try:
+                    w.configure(fg_color=original)
+                except Exception:
+                    pass
+
+            rf.bind("<Enter>", on_enter)
+            rf.bind("<Leave>", on_leave)
+            lbl_ref.bind("<Double-Button-1>", lambda e, r=referencia: self.mostrar_expedientes_por_articulo(r))
+
+    def mostrar_expedientes_por_articulo(self, referencia):
+        """Muestra una ventana con los expedientes asociados a una referencia de artículo."""
+        if not referencia:
+            messagebox.showinfo("Info", "Referencia vacía.")
+            return
+
+        # Evitar múltiples instancias por la misma referencia
+        name = f"exp_{referencia}"
+        # No strict unique naming; we just open a new window
+        vent = ctk.CTkToplevel(self)
+        vent.title(f"Expedientes - {referencia}")
+        vent.geometry("900x600")
+        vent.grab_set()
+
+        main = ctk.CTkFrame(vent)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        header = ctk.CTkFrame(main)
+        header.pack(fill="x", pady=(0,8))
+        ctk.CTkLabel(header, text=f"Expedientes asociados a: {referencia}", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        list_frame = ctk.CTkFrame(main)
+        list_frame.pack(fill="both", expand=True)
+
+        canvas = ctk.CTkCanvas(list_frame, borderwidth=0, highlightthickness=0)
+        try:
+            from tkinter import Canvas as _Canvas
+            canvas = _Canvas(list_frame, borderwidth=0, highlightthickness=0)
+        except Exception:
+            pass
+        sb = ctk.CTkScrollbar(list_frame, orientation="vertical", command=lambda *args: canvas.yview(*args))
+        canvas.configure(yscrollcommand=lambda *args: sb.set(*args))
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        sf = ctk.CTkFrame(canvas)
+        try:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+        except Exception:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+
+        def on_sf_config(event):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except Exception:
+                pass
+
+        def on_canvas_cfg(event):
+            try:
+                canvas.itemconfig(window_id, width=event.width)
+            except Exception:
+                pass
+
+        sf.bind("<Configure>", on_sf_config)
+        canvas.bind("<Configure>", on_canvas_cfg)
+
+        # Consultar expedientes asociados
+        try:
+            conn = connect_db()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT DISTINCT T2.id, T2.codigo_rma, T2.cliente, T2.numero_documento_cliente, T1.estado_producto
+                FROM rma_detalles T1
+                JOIN rma_maestro T2 ON T1.rma_id = T2.id
+                WHERE T1.referencia_articulo = ?
+                ORDER BY T2.fecha_emision DESC
+            """, (referencia,))
+            filas = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}")
+            return
+
+        # Header
+        head = ctk.CTkFrame(sf)
+        head.pack(fill="x", padx=5, pady=(0,4))
+        hf = ctk.CTkFont(weight="bold")
+        head.grid_columnconfigure(0, weight=1, minsize=160)
+        head.grid_columnconfigure(1, weight=2, minsize=300)
+        head.grid_columnconfigure(2, weight=1, minsize=140)
+        head.grid_columnconfigure(3, weight=1, minsize=140)
+        ctk.CTkLabel(head, text="RMA", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+        ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+        ctk.CTkLabel(head, text="DOCUMENTO", font=hf).grid(row=0, column=2, padx=5, sticky="w")
+        ctk.CTkLabel(head, text="ESTADO ARTÍCULO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
+
+        colors = ("#FFFFFF", "#F3F4F6")
+        for idx, r in enumerate(filas):
+            try:
+                rma_id, codigo, cliente, num_doc, estado = r
+            except Exception:
+                vals = list(r)
+                rma_id = vals[0] if len(vals) > 0 else None
+                codigo = vals[1] if len(vals) > 1 else ''
+                cliente = vals[2] if len(vals) > 2 else ''
+                num_doc = vals[3] if len(vals) > 3 else ''
+                estado = vals[4] if len(vals) > 4 else ''
+
+            bg = colors[idx % 2]
+            rowf = ctk.CTkFrame(sf, fg_color=bg)
+            rowf.pack(fill="x", padx=5, pady=2)
+            rowf.grid_columnconfigure(0, weight=1, minsize=160)
+            rowf.grid_columnconfigure(1, weight=2, minsize=300)
+            rowf.grid_columnconfigure(2, weight=1, minsize=140)
+            rowf.grid_columnconfigure(3, weight=1, minsize=140)
+
+            lbl_codigo = ctk.CTkLabel(rowf, text=codigo or '-', anchor="w", cursor="hand2")
+            lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
+            lbl_cliente = ctk.CTkLabel(rowf, text=cliente or '-', anchor="w")
+            lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
+            lbl_doc = ctk.CTkLabel(rowf, text=num_doc or '-', anchor="w")
+            lbl_doc.grid(row=0, column=2, padx=5, sticky="w")
+            lbl_estado = ctk.CTkLabel(rowf, text=estado or '-', anchor="w")
+            lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
+
+            acciones = ctk.CTkFrame(rowf, fg_color="transparent")
+            acciones.grid(row=0, column=4, padx=5)
+            ctk.CTkButton(acciones, text="Abrir", width=90, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
+
+            # Hover
+            def on_ent(e, r=rowf):
+                try:
+                    r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                except Exception:
+                    pass
+            def on_lve(e, r=rowf, original=bg):
+                try:
+                    r.configure(fg_color=original)
+                except Exception:
+                    pass
+
+            rowf.bind("<Enter>", on_ent)
+            rowf.bind("<Leave>", on_lve)
+            rowf.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+            lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
 
     def comprobar_tareas_vencidas(self):
         """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
