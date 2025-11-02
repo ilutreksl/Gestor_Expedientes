@@ -52,7 +52,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.59"
+APP_VERSION = "v0.0.60"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -682,12 +682,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.btn_gestion_rmp.grid(row=fila, column=0, padx=20, pady=10)
         fila += 1
 
-        self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
-                                        text="Backup BD",
-                                        command=self.crear_copia_seguridad_db,
-                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_buscar.grid(row=fila, column=0, padx=20, pady=10)
-        fila += 1
+        # Mostrar botón de Backup solo para administradores y Dpto. Tecnico
+        rol_norm = str(self.rol).strip().lower()
+        if rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico"):
+            self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
+                                           text="Backup BD",
+                                           command=self.crear_copia_seguridad_db,
+                                           font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
+            self.btn_buscar.grid(row=fila, column=0, padx=20, pady=10)
+            fila += 1
 
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
                                           text="🐞 Reportar",
@@ -3436,8 +3439,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 return
 
             try:
-                # Generar hash de la contraseña
-                password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+                # Generar hash de la contraseña y guardarlo como str UTF-8
+                password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode('utf-8')
 
                 conn = connect_db()
                 cursor = conn.cursor()
@@ -3621,7 +3624,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     cur2 = conn2.cursor()
                     # Si se proporcionó nueva contraseña, hashearla
                     if nueva_pass:
-                        hashed = bcrypt.hashpw(nueva_pass.encode(), bcrypt.gensalt())
+                        # Guardar el hash como string UTF-8 para mantener compatibilidad
+                        hashed = bcrypt.hashpw(nueva_pass.encode(), bcrypt.gensalt()).decode('utf-8')
                         try:
                             cur2.execute("UPDATE usuarios SET password_hash = ? WHERE nombre_usuario = ?", (hashed, username))
                         except Exception:
