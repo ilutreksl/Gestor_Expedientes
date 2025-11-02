@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.48"
+APP_VERSION = "v0.0.49"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3923,13 +3923,67 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn = connect_db()
                 cur = conn.cursor()
                 # Buscamos coincidencias por nombre (case-insensitive) o por id/string
-                cur.execute("SELECT id, codigo_rma, cliente, fecha_emision, estado FROM rma_maestro WHERE lower(Rma_Proveedor)=? OR Rma_Proveedor=? ORDER BY fecha_emision DESC", (proveedor_nombre.lower(), proveedor_nombre))
+                # Seleccionamos campos adicionales necesarios para exportar a Excel
+                cur.execute(
+                    "SELECT id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado "
+                    "FROM rma_maestro WHERE lower(Rma_Proveedor)=? OR Rma_Proveedor=? ORDER BY fecha_emision DESC",
+                    (proveedor_nombre.lower(), proveedor_nombre)
+                )
                 filas = cur.fetchall()
                 conn.close()
+
+                def export_to_excel(rows, proveedor):
+                    try:
+                        # Construir DataFrame con la estructura solicitada
+                        data = []
+                        for r in rows:
+                            # r: id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado
+                            (_id, codigo_rma, cliente, num_doc, modelo, ref_prov, fecha_emision, estado) = r
+                            data.append({
+                                'Nº Expediente': codigo_rma,
+                                'Proveedor': proveedor,
+                                'Cliente': cliente or '',
+                                'Numero Documento Cliente': num_doc or '',
+                                'Descripcion Articulo': modelo or '',
+                                'Referencia': ref_prov or ''
+                            })
+
+                        if not data:
+                            messagebox.showinfo('Exportar', 'No hay expedientes para exportar.')
+                            return
+
+                        df = pd.DataFrame(data)
+
+                        # Preparar carpeta de guardado: Adjuntos_RMA/RMP
+                        base_dir = os.path.join(os.path.dirname(__file__), 'Adjuntos_RMA')
+                        rmp_dir = os.path.join(base_dir, 'RMP')
+                        os.makedirs(rmp_dir, exist_ok=True)
+
+                        # Nombre de archivo: proveedor.xlsx (sanitizar)
+                        safe_name = ''.join(c for c in proveedor if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                        safe_name = safe_name.replace(' ', '_')
+                        file_path = os.path.join(rmp_dir, f"{safe_name}.xlsx")
+
+                        # Si ya existe, preguntar al usuario si desea sobrescribirlo (mostrar solo nombre)
+                        if os.path.exists(file_path):
+                            fname = os.path.basename(file_path)
+                            if not messagebox.askyesno('Exportar', f'El archivo {fname} ya existe. ¿Desea sobreescribirlo?'):
+                                return
+
+                        # Guardar Excel
+                        df.to_excel(file_path, index=False)
+                        messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
+                    except Exception as e:
+                        messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
 
                 # Encabezado
                 head = ctk.CTkFrame(sf)
                 head.pack(fill="x", padx=5, pady=(0,5))
+                # Botón de exportar a Excel
+                try:
+                    ctk.CTkButton(cont, text="Exportar a Excel", command=lambda rows=filas, p=proveedor_nombre: export_to_excel(rows, p)).pack(anchor="ne")
+                except Exception:
+                    pass
                 head.grid_columnconfigure(0, weight=1, minsize=180)
                 head.grid_columnconfigure(1, weight=2, minsize=300)
                 head.grid_columnconfigure(2, weight=1, minsize=140)
@@ -3942,7 +3996,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(head, text="ESTADO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
 
                 colors = ("#FFFFFF", "#F7F7F7")
-                for idx, (rma_id, codigo, cliente, fecha, estado) in enumerate(filas):
+                for idx, r in enumerate(filas):
+                    # filas: id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado
+                    try:
+                        rma_id, codigo, cliente, num_doc, modelo, ref_prov, fecha, estado = r
+                    except Exception:
+                        # Fallback si la tupla no tiene la forma esperada
+                        # Intentamos mapear por posición conocida
+                        vals = list(r)
+                        rma_id = vals[0] if len(vals) > 0 else None
+                        codigo = vals[1] if len(vals) > 1 else ''
+                        cliente = vals[2] if len(vals) > 2 else ''
+                        fecha = vals[3] if len(vals) > 3 else ''
+                        estado = vals[4] if len(vals) > 4 else ''
+
                     bg = colors[idx % 2]
                     row = ctk.CTkFrame(sf, fg_color=bg)
                     row.pack(fill="x", padx=5, pady=2)
