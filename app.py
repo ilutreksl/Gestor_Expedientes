@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.54"
+APP_VERSION = "v0.0.55"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1125,26 +1125,66 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                     # Copiar los datos de la tabla en bloques para no consumir mucha memoria
                     try:
-                        # Leer filas remotas
-                        remote_cursor.execute(f"SELECT * FROM \"{nombre}\"")
-                        filas = remote_cursor.fetchall()
-                        if not filas:
+                        chunk_size = 1000
+
+                        # Intentar obtener el total de filas para poder mostrar progreso
+                        total_rows = None
+                        try:
+                            remote_cursor.execute(f"SELECT COUNT(*) FROM \"{nombre}\"")
+                            cnt = remote_cursor.fetchone()
+                            total_rows = int(cnt[0]) if cnt and cnt[0] is not None else 0
+                        except Exception:
+                            # Si COUNT falla por permisos o particularidades, seguiremos sin total
+                            total_rows = None
+
+                        if total_rows == 0:
                             operations_log.append(f"Tabla {nombre}: 0 filas (omitida)")
                             continue
 
-                        # Preparar placeholders según el número de columnas
-                        colcount = len(remote_cursor.description) if remote_cursor.description else 0
-                        placeholders = ",".join(["?" for _ in range(colcount)])
-                        insert_sql = f"INSERT INTO \"{nombre}\" VALUES ({placeholders})"
+                        offset = 0
+                        copied = 0
+                        insert_sql = None
 
-                        # Inserción en destino (usamos executemany)
-                        dest_cur.executemany(insert_sql, filas)
-                        conn_destino.commit()
-                        operations_log.append(f"Tabla {nombre}: {len(filas)} filas copiadas")
-                    except Exception:
+                        while True:
+                            # Leer por bloques usando LIMIT/OFFSET
+                            remote_cursor.execute(f"SELECT * FROM \"{nombre}\" LIMIT {chunk_size} OFFSET {offset}")
+                            rows = remote_cursor.fetchall()
+                            if not rows:
+                                break
+
+                            # Preparar placeholders la primera vez que tengamos descripción
+                            if insert_sql is None:
+                                colcount = len(remote_cursor.description) if remote_cursor.description else 0
+                                placeholders = ",".join(["?" for _ in range(colcount)])
+                                insert_sql = f"INSERT INTO \"{nombre}\" VALUES ({placeholders})"
+
+                            # Insertar bloque en la DB destino
+                            try:
+                                dest_cur.executemany(insert_sql, rows)
+                                conn_destino.commit()
+                                copied += len(rows)
+                                offset += len(rows)
+                                if total_rows is None:
+                                    operations_log.append(f"Tabla {nombre}: {copied} filas copiadas (progreso por bloques)")
+                                else:
+                                    operations_log.append(f"Tabla {nombre}: {copied}/{total_rows} filas copiadas")
+                            except Exception:
+                                conn_destino.rollback()
+                                operations_log.append(f"Error insertando bloque en tabla {nombre} (omitida)")
+                                # Saltar a la siguiente tabla
+                                break
+
+                        if copied > 0:
+                            operations_log.append(f"Tabla {nombre}: copia finalizada, {copied} filas copiadas")
+                        else:
+                            operations_log.append(f"Tabla {nombre}: ninguna fila copiada")
+                    except Exception as e:
                         # Ignorar errores de copia de datos de tablas concretas
-                        conn_destino.rollback()
-                        operations_log.append(f"Error copiando datos de tabla {nombre} (omitida)")
+                        try:
+                            conn_destino.rollback()
+                        except Exception:
+                            pass
+                        operations_log.append(f"Error copiando datos de tabla {nombre} (omitida): {e}")
                         continue
 
                 # Cerrar conexión remota si existe
