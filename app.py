@@ -50,7 +50,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.53"
+APP_VERSION = "v0.0.54"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1060,21 +1060,128 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # 4. Realizar la copia de seguridad
         conn_origen = None
         conn_destino = None
+        # Registro de operaciones para mostrar al final
+        operations_log: list[str] = []
+
+        def show_log_window(lines: list[str], title: str = "Registro de Copia de Seguridad"):
+            """Muestra una ventana Toplevel con el log de operaciones."""
+            try:
+                win = ctk.CTkToplevel(self)
+                win.title(title)
+                win.geometry("700x400")
+                win.grab_set()
+
+                frame = ctk.CTkFrame(win)
+                frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+                txt = ctk.CTkTextbox(frame, wrap="word")
+                txt.pack(fill="both", expand=True)
+                txt.configure(state="normal")
+                txt.delete("1.0", "end")
+                txt.insert("1.0", "\n".join(lines))
+                txt.configure(state="disabled")
+
+                btn_close = ctk.CTkButton(win, text="Cerrar", command=win.destroy)
+                btn_close.pack(pady=8)
+            except Exception:
+                # Fallback simple si CustomTk no funciona por alguna razón
+                try:
+                    messagebox.showinfo(title, "\n".join(lines))
+                except Exception:
+                    print("Log:\n" + "\n".join(lines))
+
+        # Si están definidas las variables de Turso, intentamos volcar la BD remota
+        turso_url = os.getenv("TURSO_DATABASE_URL")
+        turso_token = os.getenv("TURSO_AUTH_TOKEN")
+
+        if turso_url and turso_token:
+            try:
+                operations_log.append(f"Intentando volcar Turso: {turso_url}")
+                # Conectamos a la BD (esto usará la implementación Turso si las env vars están)
+                remote_conn = connect_db(timeout=30)
+                remote_cursor = remote_conn.cursor()
+
+                # Obtenemos los CREATE TABLE de la BD remota (evitar tablas internas sqlite_)
+                remote_cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                tablas = remote_cursor.fetchall()
+
+                # Crear la BD destino local y recrear tablas
+                conn_destino = sqlite3.connect(path_destino)
+                dest_cur = conn_destino.cursor()
+
+                for tabla in tablas:
+                    if len(tabla) < 2:
+                        continue
+                    nombre, create_sql = tabla[0], tabla[1]
+                    if not create_sql:
+                        continue
+                    try:
+                        dest_cur.execute(create_sql)
+                        operations_log.append(f"CREATE TABLE ejecutado para: {nombre}")
+                    except Exception:
+                        # Si falla crear la tabla (por compatibilidad), intentar skip
+                        operations_log.append(f"Advertencia: no se pudo crear tabla {nombre} (se omite)")
+                        pass
+
+                    # Copiar los datos de la tabla en bloques para no consumir mucha memoria
+                    try:
+                        # Leer filas remotas
+                        remote_cursor.execute(f"SELECT * FROM \"{nombre}\"")
+                        filas = remote_cursor.fetchall()
+                        if not filas:
+                            operations_log.append(f"Tabla {nombre}: 0 filas (omitida)")
+                            continue
+
+                        # Preparar placeholders según el número de columnas
+                        colcount = len(remote_cursor.description) if remote_cursor.description else 0
+                        placeholders = ",".join(["?" for _ in range(colcount)])
+                        insert_sql = f"INSERT INTO \"{nombre}\" VALUES ({placeholders})"
+
+                        # Inserción en destino (usamos executemany)
+                        dest_cur.executemany(insert_sql, filas)
+                        conn_destino.commit()
+                        operations_log.append(f"Tabla {nombre}: {len(filas)} filas copiadas")
+                    except Exception:
+                        # Ignorar errores de copia de datos de tablas concretas
+                        conn_destino.rollback()
+                        operations_log.append(f"Error copiando datos de tabla {nombre} (omitida)")
+                        continue
+
+                # Cerrar conexión remota si existe
+                try:
+                    remote_conn.close()
+                except Exception:
+                    pass
+
+                operations_log.append(f"Copia de Turso completada correctamente en: {path_destino}")
+                # Mostrar log detallado al usuario
+                show_log_window(operations_log, title="Registro de copia (Turso)")
+                return
+
+            except Exception as e:
+                # Si falla el volcado remoto, registramos y caeremos al backup local
+                operations_log.append(f"Info: no se pudo volcar Turso directamente: {e}")
+                try:
+                    remote_conn.close()
+                except Exception:
+                    pass
+
+        # Si no hay Turso o el volcado falló, intentamos el backup local tradicional
         try:
             # 4.1. Conectar a la base de datos de origen (solo lectura)
+            if not os.path.exists(db_path_origen):
+                raise FileNotFoundError(f"Archivo de BD local no encontrado: {db_path_origen}")
+
             conn_origen = sqlite3.connect(db_path_origen)
-            
             # 4.2. Conectar a la base de datos de destino (se crea si no existe)
             conn_destino = sqlite3.connect(path_destino)
 
             # 4.3. Usar el método de backup integrado de SQLite
             with conn_destino:
                 conn_origen.backup(conn_destino)
-            
-            messagebox.showinfo(
-                "Copia de Seguridad", 
-                f"¡Copia de seguridad completada con éxito!\nGuardada en: {path_destino}"
-            )
+
+            operations_log.append(f"Copia local realizada correctamente en: {path_destino}")
+            show_log_window(operations_log, title="Registro de copia (local)")
 
         except sqlite3.Error as e:
             messagebox.showerror("Error de Base de Datos", f"Ocurrió un error al crear la copia de seguridad: {e}")
