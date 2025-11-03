@@ -100,7 +100,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.61"
+APP_VERSION = "v0.0.62"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1263,12 +1263,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Crear un frame por columna para alinear exactamente con los encabezados
                 # Reducimos la altura de cada fila usando height pequeño para que sean más finas.
                 # Height reducido para filas compactas
+                # Hacer que la columna de 'ACCIONES' tenga un fondo fijo (sin cebra)
+                actions_bg = None
+                try:
+                    if hasattr(self, 'lista_rma_frame') and hasattr(self.lista_rma_frame, 'cget'):
+                        actions_bg = self.lista_rma_frame.cget('fg_color')
+                except Exception:
+                    actions_bg = None
+                if actions_bg is None:
+                    actions_bg = colors[0]
+
                 f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
                 f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
                 f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
                 f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
                 f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
-                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                # f5 (acciones) usa actions_bg para evitar el efecto cebra
+                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=actions_bg, height=22)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
                 f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
@@ -1306,16 +1317,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Hover efectos para toda la fila: aplicar a cada columna
                 cols = [f0, f1, f2, f3, f4, f5]
+                # Guardar el color original por columna para restaurarlo correctamente
+                originals = [bg, bg, bg, bg, bg, actions_bg]
+
                 def _on_enter(e, cols=cols):
                     for rf in cols:
                         try:
                             rf.configure(fg_color=("#E9ECEF", "#E9ECEF"))
                         except Exception:
                             pass
-                def _on_leave(e, cols=cols, original=bg):
-                    for rf in cols:
+
+                def _on_leave(e, cols=cols, originals=originals):
+                    for idx, rf in enumerate(cols):
                         try:
-                            rf.configure(fg_color=original)
+                            rf.configure(fg_color=originals[idx])
                         except Exception:
                             pass
 
