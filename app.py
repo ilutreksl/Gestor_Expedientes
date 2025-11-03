@@ -582,6 +582,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.master.grid_rowconfigure(0, weight=1)
         
         self.protocol("WM_DELETE_WINDOW", self.cerrar_app)
+        # Título de la ventana principal
+        try:
+            self.title("Gestión RMA - Expedientes")
+        except Exception:
+            # CTkToplevel puede usar wm_title alternativamente
+            try:
+                self.wm_title("Gestión RMA - Expedientes")
+            except Exception:
+                pass
         
         self.crear_diseno()
         # Iniciar comprobación periódica de tareas (notificaciones para el creador)
