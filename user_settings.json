@@ -1,0 +1,17 @@
+{
+  "global": {
+    "theme": "System",
+    "date_format": "YYYY-MM-DD",
+    "show_tooltips": true,
+    "compact_mode": true,
+    "icon_size": 24
+  },
+  "users": {
+    "admin": {
+      "date_format": "DD/MM/YYYY",
+      "show_tooltips": true,
+      "compact_mode": true,
+      "icon_size": 24
+    }
+  }
+}

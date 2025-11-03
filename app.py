@@ -43,6 +43,11 @@ class Tooltip:
 
     def _schedule(self, event=None):
         self._unschedule()
+        try:
+            if not USER_SETTINGS.get("show_tooltips", True):
+                return
+        except Exception:
+            pass
         self._id = self.widget.after(self.delay, self._show)
 
     def _unschedule(self):
@@ -100,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.62"
+APP_VERSION = "v0.0.63"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -398,6 +403,101 @@ def optimize_database():
 # --- NUEVA VARIABLE GLOBAL ---
 ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
 # -----------------------------
+
+# --- User settings persistence (simple JSON file) ---
+import json
+
+USER_SETTINGS: dict = {}
+
+def _get_user_settings_path() -> str:
+    # Guardar en la carpeta del proyecto por simplicidad
+    return os.path.join(os.getcwd(), "user_settings.json")
+
+def load_user_settings(username: str = None) -> dict:
+    defaults = {
+        "date_format": "YYYY-MM-DD",
+        "show_tooltips": True,
+        "compact_mode": True,
+        "icon_size": 24,
+    }
+    path = _get_user_settings_path()
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+                if not isinstance(data, dict):
+                    return defaults
+                # Backwards-compatible file structure:
+                # { "global": {...}, "users": { "username": {...} } }
+                merged = defaults.copy()
+                # If old flat format (keys at root), merge them as global
+                root_global = {}
+                if any(k in data for k in defaults.keys()):
+                    root_global.update(data)
+
+                # Merge global overrides
+                if isinstance(data.get("global"), dict):
+                    root_global.update(data.get("global"))
+
+                merged.update(root_global)
+
+                # Merge per-user overrides if username provided
+                if username and isinstance(data.get("users"), dict):
+                    user_section = data.get("users", {}).get(username)
+                    if isinstance(user_section, dict):
+                        merged.update(user_section)
+
+                # Ensure obsolete keys removed
+                merged.pop("theme", None)
+                return merged
+    except Exception as e:
+        print(f"Warning: no se pudieron cargar user_settings.json: {e}")
+    return defaults
+
+def save_user_settings(settings: dict, username: str = None) -> bool:
+    # Do not persist attachments_dir - it's fixed by the app
+    settings_to_save = settings.copy()
+    settings_to_save.pop("attachments_dir", None)
+    # Ensure we don't persist obsolete keys like 'theme'
+    settings_to_save.pop("theme", None)
+    path = _get_user_settings_path()
+    try:
+        # Load existing file if present to preserve other users/global settings
+        root = {}
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    root = json.load(fh) or {}
+            except Exception:
+                root = {}
+
+        if not isinstance(root, dict):
+            root = {}
+
+        # Ensure structure
+        if "global" not in root or not isinstance(root.get("global"), dict):
+            # If file was flat (legacy), migrate existing keys into global
+            flat_keys = {k: v for k, v in root.items() if k not in ("users", "global")}
+            root = {"global": flat_keys, "users": {}}
+
+        if username:
+            users = root.setdefault("users", {})
+            users[username] = settings_to_save
+        else:
+            root["global"] = settings_to_save
+
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(root, fh, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Error al guardar user_settings.json: {e}")
+        try:
+            # Mostrar cuadro de diálogo de error al usuario cuando falle el guardado
+            messagebox.showerror("Error al guardar ajustes", f"No se pudieron guardar los ajustes: {e}")
+        except Exception:
+            pass
+        return False
+
 #try:
 #    locale.setlocale(locale.LC_ALL, 'es_ES.UTF-8')
 #except locale.Error:
@@ -517,11 +617,67 @@ class LoginApp(ctk.CTk):
         """Abre la ventana principal de la aplicación."""
         
         self.withdraw() # Ocultamos la ventana de login
-        
-        if not hasattr(self, 'ventana_principal') or not self.ventana_principal.winfo_exists():
-            self.ventana_principal = VentanaPrincipal(self, username, rol)
-        
-        print(ADVERTENCIA_MULTIUSUARIO) 
+        # Mostrar un splash/transición entre login y la ventana principal
+        try:
+            splash = tk.Toplevel(self)
+            splash.overrideredirect(True)
+            splash.configure(bg="white")
+            sw = splash.winfo_screenwidth()
+            sh = splash.winfo_screenheight()
+            w, h = 380, 120
+            x = (sw - w) // 2
+            y = (sh - h) // 2
+            splash.geometry(f"{w}x{h}+{x}+{y}")
+
+            frame = tk.Frame(splash, bg="white")
+            frame.pack(fill="both", expand=True)
+            tk.Label(frame, text="Cargando Gestor RMA...", font=("Segoe UI", 11, "bold"), bg="white").pack(pady=(16, 6))
+            status_label = tk.Label(frame, text="Preparando la interfaz...", font=("Segoe UI", 9), bg="white")
+            status_label.pack(pady=(0, 8))
+            try:
+                progress = ttk.Progressbar(frame, mode="indeterminate", length=320)
+                progress.pack(pady=(0, 6))
+                progress.start(10)
+            except Exception:
+                progress = None
+
+            # Forzar dibujado del splash antes de crear la ventana principal
+            try:
+                splash.update()
+            except Exception:
+                pass
+        except Exception:
+            splash = None
+            status_label = None
+            progress = None
+
+        try:
+            if not hasattr(self, 'ventana_principal') or not self.ventana_principal.winfo_exists():
+                # Instanciar la ventana principal (esto puede tardar si carga muchos datos)
+                # Actualizar label de estado antes de la carga (si es posible)
+                try:
+                    if status_label:
+                        status_label.config(text="Cargando datos y recursos...")
+                        splash.update()
+                except Exception:
+                    pass
+
+                self.ventana_principal = VentanaPrincipal(self, username, rol)
+
+        finally:
+            # Cerrar el splash y detener la barra si existen
+            try:
+                if progress:
+                    progress.stop()
+            except Exception:
+                pass
+            try:
+                if splash:
+                    splash.destroy()
+            except Exception:
+                pass
+
+        print(ADVERTENCIA_MULTIUSUARIO)
 
 # ----------------------------------------------------------------------
 # 2. CLASE DE LA VENTANA PRINCIPAL DE LA APLICACIÓN
@@ -566,6 +722,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_user = None
         self.icon_papel = None
         self.icon_mas = None
+        # Cargar ajustes de usuario (por usuario) pero no aplicar tema en caliente
+        try:
+            self.user_settings = load_user_settings(self.username)
+        except Exception:
+            self.user_settings = {}
+        # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
+        try:
+            global USER_SETTINGS
+            USER_SETTINGS = self.user_settings
+        except Exception:
+            pass
         
         # ----------------------------------------------------
         # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️
@@ -794,6 +961,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         _ensure_icon_png("user.png", shape="rect")
         _ensure_icon_png("papel.png", shape="rect")
         _ensure_icon_png("mas.png", shape="rect")
+        _ensure_icon_png("settings.png", shape="rect")
 
         # Cargar iconos (preferir CTkImage, fallback a ImageTk)
         self.icon_list = _load_icon("ic_list_outline_24.png") or _make_placeholder_icon("list", shape="list")
@@ -807,6 +975,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_user = _load_icon("user.png")
         self.icon_papel = _load_icon("papel.png")
         self.icon_mas = _load_icon("mas.png")
+        self.icon_settings = _load_icon("settings.png")
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
@@ -937,6 +1106,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                           command=self.mostrar_formulario_github)
         self.btn_reportar.grid(row=fila, column=0, padx=20, pady=6)
         Tooltip(self.btn_reportar, "Reportar un problema / abrir GitHub")
+        # Botón Ajustes - abre diálogo de preferencias del usuario
+        try:
+            fila += 1
+            self.btn_ajustes = ctk.CTkButton(self.sidebar_frame,
+                                             text="",
+                                             image=(self.icon_settings or self.icon_info),
+                                             width=44,
+                                             height=44,
+                                             fg_color=sidebar_bg if sidebar_bg is not None else None,
+                                             hover_color=sidebar_bg if sidebar_bg is not None else None,
+                                             command=self.mostrar_ajustes)
+            self.btn_ajustes.grid(row=fila, column=0, padx=20, pady=6)
+            Tooltip(self.btn_ajustes, "Ajustes")
+        except Exception:
+            pass
         
         # --- Contenido Principal (Columna 1) ---
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
@@ -949,6 +1133,152 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # ----------------------------------------------------------------------
     # 3. MÉTODOS AUXILIARES Y GENERACIÓN DE CÓDIGO RMA
     # ----------------------------------------------------------------------
+
+    def mostrar_ajustes(self):
+        """Abre un diálogo modal para que el usuario modifique sus preferencias."""
+        try:
+            dlg = ctk.CTkToplevel(self)
+            dlg.transient(self)
+            dlg.grab_set()
+            dlg.title("Ajustes")
+
+            frm = ctk.CTkFrame(dlg, fg_color="transparent")
+            frm.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
+            frm.grid_columnconfigure(1, weight=1)
+
+            # Date format
+            ctk.CTkLabel(frm, text="Formato de fecha:").grid(row=0, column=0, sticky="w", padx=6, pady=6)
+            date_values = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"]
+            date_menu = ctk.CTkOptionMenu(frm, values=date_values, width=180)
+            date_menu.set(self.user_settings.get("date_format", "YYYY-MM-DD"))
+            date_menu.grid(row=0, column=1, sticky="e", padx=6, pady=6)
+
+            # Tooltips
+            ctk.CTkLabel(frm, text="Mostrar tooltips:").grid(row=1, column=0, sticky="w", padx=6, pady=6)
+            var_tooltips = tk.BooleanVar(value=self.user_settings.get("show_tooltips", True))
+            switch_tooltips = ctk.CTkSwitch(frm, text="", variable=var_tooltips, width=40)
+            switch_tooltips.grid(row=1, column=1, sticky="w", padx=6, pady=6)
+
+            # Compact mode
+            ctk.CTkLabel(frm, text="Modo compacto:").grid(row=2, column=0, sticky="w", padx=6, pady=6)
+            var_compact = tk.BooleanVar(value=self.user_settings.get("compact_mode", True))
+            switch_compact = ctk.CTkSwitch(frm, text="", variable=var_compact, width=40)
+            switch_compact.grid(row=2, column=1, sticky="w", padx=6, pady=6)
+
+            # Email
+            ctk.CTkLabel(frm, text="Email:").grid(row=3, column=0, sticky="w", padx=6, pady=6)
+            entry_email = ctk.CTkEntry(frm, width=300)
+            # Try to prefill from DB if exists
+            try:
+                conn, cursor = self.master.conectar_db()
+                if conn and cursor:
+                    cursor.execute("PRAGMA table_info('usuarios')")
+                    cols = [r[1] for r in cursor.fetchall()]
+                    if 'email' in cols:
+                        cursor.execute("SELECT email FROM usuarios WHERE nombre_usuario = ?", (self.username,))
+                        row = cursor.fetchone()
+                        if row and row[0]:
+                            entry_email.insert(0, row[0])
+                    # close connection
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            entry_email.grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+
+            # New password
+            ctk.CTkLabel(frm, text="Nueva contraseña:").grid(row=4, column=0, sticky="w", padx=6, pady=6)
+            entry_password = ctk.CTkEntry(frm, width=300, show="*")
+            entry_password.grid(row=4, column=1, sticky="ew", padx=6, pady=6)
+
+            ctk.CTkLabel(frm, text="Confirmar contraseña:").grid(row=5, column=0, sticky="w", padx=6, pady=6)
+            entry_password2 = ctk.CTkEntry(frm, width=300, show="*")
+            entry_password2.grid(row=5, column=1, sticky="ew", padx=6, pady=6)
+
+            # Buttons
+            btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+            btn_frame.grid(row=99, column=0, sticky="ew", padx=12, pady=(6,12))
+            btn_frame.grid_columnconfigure(0, weight=1)
+
+            def guardar():
+                new = {
+                    "date_format": date_menu.get(),
+                    "show_tooltips": bool(var_tooltips.get()),
+                    "compact_mode": bool(var_compact.get())
+                }
+                self.user_settings.update(new)
+                ok = save_user_settings(self.user_settings, self.username)
+                # Exponer globalmente y persistir valores en ejecución
+                try:
+                    global USER_SETTINGS
+                    USER_SETTINGS = self.user_settings
+                except Exception:
+                    pass
+                # Nota: guardamos el theme en las preferencias por usuario, pero NO aplicamos
+                # la apariencia en caliente aquí para evitar re-dibujos. El theme se aplicará
+                # al reiniciar la aplicación.
+                # Redibujar listado para aplicar compact mode
+                try:
+                    self.mostrar_lista_rma()
+                except Exception:
+                    pass
+                # Update email/password in DB if provided
+                try:
+                    # Update email column if present (and value provided)
+                    email_val = entry_email.get().strip()
+                    pw = entry_password.get()
+                    pw2 = entry_password2.get()
+                    conn_cursor = self.master.conectar_db()
+                    if conn_cursor:
+                        conn, cursor = conn_cursor
+                        try:
+                            # Ensure email column exists
+                            cursor.execute("PRAGMA table_info('usuarios')")
+                            cols = [r[1] for r in cursor.fetchall()]
+                            if 'email' not in cols:
+                                try:
+                                    cursor.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+                                except Exception:
+                                    pass
+                            if email_val:
+                                try:
+                                    cursor.execute("UPDATE usuarios SET email = ? WHERE nombre_usuario = ?", (email_val, self.username))
+                                except Exception as e:
+                                    print(f"Error actualizando email: {e}")
+                            # If password fields provided and match, update hash
+                            if pw:
+                                if pw != pw2:
+                                    messagebox.showerror("Error", "Las contraseñas no coinciden.")
+                                else:
+                                    try:
+                                        hashed = bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt())
+                                        cursor.execute("UPDATE usuarios SET password_hash = ? WHERE nombre_usuario = ?", (hashed.decode('utf-8'), self.username))
+                                    except Exception as e:
+                                        print(f"Error actualizando contraseña: {e}")
+                            try:
+                                conn.commit()
+                            except Exception:
+                                pass
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            print(f"Error actualizando credenciales en DB: {e}")
+                except Exception:
+                    pass
+                dlg.destroy()
+
+            def cancelar():
+                dlg.destroy()
+
+            ctk.CTkButton(btn_frame, text="Guardar", command=guardar).grid(row=0, column=1, padx=6)
+            ctk.CTkButton(btn_frame, text="Cancelar", command=cancelar).grid(row=0, column=0, padx=6)
+
+        except Exception as e:
+            print(f"Error abriendo diálogo de ajustes: {e}")
     
     def obtener_quincenas_futuras(self):
         """Genera las quincenas (Q1/Q2) para los próximos 12 meses."""
@@ -1035,7 +1365,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
         elif tipo == "date":
             # 📅 Campo de selección de fecha
             widget = CTkDatePicker(parent, width=300)
-            widget.set_date_format("%Y-%m-%d")
+            # Aplicar el formato de fecha según la preferencia del usuario (solo visual)
+            try:
+                pref = getattr(self, 'user_settings', {}).get('date_format', 'YYYY-MM-DD')
+                fmt_map = {
+                    'YYYY-MM-DD': '%Y-%m-%d',
+                    'DD/MM/YYYY': '%d/%m/%Y',
+                    'MM/DD/YYYY': '%m/%d/%Y'
+                }
+                widget_fmt = fmt_map.get(pref, '%Y-%m-%d')
+                widget.set_date_format(widget_fmt)
+            except Exception:
+                # Fallback seguro
+                try:
+                    widget.set_date_format('%Y-%m-%d')
+                except Exception:
+                    pass
 
             # Si hay valor por defecto, establecerlo
             if valor_defecto:
@@ -1261,6 +1606,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
                 btn_bg = self.sidebar_frame.cget("fg_color")
 
+            # Altura de fila según compact_mode
+            row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
+
             for i, reg in enumerate(registros):
                 rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
                 row = i + 1
@@ -1282,13 +1630,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 if actions_bg is None:
                     actions_bg = colors[0]
 
-                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
-                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
-                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
-                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
-                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
+                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
+                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
+                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
+                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
                 # f5 (acciones) usa actions_bg para evitar el efecto cebra
-                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=actions_bg, height=22)
+                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=actions_bg, height=row_height)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
                 f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
@@ -6619,9 +6967,93 @@ if __name__ == "__main__":
         print("Asegúrate de ejecutar primero 'python db_setup.py'.")
         sys.exit(1)
     
-    # Optimizar base de datos al inicio (crear índices)
-    print("🔧 Optimizando base de datos...")
-    optimize_database()
-    
-    app = LoginApp()
-    app.mainloop()
+    # Mostrar un splash/spinner de arranque y ejecutar optimize_database en background
+    try:
+        print("🔧 Iniciando: splash de arranque y optimización en segundo plano...")
+
+        # Nota: no aplicamos aquí el tema del usuario para evitar recargas visuales.
+        # Los ajustes de tema se mantienen desactivados por ahora porque los colores
+        # están fijados en el theme y la aplicación provocaba una doble renderización.
+
+        # Crear ventana splash simple (tkinter, sin bordes)
+        splash = tk.Tk()
+        splash.overrideredirect(True)
+        splash.configure(bg="white")
+        w, h = 420, 140
+        sw = splash.winfo_screenwidth()
+        sh = splash.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        splash.geometry(f"{w}x{h}+{x}+{y}")
+
+        frame = tk.Frame(splash, bg="white")
+        frame.pack(fill="both", expand=True)
+
+        label = tk.Label(frame, text="Iniciando Gestor RMA - Expedientes", font=("Segoe UI", 12, "bold"), bg="white")
+        label.pack(pady=(20, 6))
+
+        sub = tk.Label(frame, text="Preparando la aplicación...", font=("Segoe UI", 10), bg="white")
+        sub.pack(pady=(0, 10))
+
+        try:
+            pb = ttk.Progressbar(frame, mode="indeterminate", length=340)
+            pb.pack(pady=(0, 12))
+            pb.start(12)
+        except Exception:
+            pb = None
+
+        # Iniciar optimización en un hilo daemon
+        t = threading.Thread(target=optimize_database, daemon=True)
+        t.start()
+
+        # Mostrar mensajes por etapas mientras la optimización corre
+        import time
+        try:
+            while t.is_alive():
+                # Mostrar etapa de optimización
+                try:
+                    sub.config(text="Optimizando la base de datos...")
+                except Exception:
+                    pass
+                try:
+                    splash.update()
+                except Exception:
+                    pass
+                time.sleep(0.05)
+
+            # Una vez terminado, indicar carga de la interfaz
+            try:
+                sub.config(text="Cargando interfaz...")
+                splash.update()
+            except Exception:
+                pass
+
+            # Pequeña pausa para que el usuario vea el estado final
+            time.sleep(0.25)
+
+        except KeyboardInterrupt:
+            # Permitir salir con Ctrl-C si se interrumpe
+            pass
+
+        # Cerramos el splash ANTES de crear la ventana principal para evitar conflictos
+        try:
+            if pb:
+                pb.stop()
+        except Exception:
+            pass
+        try:
+            splash.destroy()
+        except Exception:
+            pass
+
+        # Crear la aplicación principal (ahora que la optimización ha finalizado)
+        app = LoginApp()
+        app.mainloop()
+
+    except Exception:
+        # Si algo falla en el splash, fallback al comportamiento previo
+        print("🔧 Optimizando base de datos en segundo plano...")
+        t = threading.Thread(target=optimize_database, daemon=True)
+        t.start()
+        app = LoginApp()
+        app.mainloop()
