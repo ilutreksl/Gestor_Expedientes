@@ -105,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.63"
+APP_VERSION = "v0.0.64"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5254,12 +5254,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         btn_next = ctk.CTkButton(header, text="▶", width=40)
         btn_next.grid(row=1, column=5, padx=(2,0), pady=(6,0))
 
-        # Progress indicator (ttk indeterminate progressbar)
-        pb = ttk.Progressbar(header, mode="indeterminate", length=120)
-        try:
-            pb.grid(row=1, column=6, padx=(8,0), pady=(6,0))
-        except Exception:
-            pass
+        # Progress indicator removed for cleaner UI (was showing next to pagination controls)
+        # If needed in the future, re-add a subtle indicator and start/stop it when loading asynchronously.
 
         # Container for rows so we can clear it on reload
         rows_container = ctk.CTkFrame(sf)
@@ -5336,7 +5332,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         def load_articles_thread(page=1):
             try:
-                self.after(0, lambda: pb.start())
+                # Progressbar removed from UI; directly schedule data rendering when ready.
                 search = search_var.get().strip()
                 page_size = int(page_size_opt.get())
                 offset = (page - 1) * page_size
@@ -5366,13 +5362,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 cur.execute(sql, tuple(params))
                 filas = cur.fetchall()
                 conn.close()
-                # Schedule UI update
-                self.after(0, lambda: (pb.stop(), render_rows(filas, page, total, page_size)))
+                # Schedule UI update (render rows directly)
+                self.after(0, lambda: render_rows(filas, page, total, page_size))
             except Exception as e:
-                try:
-                    pb.stop()
-                except Exception:
-                    pass
+                # No progressbar to stop; show error to user
                 self.after(0, lambda: messagebox.showerror("Error BD", f"No se pudieron cargar los artículos: {e}"))
 
         def start_load(page=1):
