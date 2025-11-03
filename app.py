@@ -28,6 +28,54 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 
+
+class Tooltip:
+    """Simple tooltip for tkinter widgets. Shows a small Toplevel on hover."""
+    def __init__(self, widget, text, delay=400):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._id = None
+        self._tipwindow = None
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, event=None):
+        self._unschedule()
+        self._id = self.widget.after(self.delay, self._show)
+
+    def _unschedule(self):
+        if self._id:
+            try:
+                self.widget.after_cancel(self._id)
+            except Exception:
+                pass
+            self._id = None
+
+    def _show(self):
+        if self._tipwindow or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self._tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("Segoe UI", 9))
+        label.pack(ipadx=4, ipady=2)
+
+    def _hide(self, event=None):
+        self._unschedule()
+        tw = self._tipwindow
+        self._tipwindow = None
+        if tw:
+            try:
+                tw.destroy()
+            except Exception:
+                pass
+
 import pandas as pd
 import locale
 import shutil # Para copiar archivos
@@ -52,7 +100,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.60"
+APP_VERSION = "v0.0.61"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -505,6 +553,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.toaster = ToastNotifier() if ToastNotifier else None
         except Exception:
             self.toaster = None
+
+        # Inicializar referencias de iconos por defecto para evitar AttributeError
+        # Icon placeholders (se asignarán en crear_diseno)
+        self.icon_list = None
+        self.icon_articles = None
+        self.icon_stats = None
+        self.icon_tasks = None
+        self.icon_reports = None
+        self.icon_info = None
+        self.icon_edit = None
+        self.icon_user = None
+        self.icon_papel = None
+        self.icon_mas = None
         
         # ----------------------------------------------------
         # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️
@@ -590,9 +651,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.grid_columnconfigure(1, weight=1)
 
         # --- Panel Lateral de Navegación (Columna 0) ---
-        self.sidebar_frame = ctk.CTkFrame(self, 
-                                          width=140, 
-                                          corner_radius=0, 
+        self.sidebar_frame = ctk.CTkFrame(self,
+                                          width=100,
+                                          corner_radius=0,
                                           #fg_color="gray90"
                                           )
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
@@ -608,7 +669,135 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                        text="", 
                                        image=self.logo_image)
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
-        #ctk.CTkLabel(self.sidebar_frame, text="MENÚ", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, padx=20, pady=(20, 10))
+        # Cargar iconos (outline 24x24) para botones icon-only
+        ruta_icons = os.path.join(os.path.dirname(__file__), "icons")
+        # Mantener referencias para evitar GC (ImageTk objects must be referenced)
+        self._icon_refs = {}
+
+        def _ensure_icon_png(fname, shape="rect", fg=(43,108,176,255)):
+            """Asegura que exista un PNG válido en icons/fname. Si no existe o está corrupto,
+            genera uno simple de 24x24 y lo guarda en disco.
+            """
+            path = os.path.join(ruta_icons, fname)
+            try:
+                if os.path.exists(path):
+                    # Intentar abrir con PIL para verificar integridad
+                    Image.open(path).verify()
+                    return True
+            except Exception:
+                # Archivo corrupto o no imagen válida -> reescribir
+                pass
+
+            # Crear carpeta si no existe
+            try:
+                os.makedirs(ruta_icons, exist_ok=True)
+            except Exception:
+                pass
+
+            # Generar imagen sencilla
+            try:
+                img = Image.new("RGBA", (24, 24), (0, 0, 0, 0))
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(img)
+                if shape == "list":
+                    draw.line([4, 7, 20, 7], fill=fg, width=2)
+                    draw.line([4, 12, 20, 12], fill=fg, width=2)
+                    draw.line([4, 17, 20, 17], fill=fg, width=2)
+                elif shape == "dot":
+                    draw.ellipse([6, 6, 18, 18], outline=fg, width=2)
+                elif shape == "pencil":
+                    draw.line([6, 17, 17, 6], fill=fg, width=2)
+                    draw.polygon([(17,6),(19,8),(15,10)], fill=fg)
+                else:
+                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+
+                img.save(path, format="PNG")
+                return True
+            except Exception:
+                return False
+
+        def _load_icon(fname):
+            path = os.path.join(ruta_icons, fname)
+            if not os.path.exists(path):
+                return None
+            try:
+                # Prefer CTkImage (works well with customtkinter)
+                img = ctk.CTkImage(light_image=Image.open(path), dark_image=Image.open(path), size=(24, 24))
+                self._icon_refs[fname] = img
+                return img
+            except Exception:
+                try:
+                    # Fallback to ImageTk.PhotoImage if CTkImage fails
+                    pil = Image.open(path).resize((24, 24), Image.LANCZOS)
+                    tkimg = ImageTk.PhotoImage(pil)
+                    self._icon_refs[fname] = tkimg
+                    return tkimg
+                except Exception:
+                    return None
+
+        def _make_placeholder_icon(key=None, shape="rect", fg="#2b6cb0", bg=None):
+            """Genera un icono simple de 24x24 con PIL y lo convierte a PhotoImage/CTkImage.
+            shape: 'rect', 'dot', 'pencil' (simple), 'list'
+            """
+            try:
+                img = Image.new("RGBA", (24, 24), bg if bg is not None else (0, 0, 0, 0))
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(img)
+                if shape == "rect":
+                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+                elif shape == "dot":
+                    draw.ellipse([6, 6, 18, 18], outline=fg, width=2)
+                elif shape == "list":
+                    # three horizontal lines
+                    draw.line([5, 7, 19, 7], fill=fg, width=2)
+                    draw.line([5, 12, 19, 12], fill=fg, width=2)
+                    draw.line([5, 17, 19, 17], fill=fg, width=2)
+                elif shape == "pencil":
+                    # simple pencil: diagonal line + tip
+                    draw.line([6, 17, 17, 6], fill=fg, width=2)
+                    draw.polygon([(17,6),(19,8),(15,10)], fill=fg)
+                else:
+                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+
+                # Try CTkImage first
+                try:
+                    ctki = ctk.CTkImage(light_image=img, dark_image=img, size=(24, 24))
+                    keyname = f"gen-{key or shape}"
+                    self._icon_refs[keyname] = ctki
+                    return ctki
+                except Exception:
+                    tkimg = ImageTk.PhotoImage(img)
+                    keyname = f"gen-{key or shape}"
+                    self._icon_refs[keyname] = tkimg
+                    return tkimg
+            except Exception:
+                return None
+
+        # Asegurar que existan ficheros PNG válidos en disco (sobrescribe corruptos)
+        _ensure_icon_png("ic_list_outline_24.png", shape="list")
+        _ensure_icon_png("ic_articles_outline_24.png", shape="rect")
+        _ensure_icon_png("ic_stats_outline_24.png", shape="dot")
+        _ensure_icon_png("ic_tasks_outline_24.png", shape="rect")
+        _ensure_icon_png("ic_reports_outline_24.png", shape="rect")
+        _ensure_icon_png("boton-de-informacion.png", shape="dot")
+        _ensure_icon_png("ic_edit_outline_24.png", shape="pencil")
+        # Additional user-provided icons
+        _ensure_icon_png("user.png", shape="rect")
+        _ensure_icon_png("papel.png", shape="rect")
+        _ensure_icon_png("mas.png", shape="rect")
+
+        # Cargar iconos (preferir CTkImage, fallback a ImageTk)
+        self.icon_list = _load_icon("ic_list_outline_24.png") or _make_placeholder_icon("list", shape="list")
+        self.icon_articles = _load_icon("ic_articles_outline_24.png") or _make_placeholder_icon("articles", shape="rect")
+        self.icon_stats = _load_icon("ic_stats_outline_24.png") or _make_placeholder_icon("stats", shape="dot")
+        self.icon_tasks = _load_icon("ic_tasks_outline_24.png") or _make_placeholder_icon("tasks", shape="rect")
+        self.icon_reports = _load_icon("ic_reports_outline_24.png") or _make_placeholder_icon("reports", shape="rect")
+        self.icon_info = _load_icon("boton-de-informacion.png") or _make_placeholder_icon("info", shape="dot")
+        self.icon_edit = _load_icon("ic_edit_outline_24.png") or _make_placeholder_icon("edit", shape="pencil")
+        # Load additional icons (user, papel, mas)
+        self.icon_user = _load_icon("user.png")
+        self.icon_papel = _load_icon("papel.png")
+        self.icon_mas = _load_icon("mas.png")
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
@@ -637,66 +826,108 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Botón de gestión de usuarios (solo visible para administradores)
         if str(self.rol).strip().lower() in ("admin", "administrador"):
+            sidebar_bg = self.sidebar_frame.cget("fg_color") if hasattr(self.sidebar_frame, 'cget') else None
             self.btn_usuarios = ctk.CTkButton(self.sidebar_frame,
-                                             text="👥 Gestión Usuarios",
-                                             command=self.mostrar_gestion_usuarios,
-                                             font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-            self.btn_usuarios.grid(row=fila, column=0, padx=20, pady=10)
+                                             text="",
+                                             image=(self.icon_user or self.icon_tasks),
+                                             width=44,
+                                             height=44,
+                                             fg_color=sidebar_bg if sidebar_bg is not None else None,
+                                             hover_color=sidebar_bg if sidebar_bg is not None else None,
+                                             command=self.mostrar_gestion_usuarios)
+            self.btn_usuarios.grid(row=fila, column=0, padx=12, pady=6)
+            Tooltip(self.btn_usuarios, "Gestión de usuarios")
             fila += 1
+        sidebar_bg = self.sidebar_frame.cget("fg_color") if hasattr(self.sidebar_frame, 'cget') else None
 
         self.btn_lista = ctk.CTkButton(self.sidebar_frame,
-                                       text="📋 Listado",
-                                       command=self.mostrar_lista_rma,
-                                       font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_lista.grid(row=fila, column=0, padx=20, pady=10)
+                                       text="",
+                                       image=self.icon_list,
+                                       width=44,
+                                       height=44,
+                                       fg_color=sidebar_bg,
+                                       hover_color=sidebar_bg,
+                                       command=self.mostrar_lista_rma)
+        self.btn_lista.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_lista, "Listado de expedientes")
         fila += 1
 
         # Botón Artículos: abre ventana con listado de artículos y conteo de expedientes asociados
         self.btn_articulos = ctk.CTkButton(self.sidebar_frame,
-                                           text="📦 Artículos",
-                                           command=self.mostrar_articulos_window,
-                                           font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_articulos.grid(row=fila, column=0, padx=20, pady=10)
+                                           text="",
+                                           image=self.icon_articles,
+                                           width=44,
+                                           height=44,
+                                           fg_color=sidebar_bg,
+                                           hover_color=sidebar_bg,
+                                           command=self.mostrar_articulos_window)
+        self.btn_articulos.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_articulos, "Artículos")
         fila += 1
 
         self.btn_estadisticas = ctk.CTkButton(self.sidebar_frame,
-                                              text="📊 Filtrado",
-                                              command=self.mostrar_ventana_estadisticas,
-                                              font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_estadisticas.grid(row=fila, column=0, padx=20, pady=10)
+                                              text="",
+                                              image=self.icon_stats,
+                                              width=44,
+                                              height=44,
+                                              fg_color=sidebar_bg,
+                                              hover_color=sidebar_bg,
+                                              command=self.mostrar_ventana_estadisticas)
+        self.btn_estadisticas.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_estadisticas, "Filtrar / Estadísticas")
         fila += 1
 
         # Botón de Tareas (lista y creación de tareas por expediente)
         self.btn_tareas = ctk.CTkButton(self.sidebar_frame,
-                                        text="🗒️ Tareas",
-                                        command=self.mostrar_gestion_tareas,
-                                        font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_tareas.grid(row=fila, column=0, padx=20, pady=10)
+                                        text="",
+                                        image=self.icon_tasks,
+                                        width=44,
+                                        height=44,
+                                        fg_color=sidebar_bg,
+                                        hover_color=sidebar_bg,
+                                        command=self.mostrar_gestion_tareas)
+        self.btn_tareas.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_tareas, "Tareas")
         fila += 1
 
         # Botón Gestión RMP (Proveedores -> Expedientes)
         self.btn_gestion_rmp = ctk.CTkButton(self.sidebar_frame,
-                                             text="🔁 Gestión RMP",
-                                             command=self.mostrar_gestion_rmp,
-                                             font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_gestion_rmp.grid(row=fila, column=0, padx=20, pady=10)
+                                             text="",
+                                             image=(self.icon_papel or self.icon_reports),
+                                             width=44,
+                                             height=44,
+                                             fg_color=sidebar_bg,
+                                             hover_color=sidebar_bg,
+                                             command=self.mostrar_gestion_rmp)
+        self.btn_gestion_rmp.grid(row=fila, column=0, padx=12, pady=6)
+        Tooltip(self.btn_gestion_rmp, "Gestión RMP")
         fila += 1
 
         # Mostrar botón de Backup solo para administradores y Dpto. Tecnico
         rol_norm = str(self.rol).strip().lower()
         if rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico"):
             self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
-                                           text="Backup BD",
-                                           command=self.crear_copia_seguridad_db,
-                                           font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-            self.btn_buscar.grid(row=fila, column=0, padx=20, pady=10)
+                                           text="",
+                                           image=self.icon_reports,
+                                           width=44,
+                                           height=44,
+                                           fg_color=sidebar_bg,
+                                           hover_color=sidebar_bg,
+                                           command=self.crear_copia_seguridad_db)
+            self.btn_buscar.grid(row=fila, column=0, padx=20, pady=6)
+            Tooltip(self.btn_buscar, "Crear copia de seguridad (DB)")
             fila += 1
 
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
-                                          text="🐞 Reportar",
-                                          command=self.mostrar_formulario_github,
-                                          font=ctk.CTkFont(family="Verdana", size=14, weight="bold"))
-        self.btn_reportar.grid(row=fila, column=0, padx=20, pady=10)
+                                          text="",
+                                          image=self.icon_info,
+                                          width=44,
+                                          height=44,
+                                          fg_color=sidebar_bg,
+                                          hover_color=sidebar_bg,
+                                          command=self.mostrar_formulario_github)
+        self.btn_reportar.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_reportar, "Reportar un problema / abrir GitHub")
         
         # --- Contenido Principal (Columna 1) ---
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
@@ -835,12 +1066,30 @@ class VentanaPrincipal(ctk.CTkToplevel):
         title_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(title_frame, text="LISTADO", font=ctk.CTkFont(family="Verdana", size=24, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(title_frame,
-                      text="➕ Crear Nuevo RMA",
-                      #fg_color="gray80",        # Fondo del botón: Gris claro
-                      #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
-                      #text_color="black",
-                      command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
+        # Botón Crear Nuevo RMA: icon-only (usar self.icon_mas si está disponible)
+        try:
+            btn_bg = None
+            if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
+                btn_bg = self.sidebar_frame.cget("fg_color")
+
+            ctk.CTkButton(title_frame,
+                          text="",
+                          image=(self.icon_mas or self.icon_mas),
+                          width=36,
+                          height=36,
+                          fg_color=(btn_bg if btn_bg is not None else None),
+                          hover_color=(btn_bg if btn_bg is not None else None),
+                          command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
+            try:
+                # Añadir tooltip al botón de crear (si la clase Tooltip existe)
+                Tooltip(title_frame.winfo_children()[-1], "Crear nuevo RMA")
+            except Exception:
+                pass
+        except Exception:
+            # Fallback a botón de texto si algo falla
+            ctk.CTkButton(title_frame,
+                          text="➕ Crear Nuevo RMA",
+                          command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
 
         # ----------------------------------------------------
         # 2. NUEVO: Panel de Búsqueda y Filtros (Fila 1)
@@ -996,8 +1245,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
                 return
 
-            # Registros (filas cebra)
+            # Registros (filas cebra) - filas más finas
             colors = ("#FFFFFF", "#F3F4F6")
+            # Determinar color de fondo para botones (para hacer 'transparent-like')
+            btn_bg = None
+            if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
+                btn_bg = self.sidebar_frame.cget("fg_color")
+
             for i, reg in enumerate(registros):
                 rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
                 row = i + 1
@@ -1007,28 +1261,48 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 bg = colors[i % 2]
                 # Crear un frame por columna para alinear exactamente con los encabezados
-                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
-                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
-                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
-                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
-                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
-                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg)
+                # Reducimos la altura de cada fila usando height pequeño para que sean más finas.
+                # Height reducido para filas compactas
+                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
+                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=22)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
-                f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=1)
-                f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=1)
-                f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=1)
-                f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=1)
-                f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=1)
-                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=1)
+                f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
+                f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=0)
+                f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
+                f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
+                f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
+                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
 
-                # Contenido de cada columna con padding reducido para filas más finas
-                ctk.CTkLabel(f0, text=codigo_rma).pack(anchor="w", padx=4, pady=1)
-                ctk.CTkLabel(f1, text=cliente).pack(anchor="w", padx=4, pady=1)
-                ctk.CTkLabel(f2, text=numero_documento_cliente).pack(anchor="w", padx=4, pady=1)
-                ctk.CTkLabel(f3, text=estado, text_color=color).pack(anchor="w", padx=4, pady=1)
-                ctk.CTkLabel(f4, text=fecha_emision).pack(anchor="w", padx=4, pady=1)
-                ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=1)
+                # Contenido de cada columna con padding muy reducido para filas más finas
+                ctk.CTkLabel(f0, text=codigo_rma).pack(anchor="w", padx=4, pady=0)
+                ctk.CTkLabel(f1, text=cliente).pack(anchor="w", padx=4, pady=0)
+                ctk.CTkLabel(f2, text=numero_documento_cliente).pack(anchor="w", padx=4, pady=0)
+                ctk.CTkLabel(f3, text=estado, text_color=color).pack(anchor="w", padx=4, pady=0)
+                ctk.CTkLabel(f4, text=fecha_emision).pack(anchor="w", padx=4, pady=0)
+                # Botón editar: icon-only con apariencia similar a los botones del sidebar
+                try:
+                    if getattr(self, 'icon_edit', None):
+                        # Botón editar más pequeño para encajar en filas compactas
+                        btn = ctk.CTkButton(f5, text="", image=self.icon_edit, width=28, height=28,
+                                           fg_color=(btn_bg if btn_bg is not None else None),
+                                           hover_color=(btn_bg if btn_bg is not None else None),
+                                           command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
+                        btn.pack(anchor="w", padx=4, pady=0)
+                        # Añadir tooltip si la clase Tooltip está disponible
+                        try:
+                            Tooltip(btn, "Editar expediente")
+                        except Exception:
+                            pass
+                    else:
+                        ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=0)
+                except Exception:
+                    # Caer a botón de texto si algo falla en la carga de icono
+                    ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=0)
 
                 # Hover efectos para toda la fila: aplicar a cada columna
                 cols = [f0, f1, f2, f3, f4, f5]
