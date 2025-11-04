@@ -105,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.64"
+APP_VERSION = "v0.0.65"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4665,18 +4665,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Asegurar que exista la tabla de proveedores para persistir estados
                 try:
-                    cur.execute("CREATE TABLE IF NOT EXISTS rma_proveedor (id INTEGER PRIMARY KEY, proveedor TEXT UNIQUE, estado TEXT)")
+                    cur.execute("CREATE TABLE IF NOT EXISTS rma_proveedor (id INTEGER PRIMARY KEY, proveedor TEXT UNIQUE, estado TEXT, factura_abono TEXT)")
                     # Tabla de historial de proveedores: proveedor, estado, comentario, usuario, fecha
                     cur.execute(
                         "CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
                     )
                     conn.commit()
+                    # Añadir columna factura_abono si no existe (para migración)
+                    try:
+                        cur.execute("ALTER TABLE rma_proveedor ADD COLUMN factura_abono TEXT")
+                        conn.commit()
+                    except Exception:
+                        # La columna ya existe o el dialecto no soporta ALTER TABLE
+                        pass
                 except Exception:
                     # Si no podemos crearla en Turso u otro backend, seguimos sin persistencia
                     pass
 
                 # Construir consulta: obtenemos proveedores distintos de rma_maestro
-                # y left-join con rma_proveedor para traer el estado si existe.
+                # y left-join con rma_proveedor para traer el estado y factura_abono si existe.
                 params = []
                 search_clause = ""
                 if filtro:
@@ -4686,7 +4693,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 direction = 'ASC' if sort_state.get('dir', 'asc') == 'asc' else 'DESC'
 
                 sql = (
-                    "SELECT p.proveedor, COALESCE(r.estado, '') as estado "
+                    "SELECT p.proveedor, COALESCE(r.estado, '') as estado, COALESCE(r.factura_abono, '') as factura_abono "
                     "FROM (SELECT DISTINCT rma_proveedor AS proveedor FROM rma_maestro WHERE rma_proveedor IS NOT NULL AND rma_proveedor != ''"
                     + search_clause + ") p "
                     "LEFT JOIN rma_proveedor r ON lower(p.proveedor) = lower(r.proveedor) "
@@ -4758,7 +4765,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 header_row.grid_columnconfigure(3, weight=0, minsize=120)
 
                 hf = ctk.CTkFont(weight="bold")
-                lbl_nom = ctk.CTkLabel(header_row, text="PROVEEDOR", font=hf, anchor="w", cursor="hand2")
+                lbl_nom = ctk.CTkLabel(header_row, text="RMP", font=hf, anchor="w", cursor="hand2")
                 lbl_nom.grid(row=0, column=0, padx=5, sticky="w")
                 ctk.CTkLabel(header_row, text="ACCIONES", font=hf, anchor="center").grid(row=0, column=1, padx=5)
                 ctk.CTkLabel(header_row, text="HISTORIAL", font=hf, anchor="center").grid(row=0, column=2, padx=5)
@@ -4782,7 +4789,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 except Exception:
                     prov_page_lbl.configure(text=f"Página {prov_page.get('page',1)}")
 
-                for idx, (prov, estado_actual) in enumerate(rows):
+                for idx, (prov, estado_actual, factura_actual) in enumerate(rows):
                     nombre = prov
                     bg = colors[idx % 2]
                     row = ctk.CTkFrame(scroll, fg_color=bg)
@@ -4869,8 +4876,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     lbl_nombre.bind("<Enter>", on_enter)
                     lbl_nombre.bind("<Leave>", on_leave)
 
-                    # Click en nombre abre expedientes
-                    lbl_nombre.bind("<Button-1>", lambda e, nombre=nombre: mostrar_expedientes_proveedor(nombre))
+                    # Click en nombre abre detalle del proveedor
+                    lbl_nombre.bind("<Button-1>", lambda e, nombre=nombre, estado=estado_actual, factura=factura_actual: mostrar_expedientes_proveedor(nombre, estado, factura))
 
                     # Persistir cambio de estado (upsert) y anotar en historial
                     def make_state_updater(proveedor_nombre, prev_estado):
@@ -4943,26 +4950,150 @@ class VentanaPrincipal(ctk.CTkToplevel):
             except sqlite3.Error as e:
                 messagebox.showerror("Error BD", f"No se pudo cargar lista de proveedores: {e}")
 
-        def mostrar_expedientes_proveedor(proveedor_nombre):
-            # Ventana que lista rma_maestro asociados al proveedor y permite editar (doble-clic)
+        def mostrar_expedientes_proveedor(proveedor_nombre, estado_actual='', factura_actual=''):
+            # Ventana detallada del proveedor: info, expedientes, historial y comentarios
             vent = ctk.CTkToplevel(self)
-            vent.title(f"Expedientes - {proveedor_nombre}")
-            vent.geometry("1000x650")
+            vent.title(f"Detalle RMP - {proveedor_nombre}")
+            vent.geometry("1200x900")
             vent.grab_set()
 
             cont = ctk.CTkFrame(vent)
-            cont.pack(fill="both", expand=True, padx=10, pady=10)
+            cont.pack(fill="both", expand=True, padx=12, pady=12)
 
-            ctk.CTkLabel(cont, text=f"Expedientes asociados a: {proveedor_nombre}", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0,8))
+            # ===== SECCIÓN 1: ENCABEZADO CON INFORMACIÓN DEL PROVEEDOR =====
+            header_frame = ctk.CTkFrame(cont, fg_color="#4A90E2", corner_radius=8)
+            header_frame.pack(fill="x", pady=(0,10))
+            header_frame.grid_columnconfigure(0, weight=1)
+            header_frame.grid_columnconfigure(1, weight=1)
+            header_frame.grid_columnconfigure(2, weight=1)
 
-            sf = ctk.CTkScrollableFrame(cont)
-            sf.pack(fill="both", expand=True)
+            ctk.CTkLabel(header_frame, text="RMP", font=ctk.CTkFont(size=11, weight="bold"), text_color="white").grid(row=0, column=0, padx=15, pady=(8,2), sticky="w")
+            ctk.CTkLabel(header_frame, text=proveedor_nombre, font=ctk.CTkFont(size=14), text_color="white").grid(row=1, column=0, padx=15, pady=(0,8), sticky="w")
 
+            ctk.CTkLabel(header_frame, text="ESTADO", font=ctk.CTkFont(size=11, weight="bold"), text_color="white").grid(row=0, column=1, padx=15, pady=(8,2), sticky="w")
+            
+            # Variable para rastrear el estado actual
+            estado_var = {'actual': estado_actual or ''}
+            
+            # CTkOptionMenu para editar el estado
+            opciones_estado = ["", "En Progreso", "Enviado", "Completado", "Exportado"]
+            estado_menu = ctk.CTkOptionMenu(
+                header_frame, 
+                values=opciones_estado,
+                fg_color="white",
+                button_color="#4A90E2",
+                button_hover_color="#357ABD",
+                text_color="#212529",
+                dropdown_fg_color="white",
+                dropdown_text_color="#212529"
+            )
+            estado_menu.set(estado_actual if estado_actual in opciones_estado else "")
+            estado_menu.grid(row=1, column=1, padx=15, pady=(0,8), sticky="ew")
+
+            ctk.CTkLabel(header_frame, text="FACTURA ABONO", font=ctk.CTkFont(size=11, weight="bold"), text_color="white").grid(row=0, column=2, padx=15, pady=(8,2), sticky="w")
+            factura_entry = ctk.CTkEntry(header_frame, placeholder_text="Ej: FA2025001")
+            factura_entry.insert(0, factura_actual or "")
+            factura_entry.grid(row=1, column=2, padx=15, pady=(0,8), sticky="ew")
+
+            # Función para actualizar estado
+            def actualizar_estado(nuevo_estado):
+                estado_anterior = estado_var['actual']
+                # Si no hay cambio, no hacemos nada
+                if estado_anterior == nuevo_estado:
+                    return
+                
+                try:
+                    conn_e = connect_db()
+                    cur_e = conn_e.cursor()
+                    # Actualizar estado en la tabla
+                    try:
+                        cur_e.execute(
+                            "INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?) ON CONFLICT(proveedor) DO UPDATE SET estado=excluded.estado",
+                            (proveedor_nombre, nuevo_estado, factura_actual or '')
+                        )
+                    except Exception:
+                        # Fallback para backends sin ON CONFLICT
+                        cur_e.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", (nuevo_estado, proveedor_nombre))
+                        if getattr(cur_e, 'rowcount', 0) == 0:
+                            cur_e.execute("INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?)", (proveedor_nombre, nuevo_estado, factura_actual or ''))
+                    
+                    # Añadir al historial
+                    usuario = getattr(self, 'username', 'unknown')
+                    if estado_anterior == '' or estado_anterior is None:
+                        comentario_text = f"Estado establecido a: {nuevo_estado}"
+                    else:
+                        comentario_text = f"Cambio de estado de '{estado_anterior}' a '{nuevo_estado}'"
+                    
+                    cur_e.execute(
+                        "INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)",
+                        (proveedor_nombre, nuevo_estado, comentario_text, usuario)
+                    )
+                    
+                    conn_e.commit()
+                    conn_e.close()
+                    
+                    # Actualizar variable local
+                    estado_var['actual'] = nuevo_estado
+                    
+                    # Refrescar historial en esta ventana
+                    cargar_historial()
+                    
+                    # Refrescar lista principal
+                    try:
+                        cargar_proveedores()
+                    except Exception:
+                        pass
+                    
+                    messagebox.showinfo("Actualizado", "Estado actualizado correctamente.")
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo actualizar el estado: {e}")
+            
+            # Configurar el comando del menú de estado
+            estado_menu.configure(command=actualizar_estado)
+
+            # Botón para guardar cambios de factura_abono
+            def guardar_factura():
+                nueva_factura = factura_entry.get().strip()
+                try:
+                    conn_f = connect_db()
+                    cur_f = conn_f.cursor()
+                    # Actualizar factura_abono (usar el estado actual de estado_var)
+                    try:
+                        cur_f.execute(
+                            "INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?) ON CONFLICT(proveedor) DO UPDATE SET factura_abono=excluded.factura_abono",
+                            (proveedor_nombre, estado_var['actual'], nueva_factura)
+                        )
+                    except Exception:
+                        # Fallback para backends sin ON CONFLICT
+                        cur_f.execute("UPDATE rma_proveedor SET factura_abono = ? WHERE proveedor = ?", (nueva_factura, proveedor_nombre))
+                        if getattr(cur_f, 'rowcount', 0) == 0:
+                            cur_f.execute("INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?)", (proveedor_nombre, estado_var['actual'], nueva_factura))
+                    conn_f.commit()
+                    conn_f.close()
+                    messagebox.showinfo("Guardado", "Factura de abono actualizada correctamente.")
+                    # Refrescar lista principal
+                    try:
+                        cargar_proveedores()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo guardar la factura: {e}")
+
+            ctk.CTkButton(header_frame, text="💾 Guardar Factura", command=guardar_factura, width=130).grid(row=1, column=3, padx=(5,15), pady=(0,8))
+
+            # ===== SECCIÓN 2: LISTADO DE EXPEDIENTES =====
+            exp_frame = ctk.CTkFrame(cont)
+            exp_frame.pack(fill="both", expand=True, pady=(0,10))
+
+            ctk.CTkLabel(exp_frame, text="Expedientes Asociados", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=5, pady=(5,5))
+
+            sf_exp = ctk.CTkScrollableFrame(exp_frame, height=250)
+            sf_exp.pack(fill="both", expand=True, padx=5, pady=(0,5))
+
+            # Cargar expedientes del proveedor
             try:
                 conn = connect_db()
                 cur = conn.cursor()
-                # Buscamos coincidencias por nombre (case-insensitive) o por id/string
-                # Seleccionamos campos adicionales necesarios para exportar a Excel
                 cur.execute(
                     "SELECT id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado "
                     "FROM rma_maestro WHERE lower(Rma_Proveedor)=? OR Rma_Proveedor=? ORDER BY fecha_emision DESC",
@@ -4970,202 +5101,229 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 )
                 filas = cur.fetchall()
                 conn.close()
+            except Exception as e:
+                messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}")
+                filas = []
 
-                def export_to_excel(rows, proveedor):
-                    try:
-                        # Construir DataFrame con la estructura solicitada
-                        data = []
-                        for r in rows:
-                            # r: id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado
-                            (_id, codigo_rma, cliente, num_doc, modelo, ref_prov, fecha_emision, estado) = r
-                            data.append({
-                                'Nº Expediente': codigo_rma,
-                                'Proveedor': proveedor,
-                                'Cliente': cliente or '',
-                                'Numero Documento Cliente': num_doc or '',
-                                'Descripcion Articulo': modelo or '',
-                                'Referencia': ref_prov or ''
-                            })
+            # Función para exportar a Excel
+            def export_to_excel():
+                try:
+                    if not filas:
+                        messagebox.showinfo('Exportar', 'No hay expedientes para exportar.')
+                        return
+                    
+                    data = []
+                    for r in filas:
+                        (_id, codigo_rma, cliente, num_doc, modelo, ref_prov, fecha_emision, estado) = r
+                        data.append({
+                            'Nº Expediente': codigo_rma,
+                            'Proveedor': proveedor_nombre,
+                            'Cliente': cliente or '',
+                            'Numero Documento Cliente': num_doc or '',
+                            'Descripcion Articulo': modelo or '',
+                            'Referencia': ref_prov or ''
+                        })
 
-                        if not data:
-                            messagebox.showinfo('Exportar', 'No hay expedientes para exportar.')
+                    df = pd.DataFrame(data)
+                    base_dir = os.path.join(os.path.dirname(__file__), 'Adjuntos_RMA')
+                    rmp_dir = os.path.join(base_dir, 'RMP')
+                    os.makedirs(rmp_dir, exist_ok=True)
+
+                    safe_name = ''.join(c for c in proveedor_nombre if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    safe_name = safe_name.replace(' ', '_')
+                    file_path = os.path.join(rmp_dir, f"{safe_name}.xlsx")
+
+                    if os.path.exists(file_path):
+                        if not messagebox.askyesno('Exportar', f'El archivo {os.path.basename(file_path)} ya existe. ¿Desea sobreescribirlo?'):
                             return
 
-                        df = pd.DataFrame(data)
+                    with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Expedientes')
+                        workbook = writer.book
+                        worksheet = writer.sheets['Expedientes']
+                        from openpyxl.utils import get_column_letter
+                        for i, col in enumerate(df.columns):
+                            if df.empty:
+                                max_len = len(str(col))
+                            else:
+                                col_max = df[col].astype(str).map(len).max()
+                                max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
+                            adjusted_width = min(max_len + 2, 60)
+                            worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
 
-                        # Preparar carpeta de guardado: Adjuntos_RMA/RMP
-                        base_dir = os.path.join(os.path.dirname(__file__), 'Adjuntos_RMA')
-                        rmp_dir = os.path.join(base_dir, 'RMP')
-                        os.makedirs(rmp_dir, exist_ok=True)
+                    messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
 
-                        # Nombre de archivo: proveedor.xlsx (sanitizar)
-                        safe_name = ''.join(c for c in proveedor if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                        safe_name = safe_name.replace(' ', '_')
-                        file_path = os.path.join(rmp_dir, f"{safe_name}.xlsx")
-
-                        # Si ya existe, preguntar al usuario si desea sobrescribirlo (mostrar solo nombre)
-                        if os.path.exists(file_path):
-                            fname = os.path.basename(file_path)
-                            if not messagebox.askyesno('Exportar', f'El archivo {fname} ya existe. ¿Desea sobreescribirlo?'):
-                                return
-
-                        # Guardar Excel y ajustar anchos de columna automáticamente
-                        try:
-                            # Usamos openpyxl a través de pandas ExcelWriter para poder ajustar columnas
-                            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                                df.to_excel(writer, index=False, sheet_name='Expedientes')
-                                workbook = writer.book
-                                worksheet = writer.sheets['Expedientes']
-
-                                # Ajustar ancho: calcular longitud máxima entre valores y encabezado
-                                from openpyxl.utils import get_column_letter
-                                for i, col in enumerate(df.columns):
-                                    if df.empty:
-                                        max_len = len(str(col))
-                                    else:
-                                        # map len over stringified values, ignore None
-                                        col_max = df[col].astype(str).map(len).max()
-                                        max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
-                                    # añadir un pequeño padding y limitar a un ancho razonable
-                                    adjusted_width = min(max_len + 2, 60)
-                                    worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
-
-                            messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
-
-                            # Registrar en historial del proveedor que se exportó el listado a Excel
-                            try:
-                                connh = connect_db()
-                                curh = connh.cursor()
-                                # Conteo de expedientes y lista de códigos RMA
-                                try:
-                                    rma_codes = [str(r[1]) for r in rows if len(r) > 1 and r[1] is not None]
-                                except Exception:
-                                    rma_codes = []
-                                count = len(rows)
-                                codes_str = ', '.join(rma_codes)
-                                # Truncar si la lista es muy larga para no crear comentarios gigantes
-                                if len(codes_str) > 500:
-                                    codes_str = codes_str[:500] + '...'
-
-                                comentario = f'Exportado {count} expedientes a Excel: {os.path.basename(file_path)}'
-                                if codes_str:
-                                    comentario += f' (RMAs: {codes_str})'
-
-                                usuario = getattr(self, 'username', '') if hasattr(self, 'username') else ''
-                                # Insertamos comentario; marcamos estado como 'Exportado'
-                                curh.execute(
-                                    "INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)",
-                                    (proveedor, 'Exportado', comentario, usuario)
-                                )
-
-                                # Actualizar la tabla rma_proveedor para reflejar el nuevo estado
-                                try:
-                                    try:
-                                        curh.execute(
-                                            "INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?) ON CONFLICT(proveedor) DO UPDATE SET estado=excluded.estado",
-                                            (proveedor, 'Exportado')
-                                        )
-                                    except Exception:
-                                        # Fallback a UPDATE/INSERT si el dialecto no soporta ON CONFLICT
-                                        curh.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", ('Exportado', proveedor))
-                                        if getattr(curh, 'rowcount', 0) == 0:
-                                            curh.execute("INSERT INTO rma_proveedor (proveedor, estado) VALUES (?, ?)", (proveedor, 'Exportado'))
-                                except Exception:
-                                    # No bloqueamos la exportación por este error; lo registramos en consola
-                                    try:
-                                        print('Warning: no se pudo actualizar rma_proveedor estado a Exportado')
-                                    except Exception:
-                                        pass
-                                connh.commit()
-                                connh.close()
-                                # Refrescar la lista de proveedores para que muestre el nuevo estado
-                                try:
-                                    cargar_proveedores()
-                                except Exception:
-                                    pass
-                            except Exception as e:
-                                # No interrumpimos la exportación por un fallo en el historial; registramos en consola
-                                try:
-                                    print('Warning: no se pudo escribir en rma_proveedor_hist:', e)
-                                except Exception:
-                                    pass
-                        except Exception as e:
-                            messagebox.showerror('Exportar', f'Error exportando a Excel (asegúrate de tener openpyxl): {e}')
-                    except Exception as e:
-                        messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
-
-                # Encabezado
-                head = ctk.CTkFrame(sf)
-                head.pack(fill="x", padx=5, pady=(0,5))
-                # Botón de exportar a Excel
-                try:
-                    ctk.CTkButton(cont, text="Exportar a Excel", command=lambda rows=filas, p=proveedor_nombre: export_to_excel(rows, p)).pack(anchor="ne")
-                except Exception:
-                    pass
-                head.grid_columnconfigure(0, weight=1, minsize=180)
-                head.grid_columnconfigure(1, weight=2, minsize=300)
-                head.grid_columnconfigure(2, weight=1, minsize=140)
-                head.grid_columnconfigure(3, weight=1, minsize=140)
-
-                hf = ctk.CTkFont(weight="bold")
-                ctk.CTkLabel(head, text="CÓDIGO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="FECHA", font=hf).grid(row=0, column=2, padx=5, sticky="w")
-                ctk.CTkLabel(head, text="ESTADO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
-
-                colors = ("#FFFFFF", "#F7F7F7")
-                for idx, r in enumerate(filas):
-                    # filas: id, codigo_rma, cliente, numero_documento_cliente, modelo, ref_proveedor, fecha_emision, estado
+                    # Añadir a historial
                     try:
-                        rma_id, codigo, cliente, num_doc, modelo, ref_prov, fecha, estado = r
-                    except Exception:
-                        # Fallback si la tupla no tiene la forma esperada
-                        # Intentamos mapear por posición conocida
-                        vals = list(r)
-                        rma_id = vals[0] if len(vals) > 0 else None
-                        codigo = vals[1] if len(vals) > 1 else ''
-                        cliente = vals[2] if len(vals) > 2 else ''
-                        fecha = vals[3] if len(vals) > 3 else ''
-                        estado = vals[4] if len(vals) > 4 else ''
+                        connh = connect_db()
+                        curh = connh.cursor()
+                        rma_codes = [str(r[1]) for r in filas if len(r) > 1 and r[1] is not None]
+                        count = len(filas)
+                        codes_str = ', '.join(rma_codes)
+                        if len(codes_str) > 500:
+                            codes_str = codes_str[:500] + '...'
+                        comentario = f'Exportado {count} expedientes a Excel: {os.path.basename(file_path)}'
+                        if codes_str:
+                            comentario += f' (RMAs: {codes_str})'
+                        usuario = getattr(self, 'username', 'unknown')
+                        curh.execute(
+                            "INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)",
+                            (proveedor_nombre, 'Exportado', comentario, usuario)
+                        )
+                        try:
+                            curh.execute(
+                                "INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?) ON CONFLICT(proveedor) DO UPDATE SET estado=excluded.estado",
+                                (proveedor_nombre, 'Exportado', factura_actual or '')
+                            )
+                        except Exception:
+                            curh.execute("UPDATE rma_proveedor SET estado = ? WHERE proveedor = ?", ('Exportado', proveedor_nombre))
+                            if getattr(curh, 'rowcount', 0) == 0:
+                                curh.execute("INSERT INTO rma_proveedor (proveedor, estado, factura_abono) VALUES (?, ?, ?)", (proveedor_nombre, 'Exportado', factura_actual or ''))
+                        connh.commit()
+                        connh.close()
+                        # Refrescar historial en esta ventana
+                        cargar_historial()
+                        cargar_proveedores()
+                    except Exception as e:
+                        print(f'Warning: error en historial: {e}')
+                except Exception as e:
+                    messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
 
-                    bg = colors[idx % 2]
-                    row = ctk.CTkFrame(sf, fg_color=bg)
-                    row.pack(fill="x", padx=5, pady=2)
-                    row.grid_columnconfigure(0, weight=1, minsize=180)
-                    row.grid_columnconfigure(1, weight=2, minsize=300)
-                    row.grid_columnconfigure(2, weight=1, minsize=140)
-                    row.grid_columnconfigure(3, weight=1, minsize=140)
-                    row.grid_columnconfigure(4, weight=0, minsize=100)
+            # Botón exportar
+            btn_frame = ctk.CTkFrame(exp_frame)
+            btn_frame.pack(fill="x", padx=5, pady=(0,5))
+            ctk.CTkButton(btn_frame, text="📊 Exportar a Excel", command=export_to_excel, width=150).pack(side="right")
 
-                    lbl_codigo = ctk.CTkLabel(row, text=codigo, anchor="w", cursor="hand2")
-                    lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
-                    lbl_cliente = ctk.CTkLabel(row, text=cliente if cliente else "-", anchor="w")
-                    lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
-                    lbl_fecha = ctk.CTkLabel(row, text=fecha if fecha else "-", anchor="w")
-                    lbl_fecha.grid(row=0, column=2, padx=5, sticky="w")
-                    lbl_estado = ctk.CTkLabel(row, text=estado if estado else "-", anchor="w")
-                    lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
+            # Encabezado de expedientes
+            head = ctk.CTkFrame(sf_exp)
+            head.pack(fill="x", padx=5, pady=(0,5))
+            head.grid_columnconfigure(0, weight=1, minsize=150)
+            head.grid_columnconfigure(1, weight=2, minsize=250)
+            head.grid_columnconfigure(2, weight=1, minsize=120)
+            head.grid_columnconfigure(3, weight=1, minsize=120)
+            head.grid_columnconfigure(4, weight=0, minsize=80)
 
-                    acciones = ctk.CTkFrame(row, fg_color="transparent")
-                    acciones.grid(row=0, column=4, padx=5)
-                    # Botón Editar que abre el expediente en el panel principal
-                    ctk.CTkButton(acciones, text="Editar", width=80, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
+            hf = ctk.CTkFont(weight="bold")
+            ctk.CTkLabel(head, text="CÓDIGO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="CLIENTE", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="FECHA", font=hf).grid(row=0, column=2, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="ESTADO", font=hf).grid(row=0, column=3, padx=5, sticky="w")
+            ctk.CTkLabel(head, text="", font=hf).grid(row=0, column=4, padx=5)
 
-                    # Hover
-                    def on_enter(e, r=row):
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
-                    def on_leave(e, r=row, original_bg=bg):
-                        r.configure(fg_color=original_bg)
+            # Filas de expedientes
+            colors = ("#FFFFFF", "#F7F7F7")
+            for idx, r in enumerate(filas):
+                try:
+                    rma_id, codigo, cliente, num_doc, modelo, ref_prov, fecha, estado = r
+                except Exception:
+                    vals = list(r)
+                    rma_id = vals[0] if len(vals) > 0 else None
+                    codigo = vals[1] if len(vals) > 1 else ''
+                    cliente = vals[2] if len(vals) > 2 else ''
+                    fecha = vals[6] if len(vals) > 6 else ''
+                    estado = vals[7] if len(vals) > 7 else ''
 
-                    row.bind("<Enter>", on_enter)
-                    row.bind("<Leave>", on_leave)
+                bg = colors[idx % 2]
+                row = ctk.CTkFrame(sf_exp, fg_color=bg)
+                row.pack(fill="x", padx=5, pady=2)
+                row.grid_columnconfigure(0, weight=1, minsize=150)
+                row.grid_columnconfigure(1, weight=2, minsize=250)
+                row.grid_columnconfigure(2, weight=1, minsize=120)
+                row.grid_columnconfigure(3, weight=1, minsize=120)
+                row.grid_columnconfigure(4, weight=0, minsize=80)
 
-                    # Doble clic también abre editor del RMA
-                    row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
-                    lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+                lbl_codigo = ctk.CTkLabel(row, text=codigo, anchor="w", cursor="hand2")
+                lbl_codigo.grid(row=0, column=0, padx=5, sticky="w")
+                lbl_cliente = ctk.CTkLabel(row, text=cliente if cliente else "-", anchor="w")
+                lbl_cliente.grid(row=0, column=1, padx=5, sticky="w")
+                lbl_fecha = ctk.CTkLabel(row, text=fecha if fecha else "-", anchor="w")
+                lbl_fecha.grid(row=0, column=2, padx=5, sticky="w")
+                lbl_estado = ctk.CTkLabel(row, text=estado if estado else "-", anchor="w")
+                lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
 
-            except sqlite3.Error as e:
-                messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}")
+                ctk.CTkButton(row, text="Editar", width=70, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).grid(row=0, column=4, padx=5)
+
+                # Hover
+                def on_enter(e, r=row):
+                    r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                def on_leave(e, r=row, original_bg=bg):
+                    r.configure(fg_color=original_bg)
+
+                row.bind("<Enter>", on_enter)
+                row.bind("<Leave>", on_leave)
+
+                # Doble clic abre editor
+                row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+
+            # ===== SECCIÓN 3: HISTORIAL DEL PROVEEDOR =====
+            hist_frame = ctk.CTkFrame(cont)
+            hist_frame.pack(fill="both", expand=True, pady=(0,10))
+
+            ctk.CTkLabel(hist_frame, text="Historial del Proveedor", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=5, pady=(5,5))
+
+            sf_hist = ctk.CTkScrollableFrame(hist_frame, height=180)
+            sf_hist.pack(fill="both", expand=True, padx=5, pady=(0,5))
+
+            def cargar_historial():
+                for w in sf_hist.winfo_children():
+                    w.destroy()
+                try:
+                    conn_h = connect_db()
+                    cur_h = conn_h.cursor()
+                    cur_h.execute(
+                        "SELECT fecha, usuario, estado, comentario FROM rma_proveedor_hist WHERE lower(proveedor)=? OR proveedor=? ORDER BY fecha DESC",
+                        (proveedor_nombre.lower(), proveedor_nombre)
+                    )
+                    hist_rows = cur_h.fetchall()
+                    conn_h.close()
+
+                    if not hist_rows:
+                        ctk.CTkLabel(sf_hist, text="No hay historial registrado.", text_color="gray").pack(anchor="w", padx=5, pady=10)
+                    else:
+                        for idx, (fecha, usuario, estado_h, comentario) in enumerate(hist_rows):
+                            rowf = ctk.CTkFrame(sf_hist, fg_color="#FFFFFF" if idx % 2 == 0 else "#F7F7F7", corner_radius=6)
+                            rowf.pack(fill="x", padx=3, pady=3)
+                            txt = f"📅 {fecha} | 👤 {usuario}"
+                            if estado_h:
+                                txt += f" | 🏷️ {estado_h}"
+                            ctk.CTkLabel(rowf, text=txt, font=ctk.CTkFont(weight="bold", size=11)).pack(anchor="w", padx=8, pady=(6,2))
+                            if comentario:
+                                ctk.CTkLabel(rowf, text=comentario, wraplength=1100, anchor="w").pack(anchor="w", padx=8, pady=(0,6))
+                except Exception as e:
+                    ctk.CTkLabel(sf_hist, text=f"Error cargando historial: {e}", text_color="red").pack(anchor="w", padx=5, pady=10)
+
+            cargar_historial()
+
+            # ===== SECCIÓN 4: AÑADIR COMENTARIO =====
+            comment_frame = ctk.CTkFrame(cont)
+            comment_frame.pack(fill="x")
+
+            ctk.CTkLabel(comment_frame, text="Añadir comentario al historial:", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=5, pady=(5,3))
+            comment_box = ctk.CTkTextbox(comment_frame, height=60)
+            comment_box.pack(fill="x", padx=5, pady=(0,5))
+
+            def add_comment():
+                text = comment_box.get("0.0", "end").strip()
+                if not text:
+                    messagebox.showwarning("Vacío", "Escribe un comentario antes de añadirlo.")
+                    return
+                try:
+                    connc = connect_db()
+                    curc = connc.cursor()
+                    curc.execute("CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    curc.execute("INSERT INTO rma_proveedor_hist (proveedor, estado, comentario, usuario) VALUES (?, ?, ?, ?)", 
+                                (proveedor_nombre, '', text, getattr(self, 'username', 'unknown')))
+                    connc.commit()
+                    connc.close()
+                    messagebox.showinfo("Añadido", "Comentario añadido al historial.")
+                    comment_box.delete("0.0", "end")
+                    cargar_historial()
+                    cargar_proveedores()
+                except Exception as e:
+                    messagebox.showerror("Error BD", f"No se pudo añadir el comentario: {e}")
+
+            ctk.CTkButton(comment_frame, text="💬 Añadir Comentario", command=add_comment, width=180).pack(anchor="e", padx=5, pady=(0,5))
 
         # Vincular búsqueda
         btn_buscar.configure(command=cargar_proveedores)
