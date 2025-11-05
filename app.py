@@ -105,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.66"
+APP_VERSION = "v0.0.67"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -760,6 +760,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 pass
         
         self.crear_diseno()
+        
+        # Configurar atajos de teclado globales
+        self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
+        self.bind_all("<Control-F>", lambda e: self.mostrar_busqueda_global())
+        self.bind_all("<Control-n>", lambda e: self.mostrar_nuevo_rma())
+        self.bind_all("<Control-N>", lambda e: self.mostrar_nuevo_rma())
+        
         # Iniciar comprobación periódica de tareas (notificaciones para el creador)
         try:
             self.programar_chequeo_tareas()
@@ -976,6 +983,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_papel = _load_icon("papel.png")
         self.icon_mas = _load_icon("mas.png")
         self.icon_settings = _load_icon("settings.png")
+        self.icon_busqueda = _load_icon("busqueda.png")
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
@@ -1001,6 +1009,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Usamos índices de fila secuenciales para evitar solapamientos.
         fila = 2
+
+        # Botón Búsqueda Global - busca en todos los campos
+        sidebar_bg = self.sidebar_frame.cget("fg_color") if hasattr(self.sidebar_frame, 'cget') else None
+        self.btn_busqueda_global = ctk.CTkButton(self.sidebar_frame,
+                                               text="",
+                                               image=self.icon_busqueda,
+                                               width=44,
+                                               height=44,
+                                               fg_color=sidebar_bg,
+                                               hover_color=sidebar_bg,
+                                               command=self.mostrar_busqueda_global)
+        self.btn_busqueda_global.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_busqueda_global, "Búsqueda Global - Buscar en todos los campos")
+        fila += 1
 
         # Botón de gestión de usuarios (solo visible para administradores)
         if str(self.rol).strip().lower() in ("admin", "administrador"):
@@ -1055,8 +1077,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         Tooltip(self.btn_estadisticas, "Filtrar / Estadísticas")
         fila += 1
 
-        # Botón de Tareas (lista y creación de tareas por expediente)
-        self.btn_tareas = ctk.CTkButton(self.sidebar_frame,
+        # Botón de Tareas (lista y creación de tareas por expediente) con badge
+        # Crear frame contenedor para el botón + badge
+        self.frame_tareas = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.frame_tareas.grid(row=fila, column=0, padx=20, pady=6)
+        
+        self.btn_tareas = ctk.CTkButton(self.frame_tareas,
                                         text="",
                                         image=self.icon_tasks,
                                         width=44,
@@ -1064,7 +1090,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                         fg_color=sidebar_bg,
                                         hover_color=sidebar_bg,
                                         command=self.mostrar_gestion_tareas)
-        self.btn_tareas.grid(row=fila, column=0, padx=20, pady=6)
+        self.btn_tareas.grid(row=0, column=0)
+        
+        # Badge para contador de tareas pendientes
+        self.badge_tareas = ctk.CTkLabel(self.frame_tareas,
+                                       text="0",
+                                       width=18,
+                                       height=18,
+                                       corner_radius=9,
+                                       fg_color="#e74c3c",  # Rojo más intenso
+                                       text_color="white",
+                                       font=ctk.CTkFont(size=9, weight="bold"))
+        self.badge_tareas.grid(row=0, column=0, sticky="ne", padx=(32, 0), pady=(2, 0))
+        
+        # Inicializar badge (oculto inicialmente)
+        self.badge_tareas.grid_remove()
+        
         Tooltip(self.btn_tareas, "Tareas")
         fila += 1
 
@@ -1086,7 +1127,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico"):
             self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
                                            text="",
-                                           image=self.icon_info,
+                                           image=self.icon_reports,
                                            width=44,
                                            height=44,
                                            fg_color=sidebar_bg,
@@ -1098,7 +1139,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
                                           text="",
-                                          image=self.icon_reports,
+                                          image=self.icon_info,
                                           width=44,
                                           height=44,
                                           fg_color=sidebar_bg,
@@ -1106,6 +1147,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                           command=self.mostrar_formulario_github)
         self.btn_reportar.grid(row=fila, column=0, padx=20, pady=6)
         Tooltip(self.btn_reportar, "Reportar un problema / abrir GitHub")
+        
         # Botón Ajustes - abre diálogo de preferencias del usuario
         try:
             fila += 1
@@ -1128,6 +1170,50 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.content_frame.grid_columnconfigure(0, weight=1)
         
         self.mostrar_lista_rma()
+        
+        # Actualizar badge de tareas al cargar la ventana
+        self.actualizar_badge_tareas()
+    
+    def contar_tareas_pendientes(self):
+        """Cuenta las tareas que no están completadas (Pendiente + En progreso)."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return 0
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM tareas 
+                WHERE estado NOT IN ('Completado', 'Completada', 'Finalizada')
+                AND estado IS NOT NULL
+            """)
+            count = int(cursor.fetchone()[0])  # Convertir a entero
+            conn.close()
+            return count
+        except Exception as e:
+            print(f"Error al contar tareas pendientes: {e}")
+            return 0
+
+    def actualizar_badge_tareas(self):
+        """Actualiza el badge visual del botón de tareas."""
+        if not hasattr(self, 'badge_tareas'):
+            return
+        
+        count = self.contar_tareas_pendientes()
+        if count > 0:
+            # Mostrar badge con el número
+            self.badge_tareas.configure(text=str(count))
+            self.badge_tareas.grid()  # Hacer visible
+            # Actualizar tooltip con información de tareas pendientes
+            Tooltip(self.btn_tareas, f"Tareas ({count} pendientes)")
+        else:
+            # Ocultar badge si no hay tareas pendientes
+            self.badge_tareas.grid_remove()
+            # Restaurar tooltip normal
+            Tooltip(self.btn_tareas, "Tareas")
+
+    def conectar_db(self):
+        """Intenta conectar a la base de datos (método heredado de master)."""
+        return self.master.conectar_db()
     
     
     # ----------------------------------------------------------------------
@@ -1922,6 +2008,349 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if conn_destino:
                 conn_destino.close()
 
+    # ----------------------------------------------------------------------
+    # 4.5. BÚSQUEDA GLOBAL AVANZADA
+    # ----------------------------------------------------------------------
+
+    def mostrar_busqueda_global(self):
+        """Muestra la interfaz de búsqueda global avanzada."""
+        self.limpiar_contenido()
+        
+        # Header
+        header_frame = ctk.CTkFrame(self.content_frame)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(header_frame, 
+                    text="🔍 BÚSQUEDA GLOBAL AVANZADA", 
+                    font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
+        
+        # Botón para volver
+        btn_volver = ctk.CTkButton(header_frame, text="← Volver a Lista", 
+                                  command=self.mostrar_lista_rma,
+                                  width=150, height=30)
+        btn_volver.pack(anchor="e", padx=10, pady=(0,5))
+        
+        # Frame de búsqueda
+        search_frame = ctk.CTkFrame(self.content_frame)
+        search_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Campo de búsqueda principal
+        ctk.CTkLabel(search_frame, text="Buscar en todos los campos:", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10,5))
+        
+        entrada_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+        entrada_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.entry_busqueda_global = ctk.CTkEntry(entrada_frame, 
+                                                 placeholder_text="Escribe cualquier texto para buscar en expedientes y productos...",
+                                                 width=500,
+                                                 height=35,
+                                                 font=ctk.CTkFont(size=12))
+        self.entry_busqueda_global.pack(side="left", padx=(0,10), fill="x", expand=True)
+        
+        btn_buscar = ctk.CTkButton(entrada_frame, text="🔍 Buscar", 
+                                  command=self.ejecutar_busqueda_global,
+                                  width=100, height=35)
+        btn_buscar.pack(side="left")
+        
+        btn_limpiar = ctk.CTkButton(entrada_frame, text="🗑️ Limpiar", 
+                                   command=self.limpiar_busqueda_global,
+                                   width=100, height=35)
+        btn_limpiar.pack(side="left", padx=(5,0))
+        
+        # Bind Enter key
+        self.entry_busqueda_global.bind("<Return>", lambda e: self.ejecutar_busqueda_global())
+        
+        # Información de ayuda
+        ayuda_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+        ayuda_frame.pack(fill="x", padx=10, pady=5)
+        
+        ayuda_text = """💡 Esta búsqueda explora TODOS los campos de expedientes y productos:
+📋 Expedientes: Código RMA, Cliente, Documento Cliente, Estado, Fechas, RMA Proveedor, Motivo, etc.
+📦 Productos: Referencia, Modelo, Número de Serie, Descripción del Problema, Estado del Producto, etc.
+⌨️ Atajo de teclado: Ctrl+F"""
+        
+        ctk.CTkLabel(ayuda_frame, text=ayuda_text, 
+                    font=ctk.CTkFont(size=11), 
+                    text_color="gray",
+                    justify="left").pack(anchor="w")
+        
+        # Frame para resultados
+        self.resultados_frame = ctk.CTkScrollableFrame(self.content_frame, height=400)
+        self.resultados_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Mensaje inicial
+        ctk.CTkLabel(self.resultados_frame, 
+                    text="👆 Introduce un término de búsqueda arriba para comenzar",
+                    font=ctk.CTkFont(size=14),
+                    text_color="gray").pack(pady=50)
+        
+        # Focus en el campo de búsqueda
+        self.entry_busqueda_global.focus()
+
+    def ejecutar_busqueda_global(self):
+        """Ejecuta la búsqueda global en todos los campos."""
+        termino = self.entry_busqueda_global.get().strip()
+        
+        if not termino:
+            self.mostrar_mensaje_busqueda("⚠️ Por favor, introduce un término de búsqueda")
+            return
+        
+        if len(termino) < 2:
+            self.mostrar_mensaje_busqueda("⚠️ El término de búsqueda debe tener al menos 2 caracteres")
+            return
+        
+        # Limpiar resultados anteriores
+        for widget in self.resultados_frame.winfo_children():
+            widget.destroy()
+        
+        # Mostrar indicador de carga
+        loading_label = ctk.CTkLabel(self.resultados_frame, 
+                                   text="🔄 Buscando...", 
+                                   font=ctk.CTkFont(size=14))
+        loading_label.pack(pady=20)
+        self.update()
+        
+        try:
+            # Realizar búsqueda
+            resultados_expedientes, resultados_productos = self.buscar_en_todos_los_campos(termino)
+            
+            # Limpiar indicador de carga
+            loading_label.destroy()
+            
+            # Mostrar resultados
+            self.mostrar_resultados_busqueda(resultados_expedientes, resultados_productos, termino)
+            
+        except Exception as e:
+            loading_label.destroy()
+            self.mostrar_mensaje_busqueda(f"❌ Error en la búsqueda: {str(e)}")
+
+    def buscar_en_todos_los_campos(self, termino):
+        """Busca el término en todos los campos de las tablas principales."""
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            return [], []
+        
+        cursor = conn.cursor()
+        termino_like = f"%{termino}%"
+        
+        try:
+            # Búsqueda en rma_maestro (expedientes)
+            # Obtenemos primero todas las columnas disponibles
+            cursor.execute("PRAGMA table_info(rma_maestro)")
+            columnas_maestro = [col[1] for col in cursor.fetchall()]
+            
+            # Construir query dinámicamente para todos los campos de texto
+            campos_busqueda_maestro = []
+            params_maestro = []
+            
+            for col in columnas_maestro:
+                if col.lower() not in ['id']:  # Excluir campos numéricos ID
+                    campos_busqueda_maestro.append(f"{col} LIKE ?")
+                    params_maestro.append(termino_like)
+            
+            if campos_busqueda_maestro:
+                sql_maestro = f"""
+                SELECT id, codigo_rma, cliente, numero_documento_cliente, estado, fecha_emision,
+                       rma_proveedor, motivo, fecha_gestion
+                FROM rma_maestro 
+                WHERE {' OR '.join(campos_busqueda_maestro)}
+                ORDER BY fecha_emision DESC
+                LIMIT 100
+                """
+                cursor.execute(sql_maestro, params_maestro)
+                resultados_expedientes = cursor.fetchall()
+            else:
+                resultados_expedientes = []
+            
+            # Búsqueda en rma_detalles (productos)
+            cursor.execute("PRAGMA table_info(rma_detalles)")
+            columnas_detalles = [col[1] for col in cursor.fetchall()]
+            
+            campos_busqueda_detalles = []
+            params_detalles = []
+            
+            for col in columnas_detalles:
+                if col.lower() not in ['id', 'rma_id', 'cantidad_segun_documento', 'cantidad_entregada', 'precio_unitario']:
+                    campos_busqueda_detalles.append(f"d.{col} LIKE ?")
+                    params_detalles.append(termino_like)
+            
+            if campos_busqueda_detalles:
+                sql_detalles = f"""
+                SELECT DISTINCT d.id, d.rma_id, d.referencia_articulo, d.cantidad_segun_documento,
+                       d.cantidad_entregada, d.estado_producto, d.precio_unitario, m.codigo_rma, m.cliente
+                FROM rma_detalles d
+                JOIN rma_maestro m ON d.rma_id = m.id
+                WHERE {' OR '.join(campos_busqueda_detalles)}
+                ORDER BY m.fecha_emision DESC
+                LIMIT 100
+                """
+                cursor.execute(sql_detalles, params_detalles)
+                resultados_productos = cursor.fetchall()
+            else:
+                resultados_productos = []
+            
+            conn.close()
+            return resultados_expedientes, resultados_productos
+            
+        except Exception as e:
+            conn.close()
+            raise e
+
+    def mostrar_resultados_busqueda(self, expedientes, productos, termino):
+        """Muestra los resultados de la búsqueda de forma organizada."""
+        total_resultados = len(expedientes) + len(productos)
+        
+        if total_resultados == 0:
+            self.mostrar_mensaje_busqueda(f"🔍 No se encontraron resultados para '{termino}'")
+            return
+        
+        # Header de resultados
+        header_resultados = ctk.CTkLabel(self.resultados_frame,
+                                       text=f"📊 Se encontraron {total_resultados} resultados para '{termino}'",
+                                       font=ctk.CTkFont(size=16, weight="bold"))
+        header_resultados.pack(pady=10, anchor="w")
+        
+        # Mostrar expedientes
+        if expedientes:
+            self.mostrar_seccion_expedientes(expedientes)
+        
+        # Mostrar productos
+        if productos:
+            self.mostrar_seccion_productos(productos)
+
+    def mostrar_seccion_expedientes(self, expedientes):
+        """Muestra la sección de expedientes encontrados."""
+        seccion_frame = ctk.CTkFrame(self.resultados_frame)
+        seccion_frame.pack(fill="x", pady=10)
+        
+        ctk.CTkLabel(seccion_frame, 
+                    text=f"📋 EXPEDIENTES ENCONTRADOS ({len(expedientes)})",
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        for exp in expedientes:
+            exp_id, codigo_rma, cliente, num_doc, estado, fecha, rma_prov, motivo, fecha_gestion = exp
+            
+            item_frame = ctk.CTkFrame(seccion_frame)
+            item_frame.pack(fill="x", padx=10, pady=2)
+            
+            # Información principal
+            info_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            info_frame.pack(fill="x", padx=10, pady=5)
+            
+            # Línea 1: Código RMA y fecha
+            linea1 = ctk.CTkFrame(info_frame, fg_color="transparent")
+            linea1.pack(fill="x")
+            
+            ctk.CTkLabel(linea1, text=f"📋 {codigo_rma or 'Sin código'}", 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left")
+            ctk.CTkLabel(linea1, text=f"📅 {fecha or 'Sin fecha'}", 
+                        text_color="gray").pack(side="right")
+            
+            # Línea 2: Cliente y documento
+            if cliente or num_doc:
+                linea2 = ctk.CTkLabel(info_frame, 
+                                    text=f"👤 {cliente or 'Sin cliente'} | 📄 {num_doc or 'Sin doc.'}",
+                                    text_color="gray")
+                linea2.pack(anchor="w")
+            
+            # Línea 3: Estado
+            if estado:
+                color_estado = {"Pendiente": "orange", "Autorizado": "blue", 
+                              "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+                ctk.CTkLabel(info_frame, text=f"🏷️ {estado}", 
+                           text_color=color_estado).pack(anchor="w")
+            
+            # Botón para abrir expediente
+            btn_abrir = ctk.CTkButton(item_frame, text="📖 Abrir Expediente", 
+                                     command=lambda eid=exp_id: self.mostrar_nuevo_rma(rma_id=eid),
+                                     width=150, height=30)
+            btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def mostrar_seccion_productos(self, productos):
+        """Muestra la sección de productos encontrados."""
+        seccion_frame = ctk.CTkFrame(self.resultados_frame)
+        seccion_frame.pack(fill="x", pady=10)
+        
+        ctk.CTkLabel(seccion_frame, 
+                    text=f"📦 PRODUCTOS ENCONTRADOS ({len(productos)})",
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        for prod in productos:
+            prod_id, rma_id, ref_articulo, cantidad_doc, cantidad_entregada, estado_prod, precio_unit, codigo_rma, cliente = prod
+            
+            item_frame = ctk.CTkFrame(seccion_frame)
+            item_frame.pack(fill="x", padx=10, pady=2)
+            
+            # Información principal
+            info_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            info_frame.pack(fill="x", padx=10, pady=5)
+            
+            # Línea 1: Referencia y precio
+            linea1 = ctk.CTkFrame(info_frame, fg_color="transparent")
+            linea1.pack(fill="x")
+            
+            ctk.CTkLabel(linea1, text=f"📦 {ref_articulo or 'Sin referencia'}", 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left")
+            if precio_unit:
+                ctk.CTkLabel(linea1, text=f"💰 {precio_unit}€", 
+                           text_color="blue").pack(side="right")
+            
+            # Línea 2: Cantidades
+            if cantidad_doc or cantidad_entregada:
+                ctk.CTkLabel(info_frame, text=f"� Doc: {cantidad_doc or 0} | Entregada: {cantidad_entregada or 0}", 
+                           text_color="gray").pack(anchor="w")
+            
+            # Línea 3: Expediente asociado
+            ctk.CTkLabel(info_frame, text=f"📋 Expediente: {codigo_rma} | 👤 {cliente or 'Sin cliente'}", 
+                        text_color="gray").pack(anchor="w")
+            
+            # Línea 4: Estado del producto
+            if estado_prod:
+                color_estado = {"Nuevo": "green", "Usado": "orange", "Defectuoso": "red"}.get(estado_prod, "gray")
+                ctk.CTkLabel(info_frame, text=f"⚪ {estado_prod}", 
+                           text_color=color_estado).pack(anchor="w")
+            
+            # Botón para abrir expediente
+            btn_abrir = ctk.CTkButton(item_frame, text="📖 Ver en Expediente", 
+                                     command=lambda rid=rma_id: self.mostrar_nuevo_rma(rma_id=rid),
+                                     width=150, height=30)
+            btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def mostrar_mensaje_busqueda(self, mensaje):
+        """Muestra un mensaje en el área de resultados."""
+        for widget in self.resultados_frame.winfo_children():
+            widget.destroy()
+        
+        ctk.CTkLabel(self.resultados_frame, text=mensaje, 
+                    font=ctk.CTkFont(size=14),
+                    text_color="gray").pack(pady=50)
+
+    def limpiar_busqueda_global(self):
+        """Limpia el campo de búsqueda y resultados."""
+        self.entry_busqueda_global.delete(0, 'end')
+        self.mostrar_mensaje_busqueda("👆 Introduce un término de búsqueda arriba para comenzar")
+        self.entry_busqueda_global.focus()
+
+    def test_conexion_busqueda(self):
+        """Prueba rápida de la conexión para búsqueda."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return False
+            
+            cursor = conn.cursor()
+            # Prueba simple: obtener count de expedientes
+            cursor.execute("SELECT COUNT(*) FROM rma_maestro")
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            print(f"✅ Test de conexión exitoso: {count} expedientes en BD")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error de conexión en búsqueda: {e}")
+            return False
 
     # ----------------------------------------------------------------------
     # 5. LÓGICA DE FORMULARIO (CREAR/EDITAR)
@@ -2193,6 +2622,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         self.cargar_lista_tareas_rma()
                     if hasattr(self, 'refrescar_historial'):
                         self.refrescar_historial()
+                    # Actualizar badge de tareas
+                    self.actualizar_badge_tareas()
                     messagebox.showinfo("Éxito", "✅ Tarea creada correctamente")
                 except sqlite3.Error as e:
                     messagebox.showerror("Error BD", f"No se pudo crear la tarea: {e}")
@@ -2264,6 +2695,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         conn.close()
                         dlg.destroy()
                         self.cargar_lista_tareas_rma()
+                        # Actualizar badge de tareas
+                        self.actualizar_badge_tareas()
                         messagebox.showinfo("Éxito", "✅ Tarea actualizada correctamente")
                     except sqlite3.Error as e:
                         messagebox.showerror("Error BD", f"No se pudo actualizar la tarea: {e}")
@@ -4320,6 +4753,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def mostrar_gestion_tareas(self):
         """Ventana para crear y listar tareas relacionadas con expedientes."""
+        # Actualizar badge antes de mostrar la ventana
+        self.actualizar_badge_tareas()
+        
         # Mostrar solo el listado de tareas y filtros (la creación se hace desde la ficha del expediente)
         ventana = ctk.CTkToplevel(self)
         ventana.title("Listado de Tareas")
@@ -4462,6 +4898,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn.commit()
                 conn.close()
                 actualizar_lista_tareas()
+                # Actualizar badge de tareas
+                self.actualizar_badge_tareas()
             except sqlite3.Error as e:
                 messagebox.showerror("Error", f"No se pudo actualizar la tarea: {e}")
 
@@ -7113,10 +7551,18 @@ Versión de la App: {APP_VERSION}
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
-    if not os.path.exists(DB_NAME):
-        print("🚨 Error Crítico: No se encuentra el archivo de base de datos 'rma_app.db'.")
-        print("Asegúrate de ejecutar primero 'python db_setup.py'.")
-        sys.exit(1)
+    # Solo verificar base de datos local si no estamos usando Turso
+    turso_url = os.getenv("TURSO_DATABASE_URL")
+    turso_token = os.getenv("TURSO_AUTH_TOKEN")
+    
+    if not (turso_url and turso_token):
+        # Solo validar archivo local si no hay configuración de Turso
+        if not os.path.exists(DB_NAME):
+            print("🚨 Error Crítico: No se encuentra el archivo de base de datos 'rma_app.db'.")
+            print("Asegúrate de ejecutar primero 'python db_setup.py'.")
+            sys.exit(1)
+    else:
+        print("🌩️ Usando base de datos Turso cloud")
     
     # Mostrar un splash/spinner de arranque y ejecutar optimize_database en background
     try:
