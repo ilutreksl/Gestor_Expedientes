@@ -81,7 +81,13 @@ class Tooltip:
             except Exception:
                 pass
 
-import pandas as pd
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+    print("⚠️ Pandas no está disponible. La exportación a Excel estará deshabilitada.")
+
 import locale
 import shutil # Para copiar archivos
 import tkinter.filedialog as filedialog # Para el diálogo de selección de archivos
@@ -105,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.69"
+APP_VERSION = "v0.0.70"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -224,23 +230,36 @@ def connect_db(timeout: float | None = None):
                     session = _get_turso_session()
                     
                     # Hacer request a la API REST de Turso (v2/pipeline format)
+                    request_payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]}
+                    
                     response = session.post(
                         self._url,
                         headers={
                             "Authorization": f"Bearer {self._token}"
                         },
-                        json={"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]},
+                        json=request_payload,
                         timeout=10  # Timeout de 10 segundos
                     )
                     
                     if response.status_code != 200:
+                        print(f"Error - Response status: {response.status_code}, text: {response.text}")
                         raise Exception(f"Turso API error: {response.status_code} - {response.text}")
                     
                     data = response.json()
                     results = data.get("results", [])
+                    
                     if results and len(results) > 0:
-                        result = results[0].get("response", {}).get("result", {})
-                        self._result = result
+                        # Verificar si hay error en la respuesta
+                        result_item = results[0]
+                        if result_item.get("type") == "error":
+                            error_msg = result_item.get("error", {}).get("message", "Unknown error")
+                            print(f"SQL Error: {error_msg}")
+                            print(f"Query: {sql}")
+                            print(f"Params: {params}")
+                            self._result = {}
+                        else:
+                            result = result_item.get("response", {}).get("result", {})
+                            self._result = result
                     else:
                         self._result = {"rows": []}
                     
@@ -309,22 +328,39 @@ def connect_db(timeout: float | None = None):
                 def fetchall(self):
                     if not self._result:
                         return []
+                    
                     rows = self._result.get("rows", [])
-                    # Turso devuelve cada fila como lista de objetos {"type": ..., "value": ...}
-                    # Necesitamos extraer solo los valores
+                    
+                    # Si no hay filas directamente, intentar extraer de otros posibles formatos
+                    if not rows and "values" in self._result:
+                        rows = self._result.get("values", [])
+                    
+                    if not rows and "data" in self._result:
+                        rows = self._result.get("data", [])
+                    
+                    # Turso puede devolver diferentes formatos
                     result_rows = []
                     for row in rows:
                         if isinstance(row, list):
-                            # Extraer valores de cada celda
-                            values = []
-                            for cell in row:
-                                if isinstance(cell, dict):
-                                    values.append(cell.get("value"))
-                                else:
-                                    values.append(cell)
-                            result_rows.append(tuple(values))
+                            # Caso 1: Lista de valores directos
+                            if row and not isinstance(row[0], dict):
+                                result_rows.append(tuple(row))
+                            else:
+                                # Caso 2: Lista de objetos {"type": ..., "value": ...}
+                                values = []
+                                for cell in row:
+                                    if isinstance(cell, dict):
+                                        value = cell.get("value")
+                                        if value is None:
+                                            value = cell.get("v")  # Otra posible key
+                                        values.append(value)
+                                    else:
+                                        values.append(cell)
+                                result_rows.append(tuple(values))
                         else:
-                            result_rows.append(tuple(row))
+                            # Caso 3: Fila como tupla directa
+                            result_rows.append(tuple(row) if not isinstance(row, tuple) else row)
+                    
                     return result_rows
 
                 def fetchone(self):
@@ -759,12 +795,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 pass
         
         self.crear_diseno()
-        
-        # Crear tablas de gestión de clientes
-        try:
-            self.crear_tablas_clientes()
-        except Exception as e:
-            print(f"Error inicializando gestión de clientes: {e}")
         
         # Configurar atajos de teclado globales
         self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
@@ -8184,53 +8214,6 @@ Versión de la App: {APP_VERSION}
     # 🧑‍💼 GESTIÓN INDEPENDIENTE DE CLIENTES
     # ==================================================================
     
-    def crear_tablas_clientes(self):
-        """Crea las tablas necesarias para la gestión independiente de clientes."""
-        try:
-            conn, cursor = self.master.conectar_db()
-            if not conn: 
-                print("❌ No se pudo conectar a la base de datos para crear tablas de clientes")
-                return
-            
-            # Leer y ejecutar el script SQL
-            script_path = os.path.join(os.getcwd(), "scripts", "clientes_schema.sql")
-            if os.path.exists(script_path):
-                with open(script_path, 'r', encoding='utf-8') as f:
-                    sql_script = f.read()
-                
-                # Ejecutar cada comando SQL
-                statements = []
-                current_statement = ""
-                for line in sql_script.split('\n'):
-                    line = line.strip()
-                    if line and not line.startswith('--'):
-                        current_statement += line + " "
-                        if line.endswith(';'):
-                            statements.append(current_statement.strip()[:-1])  # Quitar el ; final
-                            current_statement = ""
-                
-                print(f"📋 Ejecutando {len(statements)} comandos SQL...")
-                
-                for i, statement in enumerate(statements, 1):
-                    statement = statement.strip()
-                    if statement:
-                        try:
-                            cursor.execute(statement)
-                        except Exception as e:
-                            print(f"❌ Error en comando {i}: {statement[:60]}... - {e}")
-                
-                conn.commit()
-                    
-            else:
-                print(f"⚠️ No se encontró el script clientes_schema.sql en: {script_path}")
-                
-            conn.close()
-            
-        except Exception as e:
-            print(f"❌ Error creando tablas de clientes: {e}")
-            import traceback
-            print(traceback.format_exc())
-    
     def mostrar_clientes(self):
         """Muestra la gestión independiente de clientes."""
         
@@ -8321,11 +8304,20 @@ Versión de la App: {APP_VERSION}
             filtro_busqueda = self.entry_buscar_cliente.get().strip() if hasattr(self, 'entry_buscar_cliente') else ""
             filtro_tipo = self.filtro_tipo_cliente.get() if hasattr(self, 'filtro_tipo_cliente') else "Todos"
             
-            # Consulta simplificada sin vistas complejas
+            # Consulta con estadísticas reales
             query = """
                 SELECT c.cliente_id, c.nombre, c.tipo_cliente, c.activo, c.fecha_registro,
-                       0 as total_rmas, 0 as tasa_exito, '' as ultimo_rma, 0 as total_contactos
+                       COALESCE(COUNT(r.cliente), 0) as total_rmas,
+                       CASE 
+                           WHEN COUNT(r.cliente) > 0 THEN 
+                               ROUND(CAST(SUM(CASE WHEN r.resultado_expediente = 'ABONAR' THEN 1 ELSE 0 END) AS FLOAT) * 100.0 / COUNT(r.cliente), 1)
+                           ELSE 0 
+                       END as tasa_exito,
+                       MAX(r.fecha_emision) as ultimo_rma,
+                       COALESCE(COUNT(con.contacto_id), 0) as total_contactos
                 FROM clientes c
+                LEFT JOIN rma_maestro r ON c.nombre = r.cliente
+                LEFT JOIN contactos_cliente con ON c.cliente_id = con.cliente_id
                 WHERE 1=1
             """
             params = []
@@ -8338,7 +8330,7 @@ Versión de la App: {APP_VERSION}
                 query += " AND c.tipo_cliente = ?"
                 params.append(filtro_tipo)
             
-            query += " ORDER BY c.nombre"
+            query += " GROUP BY c.cliente_id, c.nombre, c.tipo_cliente, c.activo, c.fecha_registro ORDER BY c.nombre"
             
             cursor.execute(query, params)
             clientes = cursor.fetchall()
@@ -8788,20 +8780,14 @@ Versión de la App: {APP_VERSION}
                        text="📭 No hay RMAs registradas para este cliente.",
                        font=ctk.CTkFont(size=13)).pack(pady=50)
         else:
-            # Agrupar por RMA
-            rmas_agrupadas = {}
+            # Mostrar RMAs
             for rma in rmas:
-                numero_rma = rma[0]
-                if numero_rma not in rmas_agrupadas:
-                    rmas_agrupadas[numero_rma] = {
-                        'info': rma[:4],  # número, fecha, estado, motivo
-                        'productos': []
-                    }
-                if rma[4]:  # Si hay información de producto
-                    rmas_agrupadas[numero_rma]['productos'].append(rma[4:])
-            
-            for numero_rma, datos in rmas_agrupadas.items():
-                self.crear_item_rma_historial(rmas_frame, numero_rma, datos)
+                numero_rma, fecha_emision, estado, motivo = rma
+                datos_rma = {
+                    'info': rma,  # Pasa la tupla completa (numero_rma, fecha_emision, estado, motivo)
+                    'productos': []  # Sin productos por ahora
+                }
+                self.crear_item_rma_historial(rmas_frame, numero_rma, datos_rma)
     
     def crear_tab_notas_cliente(self, tab_frame, cliente_id):
         """Crea la pestaña de notas del cliente."""
@@ -8833,39 +8819,422 @@ Versión de la App: {APP_VERSION}
                 self.crear_item_nota(notas_frame, nota)
     
     def crear_tab_estadisticas_cliente(self, tab_frame, cliente_id):
-        """Crea la pestaña de estadísticas del cliente."""
-        # Header
+        """Crea la pestaña de estadísticas del cliente con filtros y exportación."""
+        # Header con controles
         header_frame = ctk.CTkFrame(tab_frame)
         header_frame.pack(fill="x", padx=10, pady=10)
         
+        # Título
         ctk.CTkLabel(header_frame, text="📊 Estadísticas del Cliente", 
                     font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
         
+        # Controles de filtro
+        filtros_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        filtros_frame.pack(side="right", padx=10, pady=10)
+        
+        # Filtro por año
+        ctk.CTkLabel(filtros_frame, text="Año:", font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=5, pady=5)
+        self.filtro_año_stats = ctk.CTkOptionMenu(filtros_frame, 
+                                                 values=["Todos"] + [str(y) for y in range(2020, 2026)],
+                                                 width=80)
+        self.filtro_año_stats.set("Todos")
+        self.filtro_año_stats.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Filtro por mes
+        ctk.CTkLabel(filtros_frame, text="Mes:", font=ctk.CTkFont(size=12)).grid(row=0, column=2, padx=5, pady=5)
+        meses = ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        self.filtro_mes_stats = ctk.CTkOptionMenu(filtros_frame, values=meses, width=100)
+        self.filtro_mes_stats.set("Todos")
+        self.filtro_mes_stats.grid(row=0, column=3, padx=5, pady=5)
+        
+        # Botón actualizar
+        self.btn_actualizar_stats = ctk.CTkButton(filtros_frame, text="🔄 Actualizar",
+                                                 command=lambda: self.cargar_estadisticas_cliente(cliente_id),
+                                                 width=100)
+        self.btn_actualizar_stats.grid(row=0, column=4, padx=10, pady=5)
+        
+        # Botón exportar Excel
+        self.btn_exportar_excel = ctk.CTkButton(filtros_frame, text="📊 Exportar Excel",
+                                               command=lambda: self.exportar_estadisticas_excel(cliente_id),
+                                               width=120, fg_color="green", hover_color="dark green")
+        self.btn_exportar_excel.grid(row=0, column=5, padx=5, pady=5)
+        
         # Contenido scrollable
-        stats_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
-        stats_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.stats_container = ctk.CTkScrollableFrame(tab_frame, height=500)
+        self.stats_container.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Cargar estadísticas
-        stats_data = self.obtener_estadisticas_cliente(cliente_id)
+        # Cargar estadísticas iniciales
+        self.cargar_estadisticas_cliente(cliente_id)
+    
+    def cargar_estadisticas_cliente(self, cliente_id):
+        """Carga las estadísticas del cliente con filtros aplicados."""
+        # Limpiar contenido anterior
+        for widget in self.stats_container.winfo_children():
+            widget.destroy()
         
-        if not stats_data or not stats_data['estadisticas']:
-            ctk.CTkLabel(stats_frame, 
-                       text="📊 No hay suficientes datos para mostrar estadísticas.\nLas estadísticas se generan automáticamente cuando el cliente tiene RMAs registradas.",
-                       font=ctk.CTkFont(size=13)).pack(pady=50)
-        else:
-            stats = stats_data['estadisticas']
-            productos_prob = stats_data['productos_problematicos']
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
             
-            # Mostrar estadísticas principales
-            self.mostrar_estadisticas_principales(stats_frame, stats)
+            # Obtener nombre del cliente
+            cursor.execute("SELECT nombre FROM clientes WHERE cliente_id = ?", (cliente_id,))
+            cliente_result = cursor.fetchone()
+            if not cliente_result:
+                return
             
-            # Mostrar productos problemáticos
-            if productos_prob:
-                self.mostrar_productos_problematicos(stats_frame, productos_prob)
+            cliente_nombre = cliente_result[0]
+            
+            # Construir filtros de fecha
+            filtro_año = self.filtro_año_stats.get()
+            filtro_mes = self.filtro_mes_stats.get()
+            
+            where_fecha = ""
+            params = [cliente_nombre]
+            
+            if filtro_año != "Todos":
+                where_fecha += " AND strftime('%Y', fecha_emision) = ?"
+                params.append(filtro_año)
+            
+            if filtro_mes != "Todos":
+                mes_num = ["", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"][
+                    ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].index(filtro_mes)
+                ]
+                where_fecha += " AND strftime('%m', fecha_emision) = ?"
+                params.append(mes_num)
+            
+            # Consulta principal: desglose por resultado_expediente
+            query_resultados = f"""
+                SELECT 
+                    resultado_expediente,
+                    COUNT(*) as cantidad,
+                    SUM(COALESCE(precio_total_expediente, 0)) as total_importe,
+                    AVG(COALESCE(precio_total_expediente, 0)) as importe_promedio
+                FROM rma_maestro 
+                WHERE cliente = ? {where_fecha}
+                GROUP BY resultado_expediente
+                ORDER BY cantidad DESC
+            """
+            
+            cursor.execute(query_resultados, params)
+            resultados = cursor.fetchall()
+            
+            if not resultados:
+                ctk.CTkLabel(self.stats_container, 
+                           text="📊 No hay datos para los filtros seleccionados.",
+                           font=ctk.CTkFont(size=14)).pack(pady=50)
+            else:
+                self.mostrar_desglose_resultados(resultados)
+                
+                # Consulta adicional: estadísticas generales
+                query_generales = f"""
+                    SELECT 
+                        COUNT(*) as total_expedientes,
+                        SUM(COALESCE(precio_total_expediente, 0)) as importe_total,
+                        AVG(COALESCE(precio_total_expediente, 0)) as importe_promedio,
+                        MIN(fecha_emision) as primer_expediente,
+                        MAX(fecha_emision) as ultimo_expediente
+                    FROM rma_maestro 
+                    WHERE cliente = ? {where_fecha}
+                """
+                
+                cursor.execute(query_generales, params)
+                generales = cursor.fetchone()
+                
+                if generales:
+                    self.mostrar_estadisticas_generales(generales)
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"Error cargando estadísticas: {e}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def mostrar_desglose_resultados(self, resultados):
+        """Muestra el desglose por tipo de resultado de expediente."""
+        # Frame para desglose
+        desglose_frame = ctk.CTkFrame(self.stats_container)
+        desglose_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(desglose_frame, text="📋 Desglose por Resultado de Expediente", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        
+        # Tabla
+        tabla_frame = ctk.CTkFrame(desglose_frame)
+        tabla_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Headers
+        headers = ["Resultado", "Cantidad", "Importe Total", "Importe Promedio"]
+        for col, header in enumerate(headers):
+            ctk.CTkLabel(tabla_frame, text=header, 
+                        font=ctk.CTkFont(weight="bold")).grid(row=0, column=col, padx=10, pady=5, sticky="ew")
+        
+        # Datos
+        total_cantidad = 0
+        total_importe = 0
+        
+        for row, (resultado, cantidad, importe_total, importe_promedio) in enumerate(resultados, 1):
+            resultado_texto = resultado if resultado else "Sin Resultado"
+            
+            # Convertir a tipos correctos
+            cantidad = int(cantidad) if cantidad is not None else 0
+            importe_total = float(importe_total) if importe_total is not None else 0.0
+            importe_promedio = float(importe_promedio) if importe_promedio is not None else 0.0
+            
+            ctk.CTkLabel(tabla_frame, text=resultado_texto).grid(row=row, column=0, padx=10, pady=2, sticky="ew")
+            ctk.CTkLabel(tabla_frame, text=str(cantidad)).grid(row=row, column=1, padx=10, pady=2, sticky="ew")
+            ctk.CTkLabel(tabla_frame, text=f"€{importe_total:.2f}").grid(row=row, column=2, padx=10, pady=2, sticky="ew")
+            ctk.CTkLabel(tabla_frame, text=f"€{importe_promedio:.2f}").grid(row=row, column=3, padx=10, pady=2, sticky="ew")
+            
+            total_cantidad += cantidad
+            total_importe += importe_total
+        
+        # Totales
+        separator_frame = ctk.CTkFrame(tabla_frame, height=2)
+        separator_frame.grid(row=len(resultados)+1, column=0, columnspan=4, sticky="ew", pady=5)
+        
+        ctk.CTkLabel(tabla_frame, text="TOTAL", 
+                    font=ctk.CTkFont(weight="bold")).grid(row=len(resultados)+2, column=0, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(tabla_frame, text=str(total_cantidad), 
+                    font=ctk.CTkFont(weight="bold")).grid(row=len(resultados)+2, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(tabla_frame, text=f"€{total_importe:.2f}", 
+                    font=ctk.CTkFont(weight="bold")).grid(row=len(resultados)+2, column=2, padx=10, pady=5, sticky="ew")
+        
+        # Configurar columnas
+        for col in range(4):
+            tabla_frame.grid_columnconfigure(col, weight=1)
+    
+    def mostrar_estadisticas_generales(self, generales):
+        """Muestra estadísticas generales del cliente."""
+        total_exp, importe_total, importe_prom, primer_exp, ultimo_exp = generales
+        
+        # Convertir a tipos correctos
+        total_exp = int(total_exp) if total_exp is not None else 0
+        importe_total = float(importe_total) if importe_total is not None else 0.0
+        importe_prom = float(importe_prom) if importe_prom is not None else 0.0
+        
+        # Frame para estadísticas generales
+        generales_frame = ctk.CTkFrame(self.stats_container)
+        generales_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(generales_frame, text="📈 Estadísticas Generales", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        
+        # Grid para estadísticas
+        stats_grid = ctk.CTkFrame(generales_frame)
+        stats_grid.pack(fill="x", padx=10, pady=10)
+        stats_grid.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        # Tarjetas de estadísticas
+        self.crear_tarjeta_stat(stats_grid, "📊 Total Expedientes", str(total_exp), 0, 0)
+        self.crear_tarjeta_stat(stats_grid, "💰 Importe Total", f"€{importe_total:.2f}", 0, 1)
+        self.crear_tarjeta_stat(stats_grid, "📊 Importe Promedio", f"€{importe_prom:.2f}", 0, 2)
+        
+        if primer_exp:
+            fecha_primer = str(primer_exp)[:10] if primer_exp else "N/A"
+            self.crear_tarjeta_stat(stats_grid, "📅 Primer Expediente", fecha_primer, 1, 0)
+        if ultimo_exp:
+            fecha_ultimo = str(ultimo_exp)[:10] if ultimo_exp else "N/A"
+            self.crear_tarjeta_stat(stats_grid, "📅 Último Expediente", fecha_ultimo, 1, 1)
+    
+    def crear_tarjeta_stat(self, parent, titulo, valor, row, col):
+        """Crea una tarjeta de estadística."""
+        tarjeta = ctk.CTkFrame(parent)
+        tarjeta.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+        
+        ctk.CTkLabel(tarjeta, text=titulo, font=ctk.CTkFont(size=11)).pack(pady=(5,0))
+        ctk.CTkLabel(tarjeta, text=valor, font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(0,5))
+    
+    def exportar_estadisticas_excel(self, cliente_id):
+        """Exporta las estadísticas del cliente a Excel."""
+        try:
+            # Verificar si pandas está disponible
+            if not HAS_PANDAS:
+                messagebox.showerror("Error", "Pandas no está instalado. Instale pandas para exportar a Excel:\npip install pandas openpyxl")
+                return
+            
+            # Verificar si openpyxl está disponible
+            try:
+                import openpyxl
+            except ImportError:
+                messagebox.showerror("Error", "OpenPyXL no está instalado. Instale openpyxl para exportar a Excel:\npip install openpyxl")
+                return
+            
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
+            
+            # Obtener nombre del cliente
+            cursor.execute("SELECT nombre FROM clientes WHERE cliente_id = ?", (cliente_id,))
+            cliente_result = cursor.fetchone()
+            if not cliente_result:
+                return
+            
+            cliente_nombre = cliente_result[0]
+            
+            # Construir filtros de fecha
+            filtro_año = self.filtro_año_stats.get()
+            filtro_mes = self.filtro_mes_stats.get()
+            
+            where_fecha = ""
+            params = [cliente_nombre]
+            
+            if filtro_año != "Todos":
+                where_fecha += " AND strftime('%Y', fecha_emision) = ?"
+                params.append(filtro_año)
+            
+            if filtro_mes != "Todos":
+                mes_num = ["", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"][
+                    ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].index(filtro_mes)
+                ]
+                where_fecha += " AND strftime('%m', fecha_emision) = ?"
+                params.append(mes_num)
+            
+            # Consulta para datos detallados
+            query_detalle = f"""
+                SELECT 
+                    codigo_rma,
+                    fecha_emision,
+                    resultado_expediente,
+                    estado,
+                    precio_total_expediente,
+                    obs_tecnica
+                FROM rma_maestro 
+                WHERE cliente = ? {where_fecha}
+                ORDER BY fecha_emision DESC
+            """
+            
+            cursor.execute(query_detalle, params)
+            datos_detalle = cursor.fetchall()
+            
+            # Crear DataFrame
+            import pandas as pd
+            df = pd.DataFrame(datos_detalle, columns=[
+                'Código RMA', 'Fecha Emisión', 'Resultado Expediente', 
+                'Estado', 'Precio Total', 'Observaciones Técnicas'
+            ])
+            
+            # Crear nombre de archivo
+            filtro_texto = ""
+            if filtro_año != "Todos":
+                filtro_texto += f"_{filtro_año}"
+            if filtro_mes != "Todos":
+                filtro_texto += f"_{filtro_mes}"
+            
+            nombre_archivo = f"Estadisticas_{cliente_nombre.replace(' ', '_')}{filtro_texto}.xlsx"
+            
+            # Guardar archivo con formato mejorado
+            with pd.ExcelWriter(nombre_archivo, engine='openpyxl') as writer:
+                # Escribir hoja de expedientes
+                df.to_excel(writer, sheet_name='Expedientes', index=False)
+                
+                # Crear hoja de resumen
+                query_resumen = f"""
+                    SELECT 
+                        resultado_expediente,
+                        COUNT(*) as cantidad,
+                        SUM(COALESCE(precio_total_expediente, 0)) as total_importe
+                    FROM rma_maestro 
+                    WHERE cliente = ? {where_fecha}
+                    GROUP BY resultado_expediente
+                    ORDER BY cantidad DESC
+                """
+                
+                cursor.execute(query_resumen, params)
+                datos_resumen = cursor.fetchall()
+                
+                df_resumen = pd.DataFrame(datos_resumen, columns=['Resultado', 'Cantidad', 'Importe Total'])
+                df_resumen.to_excel(writer, sheet_name='Resumen', index=False)
+                
+                # Ajustar el ancho de las columnas automáticamente
+                workbook = writer.book
+                
+                # Ajustar columnas de la hoja Expedientes
+                worksheet_expedientes = writer.sheets['Expedientes']
+                for column in worksheet_expedientes.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    
+                    # Establecer un ancho mínimo y máximo para las columnas
+                    adjusted_width = min(max(max_length + 2, 10), 50)
+                    worksheet_expedientes.column_dimensions[column_letter].width = adjusted_width
+                
+                # Ajustar columnas de la hoja Resumen
+                worksheet_resumen = writer.sheets['Resumen']
+                for column in worksheet_resumen.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    
+                    # Establecer un ancho mínimo y máximo para las columnas
+                    adjusted_width = min(max(max_length + 2, 12), 40)
+                    worksheet_resumen.column_dimensions[column_letter].width = adjusted_width
+                
+                # Aplicar formato a los headers (primera fila)
+                from openpyxl.styles import Font, PatternFill, Alignment
+                
+                # Formato para headers
+                header_font = Font(bold=True, color="FFFFFF")
+                header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                center_alignment = Alignment(horizontal="center", vertical="center")
+                
+                # Aplicar formato a headers de Expedientes
+                for cell in worksheet_expedientes[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = center_alignment
+                
+                # Aplicar formato a headers de Resumen
+                for cell in worksheet_resumen[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = center_alignment
+                
+                # Aplicar formato de moneda a las columnas de importes
+                from openpyxl.styles import NamedStyle
+                
+                # Estilo para moneda
+                currency_style = NamedStyle(name="currency_style")
+                currency_style.number_format = '€#,##0.00'
+                
+                # Aplicar formato de moneda a la columna "Precio Total" en Expedientes (columna E)
+                for row in range(2, len(df) + 2):
+                    cell = worksheet_expedientes[f'E{row}']
+                    cell.style = currency_style
+                
+                # Aplicar formato de moneda a la columna "Importe Total" en Resumen (columna C)
+                for row in range(2, len(df_resumen) + 2):
+                    cell = worksheet_resumen[f'C{row}']
+                    cell.style = currency_style
+            
+            conn.close()
+            
+            messagebox.showinfo("Exportación Exitosa", f"Estadísticas exportadas a:\n{nombre_archivo}")
+            
+        except Exception as e:
+            print(f"Error exportando a Excel: {e}")
+            messagebox.showerror("Error", f"Error al exportar a Excel:\n{str(e)}")
     
     def crear_item_contacto(self, parent_frame, contacto, cliente_id):
         """Crea un elemento visual para un contacto."""
-        contacto_id, nombre, cargo, email, telefono, es_principal, activo, fecha_creacion, fecha_actualizacion = contacto
+        contacto_id, nombre, cargo, email, telefono, es_principal, activo = contacto
         
         contacto_frame = ctk.CTkFrame(parent_frame)
         contacto_frame.pack(fill="x", padx=5, pady=5)
@@ -8939,7 +9308,17 @@ Versión de la App: {APP_VERSION}
         ctk.CTkLabel(info_principal, text=f"🏷️ {info[2]}", 
                     font=ctk.CTkFont(size=11), text_color=estado_color).pack(side="right")
         
-        ctk.CTkLabel(info_principal, text=f"📅 {info[1].split()[0]}", 
+        # Fecha - manejo robusto
+        try:
+            fecha_str = str(info[1])
+            if ' ' in fecha_str:
+                fecha_mostrar = fecha_str.split()[0]  # Solo la parte de la fecha
+            else:
+                fecha_mostrar = fecha_str  # Si no tiene espacios, usar toda la cadena
+        except (IndexError, AttributeError):
+            fecha_mostrar = "Sin fecha"
+        
+        ctk.CTkLabel(info_principal, text=f"📅 {fecha_mostrar}", 
                     font=ctk.CTkFont(size=11), text_color="gray").pack(side="right", padx=(0,10))
         
         # Motivo
@@ -9875,8 +10254,7 @@ Versión de la App: {APP_VERSION}
                 return []
             
             cursor.execute("""
-                SELECT contacto_id, nombre, cargo, email, telefono, es_principal, activo,
-                       fecha_creacion, fecha_actualizacion
+                SELECT contacto_id, nombre, cargo, email, telefono, es_principal, activo
                 FROM contactos_cliente 
                 WHERE cliente_id = ? AND activo = 1
                 ORDER BY es_principal DESC, nombre
@@ -9937,12 +10315,10 @@ Versión de la App: {APP_VERSION}
             
             # Obtener RMAs del cliente
             cursor.execute("""
-                SELECT rm.rma_numero, rm.fecha_creacion, rm.estado, rm.motivo_devolucion,
-                       rd.producto, rd.cantidad, rd.precio_unitario, rd.estado_producto
-                FROM rma_maestro rm
-                LEFT JOIN rma_detalles rd ON rm.rma_numero = rd.rma_numero
-                WHERE rm.cliente = ?
-                ORDER BY rm.fecha_creacion DESC
+                SELECT codigo_rma, fecha_emision, estado, motivo
+                FROM rma_maestro 
+                WHERE cliente = ?
+                ORDER BY fecha_emision DESC
             """, (nombre_cliente,))
             
             rmas = cursor.fetchall()
