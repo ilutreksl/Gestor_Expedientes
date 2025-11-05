@@ -105,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.67"
+APP_VERSION = "v0.0.68"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1214,6 +1214,48 @@ class VentanaPrincipal(ctk.CTkToplevel):
     def conectar_db(self):
         """Intenta conectar a la base de datos (método heredado de master)."""
         return self.master.conectar_db()
+
+    def cargar_historial_busquedas(self):
+        """Carga el historial de búsquedas del usuario desde configuración."""
+        if not hasattr(self, 'historial_busquedas'):
+            self.historial_busquedas = self.user_settings.get("historial_busquedas", [])
+        return self.historial_busquedas[:10]  # Máximo 10 búsquedas recientes
+
+    def guardar_busqueda_en_historial(self, termino, filtros=None):
+        """Guarda una nueva búsqueda en el historial."""
+        if not termino.strip():
+            return
+        
+        # Crear entrada del historial
+        entrada = {
+            "termino": termino.strip(),
+            "filtros": filtros or {},
+            "fecha": datetime.datetime.now().isoformat()
+        }
+        
+        # Cargar historial actual
+        if not hasattr(self, 'historial_busquedas'):
+            self.historial_busquedas = self.user_settings.get("historial_busquedas", [])
+        
+        # Remover búsqueda duplicada si existe
+        self.historial_busquedas = [h for h in self.historial_busquedas 
+                                   if h.get("termino") != termino.strip()]
+        
+        # Añadir al principio
+        self.historial_busquedas.insert(0, entrada)
+        
+        # Mantener solo las últimas 10
+        self.historial_busquedas = self.historial_busquedas[:10]
+        
+        # Guardar en configuración
+        self.user_settings["historial_busquedas"] = self.historial_busquedas
+        save_user_settings(self.user_settings, self.username)
+
+    def limpiar_historial_busquedas(self):
+        """Limpia todo el historial de búsquedas."""
+        self.historial_busquedas = []
+        self.user_settings["historial_busquedas"] = []
+        save_user_settings(self.user_settings, self.username)
     
     
     # ----------------------------------------------------------------------
@@ -2013,7 +2055,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # ----------------------------------------------------------------------
 
     def mostrar_busqueda_global(self):
-        """Muestra la interfaz de búsqueda global avanzada."""
+        """Muestra la interfaz de búsqueda global avanzada con filtros múltiples e historial."""
         self.limpiar_contenido()
         
         # Header
@@ -2030,54 +2072,605 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                   width=150, height=30)
         btn_volver.pack(anchor="e", padx=10, pady=(0,5))
         
-        # Frame de búsqueda
-        search_frame = ctk.CTkFrame(self.content_frame)
-        search_frame.pack(fill="x", padx=10, pady=5)
+        # Frame principal con dos columnas
+        main_frame = ctk.CTkFrame(self.content_frame)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        main_frame.grid_columnconfigure(0, weight=2)  # Búsqueda principal
+        main_frame.grid_columnconfigure(1, weight=1)  # Historial
+        
+        # === COLUMNA IZQUIERDA: BÚSQUEDA Y FILTROS ===
+        search_column = ctk.CTkFrame(main_frame)
+        search_column.grid(row=0, column=0, sticky="nsew", padx=(10,5), pady=10)
         
         # Campo de búsqueda principal
-        ctk.CTkLabel(search_frame, text="Buscar en todos los campos:", 
+        ctk.CTkLabel(search_column, text="Buscar en todos los campos:", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10,5))
         
-        entrada_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+        entrada_frame = ctk.CTkFrame(search_column, fg_color="transparent")
         entrada_frame.pack(fill="x", padx=10, pady=5)
         
         self.entry_busqueda_global = ctk.CTkEntry(entrada_frame, 
-                                                 placeholder_text="Escribe cualquier texto para buscar en expedientes y productos...",
-                                                 width=500,
+                                                 placeholder_text="Escribe cualquier texto para buscar...",
                                                  height=35,
                                                  font=ctk.CTkFont(size=12))
-        self.entry_busqueda_global.pack(side="left", padx=(0,10), fill="x", expand=True)
+        self.entry_busqueda_global.pack(fill="x", padx=(0,10))
         
-        btn_buscar = ctk.CTkButton(entrada_frame, text="🔍 Buscar", 
+        # Botones de búsqueda
+        botones_frame = ctk.CTkFrame(search_column, fg_color="transparent")
+        botones_frame.pack(fill="x", padx=10, pady=5)
+        
+        btn_buscar = ctk.CTkButton(botones_frame, text="🔍 Buscar", 
                                   command=self.ejecutar_busqueda_global,
                                   width=100, height=35)
-        btn_buscar.pack(side="left")
+        btn_buscar.pack(side="left", padx=(0,5))
         
-        btn_limpiar = ctk.CTkButton(entrada_frame, text="🗑️ Limpiar", 
+        btn_limpiar = ctk.CTkButton(botones_frame, text="🗑️ Limpiar", 
                                    command=self.limpiar_busqueda_global,
                                    width=100, height=35)
-        btn_limpiar.pack(side="left", padx=(5,0))
+        btn_limpiar.pack(side="left", padx=5)
+        
+        # === FILTROS AVANZADOS ===
+        filtros_frame = ctk.CTkFrame(search_column)
+        filtros_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Header de filtros con botón expandir/contraer
+        filtros_header = ctk.CTkFrame(filtros_frame, fg_color="transparent")
+        filtros_header.pack(fill="x", padx=10, pady=5)
+        
+        self.filtros_expandido = ctk.BooleanVar(value=False)
+        self.btn_toggle_filtros = ctk.CTkButton(filtros_header, 
+                                              text="🔽 Mostrar Filtros Avanzados",
+                                              command=self.toggle_filtros_avanzados,
+                                              width=200, height=30)
+        self.btn_toggle_filtros.pack(side="left")
+        
+        # Frame de filtros (inicialmente oculto)
+        self.filtros_content = ctk.CTkFrame(filtros_frame)
+        # No pack inicialmente - se mostrará al expandir
+        
+        # Crear controles de filtros
+        self.crear_controles_filtros()
         
         # Bind Enter key
         self.entry_busqueda_global.bind("<Return>", lambda e: self.ejecutar_busqueda_global())
         
+        # === COLUMNA DERECHA: HISTORIAL ===
+        historial_column = ctk.CTkFrame(main_frame)
+        historial_column.grid(row=0, column=1, sticky="nsew", padx=(5,10), pady=10)
+        
+        # Header del historial
+        historial_header = ctk.CTkFrame(historial_column, fg_color="transparent")
+        historial_header.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkLabel(historial_header, text="� Historial de Búsquedas", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        btn_limpiar_historial = ctk.CTkButton(historial_header, text="🗑️", 
+                                            command=self.limpiar_historial_busquedas_ui,
+                                            width=30, height=25)
+        btn_limpiar_historial.pack(side="right")
+        
+        # Lista del historial
+        self.historial_frame = ctk.CTkScrollableFrame(historial_column, height=200)
+        self.historial_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.actualizar_historial_ui()
+        
         # Información de ayuda
-        ayuda_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+        ayuda_frame = ctk.CTkFrame(search_column, fg_color="transparent")
         ayuda_frame.pack(fill="x", padx=10, pady=5)
         
-        ayuda_text = """💡 Esta búsqueda explora TODOS los campos de expedientes y productos:
-📋 Expedientes: Código RMA, Cliente, Documento Cliente, Estado, Fechas, RMA Proveedor, Motivo, etc.
-📦 Productos: Referencia, Modelo, Número de Serie, Descripción del Problema, Estado del Producto, etc.
-⌨️ Atajo de teclado: Ctrl+F"""
+        ayuda_text = """💡 Búsqueda en: Expedientes (Código, Cliente, Estado, etc.) y Productos (Referencia, Serie, etc.)
+⌨️ Atajo: Ctrl+F | 🔽 Usa filtros para búsquedas más específicas"""
         
         ctk.CTkLabel(ayuda_frame, text=ayuda_text, 
                     font=ctk.CTkFont(size=11), 
                     text_color="gray",
                     justify="left").pack(anchor="w")
         
-        # Frame para resultados
-        self.resultados_frame = ctk.CTkScrollableFrame(self.content_frame, height=400)
-        self.resultados_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Frame para resultados (span ambas columnas)
+        self.resultados_frame = ctk.CTkScrollableFrame(main_frame, height=300)
+        self.resultados_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        main_frame.grid_rowconfigure(1, weight=1)
+
+    def crear_controles_filtros(self):
+        """Crea los controles de filtros avanzados."""
+        # Configurar grid
+        self.filtros_content.grid_columnconfigure(0, weight=1)
+        self.filtros_content.grid_columnconfigure(1, weight=1)
+        
+        row = 0
+        
+        # === FILTROS PARA EXPEDIENTES ===
+        exp_label = ctk.CTkLabel(self.filtros_content, text="📋 Filtros de Expedientes", 
+                               font=ctk.CTkFont(size=13, weight="bold"))
+        exp_label.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(10,5))
+        row += 1
+        
+        # Estado del expediente
+        ctk.CTkLabel(self.filtros_content, text="Estado:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_estado = ctk.CTkOptionMenu(self.filtros_content, 
+                                             values=["Todos", "Pendiente", "Autorizado", "Recibido", "Completado"])
+        self.filtro_estado.set("Todos")
+        self.filtro_estado.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        # Rango de fechas
+        ctk.CTkLabel(self.filtros_content, text="Fecha desde:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_fecha_desde = ctk.CTkEntry(self.filtros_content, placeholder_text="YYYY-MM-DD")
+        self.filtro_fecha_desde.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        ctk.CTkLabel(self.filtros_content, text="Fecha hasta:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_fecha_hasta = ctk.CTkEntry(self.filtros_content, placeholder_text="YYYY-MM-DD")
+        self.filtro_fecha_hasta.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        # Cliente específico
+        ctk.CTkLabel(self.filtros_content, text="Cliente:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_cliente = ctk.CTkEntry(self.filtros_content, placeholder_text="Nombre del cliente")
+        self.filtro_cliente.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        # === FILTROS PARA PRODUCTOS ===
+        prod_label = ctk.CTkLabel(self.filtros_content, text="📦 Filtros de Productos", 
+                               font=ctk.CTkFont(size=13, weight="bold"))
+        prod_label.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15,5))
+        row += 1
+        
+        # Estado del producto
+        ctk.CTkLabel(self.filtros_content, text="Estado Producto:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_estado_producto = ctk.CTkEntry(self.filtros_content, placeholder_text="Estado del producto")
+        self.filtro_estado_producto.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        # Referencia específica
+        ctk.CTkLabel(self.filtros_content, text="Referencia:").grid(row=row, column=0, sticky="w", padx=10, pady=2)
+        self.filtro_referencia = ctk.CTkEntry(self.filtros_content, placeholder_text="Referencia del artículo")
+        self.filtro_referencia.grid(row=row, column=1, sticky="ew", padx=10, pady=2)
+        row += 1
+        
+        # Botones de filtros
+        botones_filtros = ctk.CTkFrame(self.filtros_content, fg_color="transparent")
+        botones_filtros.grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        
+        btn_aplicar_filtros = ctk.CTkButton(botones_filtros, text="🔍 Buscar con Filtros", 
+                                          command=self.ejecutar_busqueda_con_filtros,
+                                          height=30)
+        btn_aplicar_filtros.pack(side="left", padx=(0,5))
+        
+        btn_limpiar_filtros = ctk.CTkButton(botones_filtros, text="🧹 Limpiar Filtros", 
+                                          command=self.limpiar_filtros,
+                                          height=30)
+        btn_limpiar_filtros.pack(side="left")
+
+    def toggle_filtros_avanzados(self):
+        """Muestra u oculta los filtros avanzados."""
+        if self.filtros_expandido.get():
+            # Contraer
+            self.filtros_content.pack_forget()
+            self.btn_toggle_filtros.configure(text="🔽 Mostrar Filtros Avanzados")
+            self.filtros_expandido.set(False)
+        else:
+            # Expandir
+            self.filtros_content.pack(fill="x", padx=10, pady=(0,10))
+            self.btn_toggle_filtros.configure(text="🔼 Ocultar Filtros Avanzados")
+            self.filtros_expandido.set(True)
+
+    def limpiar_filtros(self):
+        """Limpia todos los filtros avanzados."""
+        self.filtro_estado.set("Todos")
+        self.filtro_fecha_desde.delete(0, 'end')
+        self.filtro_fecha_hasta.delete(0, 'end')
+        self.filtro_cliente.delete(0, 'end')
+        self.filtro_estado_producto.delete(0, 'end')
+        self.filtro_referencia.delete(0, 'end')
+
+    def actualizar_historial_ui(self):
+        """Actualiza la interfaz del historial de búsquedas."""
+        # Limpiar historial actual
+        for widget in self.historial_frame.winfo_children():
+            widget.destroy()
+        
+        historial = self.cargar_historial_busquedas()
+        
+        if not historial:
+            ctk.CTkLabel(self.historial_frame, text="Sin búsquedas recientes", 
+                        text_color="gray").pack(pady=10)
+            return
+        
+        for i, entrada in enumerate(historial):
+            self.crear_entrada_historial(entrada, i)
+
+    def crear_entrada_historial(self, entrada, index):
+        """Crea una entrada visual en el historial."""
+        frame = ctk.CTkFrame(self.historial_frame)
+        frame.pack(fill="x", padx=5, pady=2)
+        
+        # Texto de la búsqueda
+        texto = entrada.get("termino", "")
+        if len(texto) > 25:
+            texto = texto[:22] + "..."
+        
+        btn_entrada = ctk.CTkButton(frame, text=texto, 
+                                  command=lambda: self.usar_busqueda_historial(entrada),
+                                  height=25, font=ctk.CTkFont(size=11))
+        btn_entrada.pack(side="left", fill="x", expand=True, padx=5, pady=2)
+        
+        # Fecha (opcional)
+        try:
+            fecha = entrada.get("fecha", "")
+            if fecha:
+                fecha_obj = datetime.datetime.fromisoformat(fecha.replace('Z', '+00:00'))
+                fecha_str = fecha_obj.strftime("%d/%m")
+                ctk.CTkLabel(frame, text=fecha_str, text_color="gray", 
+                           font=ctk.CTkFont(size=9)).pack(side="right", padx=5)
+        except:
+            pass
+
+    def usar_busqueda_historial(self, entrada):
+        """Aplica una búsqueda del historial."""
+        # Cargar término de búsqueda
+        self.entry_busqueda_global.delete(0, 'end')
+        self.entry_busqueda_global.insert(0, entrada.get("termino", ""))
+        
+        # Cargar filtros si existen
+        filtros = entrada.get("filtros", {})
+        if filtros and hasattr(self, 'filtro_estado'):
+            # Expandir filtros si hay filtros guardados
+            if not self.filtros_expandido.get():
+                self.toggle_filtros_avanzados()
+            
+            # Aplicar filtros guardados
+            self.filtro_estado.set(filtros.get("estado", "Todos"))
+            self.filtro_fecha_desde.delete(0, 'end')
+            self.filtro_fecha_desde.insert(0, filtros.get("fecha_desde", ""))
+            self.filtro_fecha_hasta.delete(0, 'end')
+            self.filtro_fecha_hasta.insert(0, filtros.get("fecha_hasta", ""))
+            self.filtro_cliente.delete(0, 'end')
+            self.filtro_cliente.insert(0, filtros.get("cliente", ""))
+            self.filtro_estado_producto.delete(0, 'end')
+            self.filtro_estado_producto.insert(0, filtros.get("estado_producto", ""))
+            self.filtro_referencia.delete(0, 'end')
+            self.filtro_referencia.insert(0, filtros.get("referencia", ""))
+        
+        # Ejecutar búsqueda
+        if filtros:
+            self.ejecutar_busqueda_con_filtros()
+        else:
+            self.ejecutar_busqueda_global()
+
+    def limpiar_historial_busquedas_ui(self):
+        """Limpia el historial desde la interfaz."""
+        self.limpiar_historial_busquedas()
+        self.actualizar_historial_ui()
+
+    def ejecutar_busqueda_con_filtros(self):
+        """Ejecuta búsqueda combinada con filtros avanzados."""
+        termino = self.entry_busqueda_global.get().strip()
+        
+        # Recopilar filtros
+        filtros = {
+            "estado": self.filtro_estado.get() if self.filtro_estado.get() != "Todos" else "",
+            "fecha_desde": self.filtro_fecha_desde.get().strip(),
+            "fecha_hasta": self.filtro_fecha_hasta.get().strip(),
+            "cliente": self.filtro_cliente.get().strip(),
+            "estado_producto": self.filtro_estado_producto.get().strip(),
+            "referencia": self.filtro_referencia.get().strip()
+        }
+        
+        # Validar fechas
+        if filtros["fecha_desde"] and not self.validar_fecha(filtros["fecha_desde"]):
+            messagebox.showerror("Error", "Formato de fecha inválido (YYYY-MM-DD)")
+            return
+        if filtros["fecha_hasta"] and not self.validar_fecha(filtros["fecha_hasta"]):
+            messagebox.showerror("Error", "Formato de fecha inválido (YYYY-MM-DD)")
+            return
+        
+        # Guardar en historial si hay criterios de búsqueda
+        if termino or any(v for v in filtros.values() if v):
+            self.guardar_busqueda_en_historial(termino, filtros)
+            self.actualizar_historial_ui()
+        
+        # Limpiar resultados previos
+        for widget in self.resultados_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            resultados_maestro = self.buscar_en_maestro_con_filtros(termino, filtros)
+            resultados_detalles = self.buscar_en_detalles_con_filtros(termino, filtros)
+            
+            self.mostrar_resultados_busqueda_avanzada(resultados_maestro, resultados_detalles, termino, filtros)
+            
+        except Exception as e:
+            messagebox.showerror("Error en la búsqueda", f"Error al ejecutar búsqueda con filtros: {str(e)}")
+            print(f"Error en búsqueda con filtros: {e}")
+
+    def buscar_en_maestro_con_filtros(self, termino, filtros):
+        """Busca en rma_maestro aplicando filtros."""
+        query = "SELECT * FROM rma_maestro WHERE 1=1"
+        params = []
+        
+        # Filtro de texto general
+        if termino:
+            query += """ AND (
+                numero_rma LIKE ? OR cliente LIKE ? OR nombre_contacto LIKE ? OR 
+                email_contacto LIKE ? OR direccion_cliente LIKE ? OR 
+                telefono_contacto LIKE ? OR motivo_devolucion LIKE ? OR 
+                numero_seguimiento LIKE ? OR observaciones LIKE ?
+            )"""
+            termino_param = f"%{termino}%"
+            params.extend([termino_param] * 9)
+        
+        # Filtros específicos
+        if filtros["estado"]:
+            query += " AND estado_expediente = ?"
+            params.append(filtros["estado"])
+        
+        if filtros["fecha_desde"]:
+            query += " AND fecha_creacion >= ?"
+            params.append(filtros["fecha_desde"])
+        
+        if filtros["fecha_hasta"]:
+            query += " AND fecha_creacion <= ?"
+            params.append(filtros["fecha_hasta"])
+        
+        if filtros["cliente"]:
+            query += " AND cliente LIKE ?"
+            params.append(f"%{filtros['cliente']}%")
+        
+        query += " ORDER BY fecha_creacion DESC LIMIT 50"
+        
+        with self.turso_db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def buscar_en_detalles_con_filtros(self, termino, filtros):
+        """Busca en rma_detalles aplicando filtros."""
+        query = "SELECT * FROM rma_detalles WHERE 1=1"
+        params = []
+        
+        # Filtro de texto general
+        if termino:
+            query += """ AND (
+                numero_rma LIKE ? OR numero_serie LIKE ? OR referencia_articulo LIKE ? OR 
+                descripcion_articulo LIKE ? OR estado_producto LIKE ? OR observaciones LIKE ?
+            )"""
+            termino_param = f"%{termino}%"
+            params.extend([termino_param] * 6)
+        
+        # Filtros específicos para productos
+        if filtros["estado_producto"]:
+            query += " AND estado_producto LIKE ?"
+            params.append(f"%{filtros['estado_producto']}%")
+        
+        if filtros["referencia"]:
+            query += " AND referencia_articulo LIKE ?"
+            params.append(f"%{filtros['referencia']}%")
+        
+        # Filtros relacionados con el expediente padre
+        if filtros["estado"] or filtros["fecha_desde"] or filtros["fecha_hasta"] or filtros["cliente"]:
+            query += """ AND numero_rma IN (
+                SELECT numero_rma FROM rma_maestro WHERE 1=1"""
+            
+            if filtros["estado"]:
+                query += " AND estado_expediente = ?"
+                params.append(filtros["estado"])
+            
+            if filtros["fecha_desde"]:
+                query += " AND fecha_creacion >= ?"
+                params.append(filtros["fecha_desde"])
+            
+            if filtros["fecha_hasta"]:
+                query += " AND fecha_creacion <= ?"
+                params.append(filtros["fecha_hasta"])
+            
+            if filtros["cliente"]:
+                query += " AND cliente LIKE ?"
+                params.append(f"%{filtros['cliente']}%")
+            
+            query += ")"
+        
+        query += " ORDER BY numero_rma DESC LIMIT 50"
+        
+        with self.turso_db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def mostrar_resultados_busqueda_avanzada(self, resultados_maestro, resultados_detalles, termino, filtros):
+        """Muestra los resultados de la búsqueda avanzada."""
+        total_resultados = len(resultados_maestro) + len(resultados_detalles)
+        
+        # Título de resultados
+        titulo_frame = ctk.CTkFrame(self.resultados_frame, fg_color="transparent")
+        titulo_frame.pack(fill="x", padx=10, pady=(10,5))
+        
+        filtros_activos = [k for k, v in filtros.items() if v]
+        if termino or filtros_activos:
+            criterios = []
+            if termino:
+                criterios.append(f"Texto: '{termino}'")
+            if filtros_activos:
+                criterios.append(f"Filtros: {', '.join(filtros_activos)}")
+            criterios_text = " | ".join(criterios)
+        else:
+            criterios_text = "Todos los registros"
+        
+        ctk.CTkLabel(titulo_frame, 
+                    text=f"🔍 Búsqueda Avanzada: {criterios_text}",
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        ctk.CTkLabel(titulo_frame, 
+                    text=f"({total_resultados} resultados)",
+                    font=ctk.CTkFont(size=12), 
+                    text_color="gray").pack(side="right")
+        
+        if total_resultados == 0:
+            ctk.CTkLabel(self.resultados_frame, 
+                        text="❌ No se encontraron resultados con los criterios especificados",
+                        font=ctk.CTkFont(size=13),
+                        text_color="orange").pack(pady=20)
+            return
+        
+        # Resultados de expedientes
+        if resultados_maestro:
+            exp_frame = ctk.CTkFrame(self.resultados_frame)
+            exp_frame.pack(fill="x", padx=10, pady=5)
+            
+            ctk.CTkLabel(exp_frame, 
+                        text=f"📋 Expedientes ({len(resultados_maestro)} encontrados)",
+                        font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=5)
+            
+            for expediente in resultados_maestro:
+                self.crear_resultado_expediente_avanzado(exp_frame, expediente, termino)
+        
+        # Resultados de productos
+        if resultados_detalles:
+            prod_frame = ctk.CTkFrame(self.resultados_frame)
+            prod_frame.pack(fill="x", padx=10, pady=5)
+            
+            ctk.CTkLabel(prod_frame, 
+                        text=f"📦 Productos ({len(resultados_detalles)} encontrados)",
+                        font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=5)
+            
+            for producto in resultados_detalles:
+                self.crear_resultado_producto_avanzado(prod_frame, producto, termino)
+
+    def crear_resultado_expediente_avanzado(self, parent, expediente, termino_resaltado):
+        """Crea un resultado visual avanzado para expediente."""
+        resultado_frame = ctk.CTkFrame(parent)
+        resultado_frame.pack(fill="x", padx=10, pady=2)
+        
+        # Info principal
+        info_frame = ctk.CTkFrame(resultado_frame, fg_color="transparent")
+        info_frame.pack(fill="x", padx=10, pady=5)
+        
+        # RMA y estado
+        header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        header_frame.pack(fill="x")
+        
+        rma_texto = f"RMA: {expediente[1]}"  # numero_rma
+        ctk.CTkLabel(header_frame, text=rma_texto, 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        
+        estado = expediente[8] if expediente[8] else "Sin estado"  # estado_expediente
+        color_estado = {"Pendiente": "orange", "Autorizado": "blue", "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+        ctk.CTkLabel(header_frame, text=f"🏷️ {estado}", 
+                    text_color=color_estado, font=ctk.CTkFont(size=11)).pack(side="right")
+        
+        # Cliente y fecha
+        cliente_fecha = f"👤 {expediente[2]} | 📅 {expediente[9]}"  # cliente, fecha_creacion
+        ctk.CTkLabel(info_frame, text=cliente_fecha, 
+                    font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w")
+        
+        # Botón para abrir
+        btn_abrir = ctk.CTkButton(resultado_frame, text="📂 Abrir Expediente", 
+                                 command=lambda: self.abrir_expediente_desde_busqueda(expediente[1]),
+                                 height=25, width=120)
+        btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def crear_resultado_producto_avanzado(self, parent, producto, termino_resaltado):
+        """Crea un resultado visual avanzado para producto."""
+        resultado_frame = ctk.CTkFrame(parent)
+        resultado_frame.pack(fill="x", padx=10, pady=2)
+        
+        # Info principal
+        info_frame = ctk.CTkFrame(resultado_frame, fg_color="transparent")
+        info_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Referencia y RMA
+        header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        header_frame.pack(fill="x")
+        
+        ref_texto = f"📦 {producto[3]}"  # referencia_articulo
+        ctk.CTkLabel(header_frame, text=ref_texto, 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        
+        rma_texto = f"RMA: {producto[1]}"  # numero_rma
+        ctk.CTkLabel(header_frame, text=rma_texto, 
+                    font=ctk.CTkFont(size=11), text_color="blue").pack(side="right")
+        
+        # Descripción y estado
+        descripcion = producto[4] if producto[4] else "Sin descripción"  # descripcion_articulo
+        if len(descripcion) > 60:
+            descripcion = descripcion[:57] + "..."
+        ctk.CTkLabel(info_frame, text=f"📝 {descripcion}", 
+                    font=ctk.CTkFont(size=10), text_color="gray").pack(anchor="w")
+        
+        estado_prod = producto[6] if producto[6] else "Sin estado"  # estado_producto
+        ctk.CTkLabel(info_frame, text=f"🔧 Estado: {estado_prod}", 
+                    font=ctk.CTkFont(size=10), text_color="orange").pack(anchor="w")
+        
+        # Botón para abrir
+        btn_abrir = ctk.CTkButton(resultado_frame, text="📂 Ver en Expediente", 
+                                 command=lambda: self.abrir_expediente_desde_busqueda(producto[1]),
+                                 height=25, width=120)
+        btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def validar_fecha(self, fecha_str):
+        """Valida formato de fecha YYYY-MM-DD."""
+        try:
+            datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+
+    def abrir_expediente_desde_busqueda(self, numero_rma):
+        """Abre un expediente específico desde los resultados de búsqueda."""
+        try:
+            # Cerrar ventana de búsqueda
+            if hasattr(self, 'ventana_busqueda_global') and self.ventana_busqueda_global:
+                self.ventana_busqueda_global.destroy()
+                self.ventana_busqueda_global = None
+            
+            # Cambiar al marco de expedientes
+            self.mostrar_expedientes()
+            
+            # Buscar y mostrar el expediente específico
+            self.buscar_expediente_especifico(numero_rma)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al abrir expediente: {str(e)}")
+
+    def buscar_expediente_especifico(self, numero_rma):
+        """Busca y muestra un expediente específico."""
+        try:
+            # Limpiar lista actual
+            for widget in self.expedientes_frame.winfo_children():
+                widget.destroy()
+            
+            # Buscar expediente
+            with self.turso_db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM rma_maestro WHERE numero_rma = ?", (numero_rma,))
+                expediente = cursor.fetchone()
+                
+                if expediente:
+                    # Mostrar como resultado único
+                    resultado_frame = ctk.CTkFrame(self.expedientes_frame)
+                    resultado_frame.pack(fill="x", padx=10, pady=5)
+                    
+                    # Crear botón de expediente con información destacada
+                    self.crear_boton_expediente(resultado_frame, expediente, destacado=True)
+                    
+                    # Mensaje de búsqueda exitosa
+                    mensaje_frame = ctk.CTkFrame(self.expedientes_frame)
+                    mensaje_frame.pack(fill="x", padx=10, pady=5)
+                    ctk.CTkLabel(mensaje_frame, 
+                                text=f"✅ Expediente {numero_rma} encontrado desde búsqueda",
+                                font=ctk.CTkFont(size=12), 
+                                text_color="green").pack(pady=10)
+                else:
+                    ctk.CTkLabel(self.expedientes_frame, 
+                                text=f"❌ No se encontró el expediente {numero_rma}",
+                                font=ctk.CTkFont(size=12), 
+                                text_color="red").pack(pady=20)
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al buscar expediente específico: {str(e)}")
+            print(f"Error en buscar_expediente_especifico: {e}")
         
         # Mensaje inicial
         ctk.CTkLabel(self.resultados_frame, 
@@ -2112,6 +2705,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.update()
         
         try:
+            # Guardar búsqueda en historial
+            self.guardar_busqueda_en_historial(termino)
+            self.actualizar_historial_ui()
+            
             # Realizar búsqueda
             resultados_expedientes, resultados_productos = self.buscar_en_todos_los_campos(termino)
             

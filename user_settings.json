@@ -11,7 +11,41 @@
       "date_format": "DD/MM/YYYY",
       "show_tooltips": true,
       "compact_mode": true,
-      "icon_size": 24
+      "icon_size": 24,
+      "historial_busquedas": [
+        {
+          "termino": "carlos",
+          "filtros": {},
+          "fecha": "2025-11-05T10:03:15.493727"
+        },
+        {
+          "termino": "cliente test",
+          "filtros": {
+            "estado": "Pendiente",
+            "fecha_desde": "",
+            "fecha_hasta": "",
+            "cliente": "",
+            "estado_producto": "",
+            "referencia": ""
+          },
+          "fecha": "2025-11-05T10:02:59.898579"
+        },
+        {
+          "termino": "RMA25007",
+          "filtros": {},
+          "fecha": "2025-11-05T10:02:51.387318"
+        },
+        {
+          "termino": "24-1121",
+          "filtros": {},
+          "fecha": "2025-11-05T10:02:28.578681"
+        },
+        {
+          "termino": "producto defectuoso",
+          "filtros": {},
+          "fecha": "2025-11-05T08:30:00"
+        }
+      ]
     }
   }
 }
