@@ -105,7 +105,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.68"
+APP_VERSION = "v0.0.69"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -396,7 +396,6 @@ def optimize_database():
         
         conn.commit()
         conn.close()
-        print("✅ Índices de base de datos optimizados")
     except Exception as e:
         print(f"Error al crear índices: {e}")
 
@@ -761,6 +760,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.crear_diseno()
         
+        # Crear tablas de gestión de clientes
+        try:
+            self.crear_tablas_clientes()
+        except Exception as e:
+            print(f"Error inicializando gestión de clientes: {e}")
+        
         # Configurar atajos de teclado globales
         self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
         self.bind_all("<Control-F>", lambda e: self.mostrar_busqueda_global())
@@ -806,7 +811,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 if col_name not in cols:
                     try:
                         cursor.execute(f"ALTER TABLE rma_maestro ADD COLUMN {col_name} {col_def}")
-                        print(f"✅ Columna '{col_name}' añadida a rma_maestro.")
                     except Exception as e:
                         print(f"Error al añadir columna '{col_name}': {e}")
 
@@ -1107,6 +1111,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.badge_tareas.grid_remove()
         
         Tooltip(self.btn_tareas, "Tareas")
+        fila += 1
+
+        # Botón de Gestión de Clientes
+        self.btn_clientes = ctk.CTkButton(self.sidebar_frame,
+                                        text="",
+                                        image=self.icon_user,  # Usar icono de usuario para clientes
+                                        width=44,
+                                        height=44,
+                                        fg_color=sidebar_bg,
+                                        hover_color=sidebar_bg,
+                                        command=self.mostrar_clientes)
+        self.btn_clientes.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_clientes, "Gestión de Clientes")
         fila += 1
 
         # Botón Gestión RMP (Proveedores -> Expedientes)
@@ -2421,10 +2438,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         query += " ORDER BY fecha_creacion DESC LIMIT 50"
         
-        with self.turso_db_manager.get_connection() as conn:
-            cursor = conn.cursor()
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            return []
+        
+        try:
             cursor.execute(query, params)
-            return cursor.fetchall()
+            result = cursor.fetchall()
+            conn.close()
+            return result
+        except Exception as e:
+            conn.close()
+            raise e
 
     def buscar_en_detalles_con_filtros(self, termino, filtros):
         """Busca en rma_detalles aplicando filtros."""
@@ -2474,10 +2499,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         query += " ORDER BY numero_rma DESC LIMIT 50"
         
-        with self.turso_db_manager.get_connection() as conn:
-            cursor = conn.cursor()
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            return []
+        
+        try:
             cursor.execute(query, params)
-            return cursor.fetchall()
+            result = cursor.fetchall()
+            conn.close()
+            return result
+        except Exception as e:
+            conn.close()
+            raise e
 
     def mostrar_resultados_busqueda_avanzada(self, resultados_maestro, resultados_detalles, termino, filtros):
         """Muestra los resultados de la búsqueda avanzada."""
@@ -2642,8 +2675,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 widget.destroy()
             
             # Buscar expediente
-            with self.turso_db_manager.get_connection() as conn:
-                cursor = conn.cursor()
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
+            
+            try:
                 cursor.execute("SELECT * FROM rma_maestro WHERE numero_rma = ?", (numero_rma,))
                 expediente = cursor.fetchone()
                 
@@ -2667,6 +2703,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                 text=f"❌ No se encontró el expediente {numero_rma}",
                                 font=ctk.CTkFont(size=12), 
                                 text_color="red").pack(pady=20)
+                
+                conn.close()
+                
+            except Exception as e:
+                conn.close()
+                raise e
                     
         except Exception as e:
             messagebox.showerror("Error", f"Error al buscar expediente específico: {str(e)}")
@@ -2942,7 +2984,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             count = cursor.fetchone()[0]
             conn.close()
             
-            print(f"✅ Test de conexión exitoso: {count} expedientes en BD")
             return True
             
         except Exception as e:
@@ -3906,7 +3947,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     INSERT INTO rma_detalles ({columnas_detalle}) 
                     VALUES ({placeholders_detalle})
                 """, valores_batch)
-                print(f"✅ Detalles de {len(self.articulos_data)} artículos guardados (batch).")
 
             # 3c. Inserción en rma_historial (modificar descripción si no hay artículos)
             num_articulos = len(self.articulos_data)
@@ -3921,7 +3961,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Invalidar caché de estados (puede que se haya creado un nuevo estado)
             invalidate_cache('estados_rma')
             
-            print(f"✅ RMA {datos_maestro['codigo_rma']} guardado exitosamente.")
             messagebox.showinfo("Expediente Guardado", "El expediente se ha guardado correctamente.")
             
             self.current_rma_id = rma_id_generado # Asigna el ID al atributo de instancia
@@ -4390,7 +4429,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             try:
                 cursor.execute(f"UPDATE rma_maestro SET {set_clause} WHERE id = ?", tuple(valores_a_actualizar))
-                print(f"✅ RMA {datos_nuevos['codigo_rma']} Maestro actualizado.")
                 messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
             except sqlite3.Error as e:
                 print(f"Error al actualizar maestro: {e}")
@@ -4429,7 +4467,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             elif not self.articulos_data and cursor.rowcount > 0: # Si borramos y no insertamos nada
                  self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
             
-            print(f"✅ RMA {datos_nuevos['codigo_rma']} Detalles actualizados.")
             messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
 
         except sqlite3.Error as e:
@@ -8142,6 +8179,2015 @@ Versión de la App: {APP_VERSION}
             print(f"Error al abrir el cliente de correo: {e}")
             messagebox.showerror("Error de Email", "No se pudo abrir el cliente de correo por defecto. Por favor, envía un email manualmente a " + email_destino)
     
+
+    # ==================================================================
+    # 🧑‍💼 GESTIÓN INDEPENDIENTE DE CLIENTES
+    # ==================================================================
+    
+    def crear_tablas_clientes(self):
+        """Crea las tablas necesarias para la gestión independiente de clientes."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                print("❌ No se pudo conectar a la base de datos para crear tablas de clientes")
+                return
+            
+            # Leer y ejecutar el script SQL
+            script_path = os.path.join(os.getcwd(), "scripts", "clientes_schema.sql")
+            if os.path.exists(script_path):
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    sql_script = f.read()
+                
+                # Ejecutar cada comando SQL
+                statements = []
+                current_statement = ""
+                for line in sql_script.split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('--'):
+                        current_statement += line + " "
+                        if line.endswith(';'):
+                            statements.append(current_statement.strip()[:-1])  # Quitar el ; final
+                            current_statement = ""
+                
+                print(f"📋 Ejecutando {len(statements)} comandos SQL...")
+                
+                for i, statement in enumerate(statements, 1):
+                    statement = statement.strip()
+                    if statement:
+                        try:
+                            cursor.execute(statement)
+                        except Exception as e:
+                            print(f"❌ Error en comando {i}: {statement[:60]}... - {e}")
+                
+                conn.commit()
+                    
+            else:
+                print(f"⚠️ No se encontró el script clientes_schema.sql en: {script_path}")
+                
+            conn.close()
+            
+        except Exception as e:
+            print(f"❌ Error creando tablas de clientes: {e}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def mostrar_clientes(self):
+        """Muestra la gestión independiente de clientes."""
+        
+        # Mantener el tamaño actual de la ventana
+        current_geometry = self.geometry()
+        
+        try:
+            self.limpiar_contenido()
+            
+            # Asegurar que la ventana mantenga su tamaño
+            self.geometry(current_geometry)
+            
+            # Header
+            header_frame = ctk.CTkFrame(self.content_frame)
+            header_frame.pack(fill="x", padx=10, pady=10)
+            
+            ctk.CTkLabel(header_frame, 
+                        text="🧑‍💼 GESTIÓN DE CLIENTES", 
+                        font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
+            
+            # Botones de acción principal
+            botones_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+            botones_frame.pack(fill="x", padx=10, pady=5)
+            
+            btn_nuevo = ctk.CTkButton(botones_frame, text="➕ Nuevo Cliente", 
+                                     command=self.nuevo_cliente, 
+                                     width=140, height=35)
+            btn_nuevo.pack(side="left", padx=(0,10))
+            Tooltip(btn_nuevo, "Crear un nuevo cliente en el sistema")
+            
+            btn_migrar = ctk.CTkButton(botones_frame, text="🔄 Migrar desde RMAs", 
+                                      command=self.migrar_clientes_desde_rmas, 
+                                      width=160, height=35)
+            btn_migrar.pack(side="left", padx=(0,10))
+            Tooltip(btn_migrar, "Importar clientes automáticamente desde los RMAs existentes")
+            
+            # Búsqueda y filtros
+            busqueda_frame = ctk.CTkFrame(self.content_frame)
+            busqueda_frame.pack(fill="x", padx=10, pady=5)
+            
+            ctk.CTkLabel(busqueda_frame, text="Buscar cliente:", 
+                        font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=10)
+            
+            self.entry_buscar_cliente = ctk.CTkEntry(busqueda_frame, 
+                                                   placeholder_text="Nombre del cliente...",
+                                                   width=200)
+            self.entry_buscar_cliente.pack(side="left", padx=5, pady=10)
+            self.entry_buscar_cliente.bind("<KeyRelease>", self.filtrar_clientes)
+            Tooltip(self.entry_buscar_cliente, "Escriba para buscar clientes por nombre en tiempo real")
+            
+            # Filtro por tipo
+            ctk.CTkLabel(busqueda_frame, text="Tipo:", 
+                        font=ctk.CTkFont(size=12)).pack(side="left", padx=(20,5), pady=10)
+            
+            self.filtro_tipo_cliente = ctk.CTkOptionMenu(busqueda_frame, 
+                                                       values=["Todos", "Regular", "Premium", "VIP"],
+                                                       command=self.filtrar_clientes,
+                                                       width=100)
+            self.filtro_tipo_cliente.set("Todos")
+            self.filtro_tipo_cliente.pack(side="left", padx=5, pady=10)
+            Tooltip(self.filtro_tipo_cliente, "Filtrar clientes por tipo: Regular, Premium o VIP")
+            
+            # Lista de clientes con más altura para aprovechar mejor el espacio
+            self.clientes_frame = ctk.CTkScrollableFrame(self.content_frame, height=500)
+            self.clientes_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Cargar clientes
+            self.cargar_lista_clientes()
+            
+        except Exception as e:
+            print(f"❌ Error en mostrar_clientes: {e}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def cargar_lista_clientes(self):
+        """Carga y muestra la lista de clientes."""
+        # Limpiar lista actual
+        for widget in self.clientes_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                print("❌ No se pudo conectar a la base de datos")
+                return
+            
+            # Buscar clientes con estadísticas (consulta simplificada)
+            filtro_busqueda = self.entry_buscar_cliente.get().strip() if hasattr(self, 'entry_buscar_cliente') else ""
+            filtro_tipo = self.filtro_tipo_cliente.get() if hasattr(self, 'filtro_tipo_cliente') else "Todos"
+            
+            # Consulta simplificada sin vistas complejas
+            query = """
+                SELECT c.cliente_id, c.nombre, c.tipo_cliente, c.activo, c.fecha_registro,
+                       0 as total_rmas, 0 as tasa_exito, '' as ultimo_rma, 0 as total_contactos
+                FROM clientes c
+                WHERE 1=1
+            """
+            params = []
+            
+            if filtro_busqueda:
+                query += " AND c.nombre LIKE ?"
+                params.append(f"%{filtro_busqueda}%")
+            
+            if filtro_tipo != "Todos":
+                query += " AND c.tipo_cliente = ?"
+                params.append(filtro_tipo)
+            
+            query += " ORDER BY c.nombre"
+            
+            cursor.execute(query, params)
+            clientes = cursor.fetchall()
+            
+            if not clientes:
+                ctk.CTkLabel(self.clientes_frame, 
+                           text="📋 No se encontraron clientes. Haz clic en 'Nuevo Cliente' para agregar uno.",
+                           font=ctk.CTkFont(size=13)).pack(pady=30)
+                conn.close()
+                return
+            
+            # Mostrar cada cliente
+            for i, cliente in enumerate(clientes):
+                self.crear_item_cliente(cliente)
+            
+            conn.close()
+            
+        except Exception as e:
+            error_msg = f"❌ Error cargando clientes: {str(e)}"
+            print(error_msg)
+            ctk.CTkLabel(self.clientes_frame, 
+                       text=error_msg,
+                       font=ctk.CTkFont(size=12), 
+                       text_color="red").pack(pady=20)
+            import traceback
+            print(traceback.format_exc())
+    
+    def crear_item_cliente(self, cliente):
+        """Crea un elemento visual para un cliente en la lista con diseño compacto."""
+        cliente_id, nombre, tipo, activo, fecha_reg, total_rmas, tasa_exito, ultimo_rma, total_contactos = cliente
+        
+        # Frame principal del cliente con altura reducida y borde sutil
+        cliente_frame = ctk.CTkFrame(self.clientes_frame, height=45, border_width=1)
+        cliente_frame.pack(fill="x", padx=5, pady=1)
+        cliente_frame.pack_propagate(False)  # Mantener altura fija
+        
+        # Configurar grid para el layout horizontal
+        cliente_frame.grid_columnconfigure(0, weight=1)  # Info del cliente (expandible)
+        cliente_frame.grid_columnconfigure(1, weight=0)  # Botones (tamaño fijo)
+        
+        # Frame izquierdo: Información del cliente
+        info_frame = ctk.CTkFrame(cliente_frame, fg_color="transparent")
+        info_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        info_frame.grid_columnconfigure(0, weight=1)
+        
+        # Línea superior: Nombre, estado y tipo en una sola línea
+        header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew")
+        
+        # Nombre del cliente
+        nombre_label = ctk.CTkLabel(header_frame, text=f"🧑‍💼 {nombre}", 
+                                  font=ctk.CTkFont(size=13, weight="bold"))
+        nombre_label.pack(side="left")
+        
+        # Estado y tipo a la derecha
+        estado_color = "green" if activo else "red"
+        estado_texto = "🟢" if activo else "🔴"
+        estado_label = ctk.CTkLabel(header_frame, text=estado_texto, 
+                                  font=ctk.CTkFont(size=10))
+        estado_label.pack(side="right", padx=(5,0))
+        
+        tipo_label = ctk.CTkLabel(header_frame, text=f"🏷️ {tipo}", 
+                                font=ctk.CTkFont(size=10), text_color="blue")
+        tipo_label.pack(side="right", padx=(10,5))
+        
+        # Línea inferior: Estadísticas compactas
+        stats_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        stats_frame.grid(row=1, column=0, sticky="ew")
+        
+        # Convertir valores a números para el formateo
+        try:
+            total_rmas_num = int(total_rmas) if total_rmas else 0
+            tasa_exito_num = float(tasa_exito) if tasa_exito else 0.0
+            total_contactos_num = int(total_contactos) if total_contactos else 0
+        except (ValueError, TypeError):
+            total_rmas_num = 0
+            tasa_exito_num = 0.0
+            total_contactos_num = 0
+        
+        stats_text = f"📊 {total_rmas_num} RMAs • ✅ {tasa_exito_num:.1f}% • 👥 {total_contactos_num} contactos"
+        if ultimo_rma:
+            stats_text += f" • 📅 {ultimo_rma}"
+        
+        stats_label = ctk.CTkLabel(stats_frame, text=stats_text, 
+                                 font=ctk.CTkFont(size=9), text_color="gray")
+        stats_label.pack(side="left")
+        
+        # Frame derecho: Botones de acción horizontales
+        botones_frame = ctk.CTkFrame(cliente_frame, fg_color="transparent")
+        botones_frame.grid(row=0, column=1, sticky="e", padx=(5,10), pady=5)
+        
+        # Botones más pequeños y compactos con tooltips
+        btn_ver = ctk.CTkButton(botones_frame, text="👁️", 
+                              command=lambda: self.abrir_ficha_cliente(cliente_id),
+                              width=30, height=25, font=ctk.CTkFont(size=12))
+        btn_ver.pack(side="left", padx=2)
+        Tooltip(btn_ver, "Ver ficha completa del cliente")
+        
+        btn_editar = ctk.CTkButton(botones_frame, text="✏️", 
+                                 command=lambda: self.editar_cliente(cliente_id),
+                                 width=30, height=25, font=ctk.CTkFont(size=12))
+        btn_editar.pack(side="left", padx=2)
+        Tooltip(btn_editar, "Editar datos del cliente")
+        
+        btn_notas = ctk.CTkButton(botones_frame, text="📝", 
+                                command=lambda: self.gestionar_notas_cliente(cliente_id),
+                                width=30, height=25, font=ctk.CTkFont(size=12))
+        btn_notas.pack(side="left", padx=2)
+        Tooltip(btn_notas, "Gestionar notas del cliente")
+        
+        # Los tooltips proporcionan información clara sobre cada acción
+    
+    def filtrar_clientes(self, event=None):
+        """Filtra la lista de clientes según los criterios de búsqueda."""
+        self.cargar_lista_clientes()
+    
+    def nuevo_cliente(self):
+        """Muestra el formulario para crear un nuevo cliente."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Nuevo Cliente")
+        ventana.geometry("500x600")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="➕ Nuevo Cliente", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=400)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Nombre (obligatorio)
+        ctk.CTkLabel(form_frame, text="Nombre del Cliente *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_nombre = ctk.CTkEntry(form_frame, placeholder_text="Nombre completo del cliente")
+        entry_nombre.pack(fill="x", pady=(0,10))
+        
+        # Tipo de cliente
+        ctk.CTkLabel(form_frame, text="Tipo de Cliente", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        option_tipo = ctk.CTkOptionMenu(form_frame, values=["Regular", "Premium", "VIP"])
+        option_tipo.set("Regular")
+        option_tipo.pack(fill="x", pady=(0,10))
+        
+        # Dirección
+        ctk.CTkLabel(form_frame, text="Dirección", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_direccion = ctk.CTkEntry(form_frame, placeholder_text="Dirección completa")
+        entry_direccion.pack(fill="x", pady=(0,10))
+        
+        # Teléfono principal
+        ctk.CTkLabel(form_frame, text="Teléfono Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_telefono = ctk.CTkEntry(form_frame, placeholder_text="Teléfono de contacto principal")
+        entry_telefono.pack(fill="x", pady=(0,10))
+        
+        # Email principal
+        ctk.CTkLabel(form_frame, text="Email Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_email = ctk.CTkEntry(form_frame, placeholder_text="Email de contacto principal")
+        entry_email.pack(fill="x", pady=(0,10))
+        
+        # Notas generales
+        ctk.CTkLabel(form_frame, text="Notas Generales", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        text_notas = ctk.CTkTextbox(form_frame, height=80)
+        text_notas.pack(fill="x", pady=(0,10))
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        def guardar_cliente():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "El nombre del cliente es obligatorio")
+                return
+            
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn: return
+                
+                cursor.execute("""
+                    INSERT INTO clientes (nombre, tipo_cliente, direccion, telefono_principal, 
+                                        email_principal, notas_generales)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (nombre, option_tipo.get(), entry_direccion.get().strip(),
+                     entry_telefono.get().strip(), entry_email.get().strip(),
+                     text_notas.get("1.0", "end-1c").strip()))
+                
+                conn.commit()
+                conn.close()
+                
+                messagebox.showinfo("Éxito", f"Cliente '{nombre}' creado correctamente")
+                ventana.destroy()
+                self.cargar_lista_clientes()
+                
+            except Exception as e:
+                if "UNIQUE constraint failed" in str(e):
+                    messagebox.showerror("Error", f"Ya existe un cliente con el nombre '{nombre}'")
+                else:
+                    messagebox.showerror("Error", f"Error al crear cliente: {str(e)}")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Guardar Cliente", 
+                                  command=guardar_cliente,
+                                  width=120)
+        btn_guardar.pack(side="right")
+    
+    def migrar_clientes_desde_rmas(self):
+        """Migra clientes existentes desde la tabla rma_maestro."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return
+            
+            # Ejecutar migración
+            cursor.execute("""
+                INSERT OR IGNORE INTO clientes (nombre, fecha_registro, direccion, telefono_principal, email_principal)
+                SELECT DISTINCT 
+                    cliente,
+                    MIN(fecha_creacion) as fecha_registro,
+                    direccion_cliente,
+                    telefono_contacto,
+                    email_contacto
+                FROM rma_maestro 
+                WHERE cliente IS NOT NULL AND cliente != ''
+                GROUP BY cliente
+            """)
+            
+            clientes_migrados = cursor.rowcount
+            
+            # Migrar contactos
+            cursor.execute("""
+                INSERT OR IGNORE INTO contactos_cliente (cliente_id, nombre, email, telefono, es_principal)
+                SELECT DISTINCT
+                    c.cliente_id,
+                    COALESCE(rm.nombre_contacto, rm.cliente) as nombre,
+                    rm.email_contacto,
+                    rm.telefono_contacto,
+                    1 as es_principal
+                FROM clientes c
+                JOIN rma_maestro rm ON c.nombre = rm.cliente
+                WHERE rm.nombre_contacto IS NOT NULL AND rm.nombre_contacto != ''
+                GROUP BY c.cliente_id, rm.nombre_contacto
+            """)
+            
+            contactos_migrados = cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            
+            mensaje = f"Migración completada:\n• {clientes_migrados} clientes migrados\n• {contactos_migrados} contactos migrados"
+            messagebox.showinfo("Migración Completada", mensaje)
+            
+            self.cargar_lista_clientes()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error en la migración: {str(e)}")
+    
+    def abrir_ficha_cliente(self, cliente_id):
+        """Abre la ficha completa del cliente con todas sus pestañas."""
+        # Obtener información del cliente
+        cliente = self.obtener_cliente(cliente_id)
+        if not cliente:
+            messagebox.showerror("Error", "No se pudo cargar la información del cliente")
+            return
+        
+        # Crear ventana principal
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Ficha Cliente: {cliente[1]}")  # cliente[1] es el nombre
+        ventana.geometry("900x700")
+        ventana.resizable(True, True)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Header con información básica
+        header_frame = ctk.CTkFrame(ventana)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        info_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        info_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Nombre y tipo
+        nombre_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        nombre_frame.pack(fill="x")
+        
+        ctk.CTkLabel(nombre_frame, text=f"🧑‍💼 {cliente[1]}", 
+                    font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
+        
+        tipo_color = {"Regular": "blue", "Premium": "orange", "VIP": "purple"}.get(cliente[2], "gray")
+        ctk.CTkLabel(nombre_frame, text=f"🏷️ {cliente[2]}", 
+                    font=ctk.CTkFont(size=12, weight="bold"), 
+                    text_color=tipo_color).pack(side="right")
+        
+        estado_color = "green" if cliente[7] else "red"  # cliente[7] es activo
+        estado_texto = "🟢 Activo" if cliente[7] else "🔴 Inactivo"
+        ctk.CTkLabel(nombre_frame, text=estado_texto, 
+                    font=ctk.CTkFont(size=12), 
+                    text_color=estado_color).pack(side="right", padx=(0,10))
+        
+        # Crear pestañas
+        tabview = ctk.CTkTabview(ventana, width=880, height=600)
+        tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Pestaña 1: Información General
+        tab_info = tabview.add("📋 Información")
+        self.crear_tab_informacion_cliente(tab_info, cliente)
+        
+        # Pestaña 2: Contactos
+        tab_contactos = tabview.add("👥 Contactos")
+        self.crear_tab_contactos_cliente(tab_contactos, cliente_id)
+        
+        # Pestaña 3: Historial RMAs
+        tab_rmas = tabview.add("📦 Historial RMAs")
+        self.crear_tab_historial_rmas(tab_rmas, cliente_id)
+        
+        # Pestaña 4: Notas
+        tab_notas = tabview.add("📝 Notas")
+        self.crear_tab_notas_cliente(tab_notas, cliente_id)
+        
+        # Pestaña 5: Estadísticas
+        tab_stats = tabview.add("📊 Estadísticas")
+        self.crear_tab_estadisticas_cliente(tab_stats, cliente_id)
+        
+        # Botones de acción en la ventana principal
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=10, pady=10)
+        
+        btn_editar = ctk.CTkButton(botones_frame, text="✏️ Editar Cliente", 
+                                 command=lambda: self.editar_cliente_directo(cliente_id, ventana),
+                                 width=120)
+        btn_editar.pack(side="left", padx=(0,10))
+        
+        btn_cerrar = ctk.CTkButton(botones_frame, text="❌ Cerrar", 
+                                 command=ventana.destroy,
+                                 width=100)
+        btn_cerrar.pack(side="right")
+    
+    def crear_tab_informacion_cliente(self, tab_frame, cliente):
+        """Crea la pestaña de información general del cliente."""
+        # Frame scrollable para el formulario
+        scroll_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Información básica
+        ctk.CTkLabel(scroll_frame, text="📋 Información Básica", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0,10))
+        
+        info_frame = ctk.CTkFrame(scroll_frame)
+        info_frame.pack(fill="x", pady=(0,20))
+        info_frame.grid_columnconfigure(1, weight=1)
+        
+        # Datos del cliente
+        datos = [
+            ("ID Cliente:", str(cliente[0])),
+            ("Nombre:", cliente[1]),
+            ("Tipo:", cliente[2]),
+            ("Dirección:", cliente[3] or "No especificada"),
+            ("Teléfono Principal:", cliente[4] or "No especificado"),
+            ("Email Principal:", cliente[5] or "No especificado"),
+            ("Fecha Registro:", cliente[8].split()[0] if cliente[8] else "No disponible"),
+            ("Última Actualización:", cliente[9].split()[0] if cliente[9] else "No disponible")
+        ]
+        
+        for i, (etiqueta, valor) in enumerate(datos):
+            ctk.CTkLabel(info_frame, text=etiqueta, 
+                        font=ctk.CTkFont(size=12, weight="bold")).grid(
+                        row=i, column=0, sticky="w", padx=10, pady=5)
+            ctk.CTkLabel(info_frame, text=valor, 
+                        font=ctk.CTkFont(size=12)).grid(
+                        row=i, column=1, sticky="w", padx=10, pady=5)
+        
+        # Notas generales
+        if cliente[6]:  # cliente[6] son las notas generales
+            ctk.CTkLabel(scroll_frame, text="📝 Notas Generales", 
+                        font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(20,10))
+            
+            notas_frame = ctk.CTkFrame(scroll_frame)
+            notas_frame.pack(fill="x", pady=(0,10))
+            
+            text_notas = ctk.CTkTextbox(notas_frame, height=100)
+            text_notas.pack(fill="x", padx=10, pady=10)
+            text_notas.insert("1.0", cliente[6])
+            text_notas.configure(state="disabled")
+    
+    def crear_tab_contactos_cliente(self, tab_frame, cliente_id):
+        """Crea la pestaña de contactos del cliente."""
+        # Header con botón para agregar
+        header_frame = ctk.CTkFrame(tab_frame)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(header_frame, text="👥 Contactos del Cliente", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+        
+        btn_nuevo_contacto = ctk.CTkButton(header_frame, text="➕ Nuevo Contacto", 
+                                         command=lambda: self.nuevo_contacto_cliente(cliente_id),
+                                         width=120)
+        btn_nuevo_contacto.pack(side="right", padx=10, pady=10)
+        
+        # Lista de contactos
+        contactos_frame = ctk.CTkScrollableFrame(tab_frame, height=450)
+        contactos_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Cargar y mostrar contactos
+        contactos = self.obtener_contactos_cliente(cliente_id)
+        
+        if not contactos:
+            ctk.CTkLabel(contactos_frame, 
+                       text="📭 No hay contactos registrados para este cliente.\nHaz clic en 'Nuevo Contacto' para agregar uno.",
+                       font=ctk.CTkFont(size=13)).pack(pady=50)
+        else:
+            for contacto in contactos:
+                self.crear_item_contacto(contactos_frame, contacto, cliente_id)
+    
+    def crear_tab_historial_rmas(self, tab_frame, cliente_id):
+        """Crea la pestaña de historial de RMAs."""
+        # Header
+        header_frame = ctk.CTkFrame(tab_frame)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(header_frame, text="📦 Historial de RMAs", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+        
+        # Lista de RMAs
+        rmas_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
+        rmas_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Cargar historial
+        rmas = self.obtener_historial_rmas_cliente(cliente_id)
+        
+        if not rmas:
+            ctk.CTkLabel(rmas_frame, 
+                       text="📭 No hay RMAs registradas para este cliente.",
+                       font=ctk.CTkFont(size=13)).pack(pady=50)
+        else:
+            # Agrupar por RMA
+            rmas_agrupadas = {}
+            for rma in rmas:
+                numero_rma = rma[0]
+                if numero_rma not in rmas_agrupadas:
+                    rmas_agrupadas[numero_rma] = {
+                        'info': rma[:4],  # número, fecha, estado, motivo
+                        'productos': []
+                    }
+                if rma[4]:  # Si hay información de producto
+                    rmas_agrupadas[numero_rma]['productos'].append(rma[4:])
+            
+            for numero_rma, datos in rmas_agrupadas.items():
+                self.crear_item_rma_historial(rmas_frame, numero_rma, datos)
+    
+    def crear_tab_notas_cliente(self, tab_frame, cliente_id):
+        """Crea la pestaña de notas del cliente."""
+        # Header con botón para agregar
+        header_frame = ctk.CTkFrame(tab_frame)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(header_frame, text="📝 Notas del Cliente", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+        
+        btn_nueva_nota = ctk.CTkButton(header_frame, text="➕ Nueva Nota", 
+                                     command=lambda: self.nueva_nota_cliente(cliente_id),
+                                     width=120)
+        btn_nueva_nota.pack(side="right", padx=10, pady=10)
+        
+        # Lista de notas
+        notas_frame = ctk.CTkScrollableFrame(tab_frame, height=450)
+        notas_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Cargar y mostrar notas
+        notas = self.obtener_notas_cliente(cliente_id)
+        
+        if not notas:
+            ctk.CTkLabel(notas_frame, 
+                       text="📭 No hay notas registradas para este cliente.\nHaz clic en 'Nueva Nota' para agregar una.",
+                       font=ctk.CTkFont(size=13)).pack(pady=50)
+        else:
+            for nota in notas:
+                self.crear_item_nota(notas_frame, nota)
+    
+    def crear_tab_estadisticas_cliente(self, tab_frame, cliente_id):
+        """Crea la pestaña de estadísticas del cliente."""
+        # Header
+        header_frame = ctk.CTkFrame(tab_frame)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(header_frame, text="📊 Estadísticas del Cliente", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+        
+        # Contenido scrollable
+        stats_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
+        stats_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Cargar estadísticas
+        stats_data = self.obtener_estadisticas_cliente(cliente_id)
+        
+        if not stats_data or not stats_data['estadisticas']:
+            ctk.CTkLabel(stats_frame, 
+                       text="📊 No hay suficientes datos para mostrar estadísticas.\nLas estadísticas se generan automáticamente cuando el cliente tiene RMAs registradas.",
+                       font=ctk.CTkFont(size=13)).pack(pady=50)
+        else:
+            stats = stats_data['estadisticas']
+            productos_prob = stats_data['productos_problematicos']
+            
+            # Mostrar estadísticas principales
+            self.mostrar_estadisticas_principales(stats_frame, stats)
+            
+            # Mostrar productos problemáticos
+            if productos_prob:
+                self.mostrar_productos_problematicos(stats_frame, productos_prob)
+    
+    def crear_item_contacto(self, parent_frame, contacto, cliente_id):
+        """Crea un elemento visual para un contacto."""
+        contacto_id, nombre, cargo, email, telefono, es_principal, activo, fecha_creacion, fecha_actualizacion = contacto
+        
+        contacto_frame = ctk.CTkFrame(parent_frame)
+        contacto_frame.pack(fill="x", padx=5, pady=5)
+        
+        info_frame = ctk.CTkFrame(contacto_frame, fg_color="transparent")
+        info_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Nombre y cargo
+        header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        header_frame.pack(fill="x")
+        
+        nombre_text = f"👤 {nombre}"
+        if es_principal:
+            nombre_text += " ⭐ (Principal)"
+        
+        ctk.CTkLabel(header_frame, text=nombre_text, 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        if cargo:
+            ctk.CTkLabel(header_frame, text=f"💼 {cargo}", 
+                        font=ctk.CTkFont(size=11), text_color="blue").pack(side="left", padx=(10,0))
+        
+        # Información de contacto
+        if email or telefono:
+            contact_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+            contact_frame.pack(fill="x", pady=(5,0))
+            
+            if email:
+                ctk.CTkLabel(contact_frame, text=f"📧 {email}", 
+                            font=ctk.CTkFont(size=11)).pack(side="left")
+            
+            if telefono:
+                ctk.CTkLabel(contact_frame, text=f"📞 {telefono}", 
+                            font=ctk.CTkFont(size=11)).pack(side="left", padx=(20,0))
+        
+        # Botones de acción
+        btn_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(5,0))
+        
+        btn_editar = ctk.CTkButton(btn_frame, text="✏️ Editar", 
+                                 command=lambda: self.editar_contacto_cliente(contacto_id, cliente_id),
+                                 width=80, height=25)
+        btn_editar.pack(side="left", padx=(0,5))
+        
+        if not es_principal:
+            btn_principal = ctk.CTkButton(btn_frame, text="⭐ Hacer Principal", 
+                                        command=lambda: self.hacer_contacto_principal(contacto_id, cliente_id),
+                                        width=120, height=25)
+            btn_principal.pack(side="left", padx=(0,5))
+    
+    def crear_item_rma_historial(self, parent_frame, numero_rma, datos):
+        """Crea un elemento visual para un RMA en el historial."""
+        info = datos['info']  # número, fecha, estado, motivo
+        productos = datos['productos']
+        
+        rma_frame = ctk.CTkFrame(parent_frame)
+        rma_frame.pack(fill="x", padx=5, pady=5)
+        
+        header_frame = ctk.CTkFrame(rma_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Información principal del RMA
+        info_principal = ctk.CTkFrame(header_frame, fg_color="transparent")
+        info_principal.pack(fill="x")
+        
+        ctk.CTkLabel(info_principal, text=f"📦 RMA #{numero_rma}", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        # Estado del RMA
+        estado_color = {"Abierto": "orange", "En Proceso": "blue", "Cerrado": "green", "Cancelado": "red"}.get(info[2], "gray")
+        ctk.CTkLabel(info_principal, text=f"🏷️ {info[2]}", 
+                    font=ctk.CTkFont(size=11), text_color=estado_color).pack(side="right")
+        
+        ctk.CTkLabel(info_principal, text=f"📅 {info[1].split()[0]}", 
+                    font=ctk.CTkFont(size=11), text_color="gray").pack(side="right", padx=(0,10))
+        
+        # Motivo
+        if info[3]:
+            motivo_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+            motivo_frame.pack(fill="x", pady=(5,0))
+            ctk.CTkLabel(motivo_frame, text=f"📝 Motivo: {info[3]}", 
+                        font=ctk.CTkFont(size=11)).pack(side="left")
+        
+        # Productos (si los hay)
+        if productos:
+            productos_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+            productos_frame.pack(fill="x", pady=(5,0))
+            
+            ctk.CTkLabel(productos_frame, text=f"📦 Productos ({len(productos)}):", 
+                        font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w")
+            
+            for producto, cantidad, precio, estado in productos[:3]:  # Mostrar máximo 3
+                prod_text = f"  • {producto} (Cant: {cantidad}"
+                if precio:
+                    prod_text += f", €{precio}"
+                if estado:
+                    prod_text += f", Estado: {estado}"
+                prod_text += ")"
+                
+                ctk.CTkLabel(productos_frame, text=prod_text, 
+                            font=ctk.CTkFont(size=10)).pack(anchor="w")
+            
+            if len(productos) > 3:
+                ctk.CTkLabel(productos_frame, text=f"  ... y {len(productos)-3} más", 
+                            font=ctk.CTkFont(size=10), text_color="gray").pack(anchor="w")
+    
+    def crear_item_nota(self, parent_frame, nota, parent_window=None):
+        """Crea un elemento visual para una nota."""
+        # Estructura correcta: nota_id, titulo, contenido, tipo, fecha, usuario, privada
+        nota_id, titulo, contenido, tipo, fecha, usuario, privada = nota
+        
+        nota_frame = ctk.CTkFrame(parent_frame)
+        nota_frame.pack(fill="x", padx=5, pady=5)
+        
+        header_frame = ctk.CTkFrame(nota_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Título y tipo
+        titulo_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        titulo_frame.pack(fill="x")
+        
+        titulo_icon = "🔒" if privada else "📝"
+        ctk.CTkLabel(titulo_frame, text=f"{titulo_icon} {titulo}", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        tipo_color = {
+            "General": "blue", 
+            "Incidencia": "red", 
+            "Comercial": "green", 
+            "Técnica": "orange"
+        }.get(tipo, "gray")
+        ctk.CTkLabel(titulo_frame, text=f"🏷️ {tipo}", 
+                    font=ctk.CTkFont(size=11), text_color=tipo_color).pack(side="right")
+        
+        # Fecha y usuario
+        info_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        info_frame.pack(fill="x", pady=(5,0))
+        
+        fecha_formateada = fecha.split(' ')[0] if fecha else "Sin fecha"
+        ctk.CTkLabel(info_frame, text=f"📅 {fecha_formateada} | 👤 {usuario}", 
+                    font=ctk.CTkFont(size=10), text_color="gray").pack(side="left")
+        
+        # Botones de acción
+        botones_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        botones_frame.pack(side="right")
+        
+        btn_ver = ctk.CTkButton(botones_frame, text="👁️", width=30, height=25,
+                               command=lambda: self.ver_nota_completa(nota))
+        btn_ver.pack(side="right", padx=2)
+        
+        btn_editar = ctk.CTkButton(botones_frame, text="✏️", width=30, height=25,
+                                  command=lambda: self.editar_nota(nota_id, parent_window))
+        btn_editar.pack(side="right", padx=2)
+        
+        # Contenido (limitado)
+        if contenido:
+            contenido_preview = contenido[:200] + "..." if len(contenido) > 200 else contenido
+            contenido_frame = ctk.CTkFrame(nota_frame)
+            contenido_frame.pack(fill="x", padx=10, pady=(0,10))
+            
+            ctk.CTkLabel(contenido_frame, text=contenido_preview, 
+                        font=ctk.CTkFont(size=11), 
+                        wraplength=700, justify="left").pack(anchor="w", padx=10, pady=5)
+    
+    def mostrar_estadisticas_principales(self, parent_frame, stats):
+        """Muestra las estadísticas principales del cliente."""
+        # Nueva estructura de stats desde estadisticas_cliente:
+        # [0]: cliente_id, [1]: nombre, [2]: tipo_cliente, [3]: activo,
+        # [4]: total_rmas, [5]: rmas_completados, [6]: rmas_abiertos,
+        # [7]: rmas_pendientes, [8]: rmas_pendientes_autorizar, [9]: rmas_recibidos,
+        # [10]: rmas_en_tramite, [11]: tasa_exito, [12]: primer_rma, [13]: ultimo_rma,
+        # [14]: productos_diferentes, [15]: rmas_ultimo_mes
+        
+        ctk.CTkLabel(parent_frame, text="📊 Estadísticas Generales", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0,10))
+        
+        stats_frame = ctk.CTkFrame(parent_frame)
+        stats_frame.pack(fill="x", pady=(0,20))
+        stats_frame.grid_columnconfigure((0,1,2), weight=1)
+        
+        # Fila 1: RMAs totales, abiertas (NO completados), cerradas (completados)
+        ctk.CTkLabel(stats_frame, text=f"📦 Total RMAs\n{stats[4] or 0}", 
+                    font=ctk.CTkFont(size=14, weight="bold"), 
+                    text_color="blue").grid(row=0, column=0, padx=10, pady=10)
+        
+        ctk.CTkLabel(stats_frame, text=f"🟡 RMAs Abiertos\n{stats[6] or 0}", 
+                    font=ctk.CTkFont(size=14, weight="bold"), 
+                    text_color="orange").grid(row=0, column=1, padx=10, pady=10)
+        
+        ctk.CTkLabel(stats_frame, text=f"🟢 RMAs Cerrados\n{stats[5] or 0}", 
+                    font=ctk.CTkFont(size=14, weight="bold"), 
+                    text_color="green").grid(row=0, column=2, padx=10, pady=10)
+        
+        # Fila 2: Tasa de éxito y otros datos
+        tasa_exito = stats[11] or 0  # Actualizado al índice correcto
+        # Convertir a número si viene como string
+        try:
+            tasa_exito = float(tasa_exito)
+        except (ValueError, TypeError):
+            tasa_exito = 0.0
+        
+        color_tasa = "green" if tasa_exito >= 80 else "orange" if tasa_exito >= 60 else "red"
+        
+        ctk.CTkLabel(stats_frame, text=f"✅ Tasa de Éxito\n{tasa_exito:.1f}%", 
+                    font=ctk.CTkFont(size=14, weight="bold"), 
+                    text_color=color_tasa).grid(row=1, column=0, padx=10, pady=10)
+        
+        if len(stats) > 14 and stats[14]:  # productos_diferentes (índice corregido)
+            ctk.CTkLabel(stats_frame, text=f"📦 Total Productos\n{stats[14]}", 
+                        font=ctk.CTkFont(size=14, weight="bold"), 
+                        text_color="blue").grid(row=1, column=1, padx=10, pady=10)
+        
+        if len(stats) > 13 and stats[13]:  # ultimo_rma (índice corregido)
+            ctk.CTkLabel(stats_frame, text=f"📅 Último RMA\n{stats[13]}", 
+                        font=ctk.CTkFont(size=11, weight="bold"), 
+                        text_color="gray").grid(row=1, column=2, padx=10, pady=10)
+    
+    def mostrar_productos_problematicos(self, parent_frame, productos):
+        """Muestra los productos más problemáticos del cliente."""
+        ctk.CTkLabel(parent_frame, text="⚠️ Productos Más Problemáticos", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(20,10))
+        
+        productos_frame = ctk.CTkFrame(parent_frame)
+        productos_frame.pack(fill="x", pady=(0,10))
+        
+        for i, producto in enumerate(productos[:5], 1):  # Top 5
+            # producto: cliente_id, producto, total_devoluciones, valor_total
+            prod_frame = ctk.CTkFrame(productos_frame, fg_color="transparent")
+            prod_frame.pack(fill="x", padx=10, pady=5)
+            
+            ctk.CTkLabel(prod_frame, text=f"{i}. {producto[1]}", 
+                        font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+            
+            ctk.CTkLabel(prod_frame, text=f"🔄 {producto[2]} devoluciones", 
+                        font=ctk.CTkFont(size=11), text_color="red").pack(side="right")
+            
+            if producto[3]:  # valor_total
+                ctk.CTkLabel(prod_frame, text=f"💰 €{producto[3]:.2f}", 
+                            font=ctk.CTkFont(size=11), text_color="gray").pack(side="right", padx=(0,10))
+    
+    # Funciones auxiliares para gestión de contactos y notas
+    def nuevo_contacto_cliente(self, cliente_id):
+        """Muestra el formulario para agregar un nuevo contacto."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Nuevo Contacto")
+        ventana.geometry("400x500")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="👤 Nuevo Contacto", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=300)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Nombre (obligatorio)
+        ctk.CTkLabel(form_frame, text="Nombre del Contacto *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_nombre = ctk.CTkEntry(form_frame, placeholder_text="Nombre completo del contacto")
+        entry_nombre.pack(fill="x", pady=(0,10))
+        
+        # Cargo
+        ctk.CTkLabel(form_frame, text="Cargo", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_cargo = ctk.CTkEntry(form_frame, placeholder_text="Cargo o posición en la empresa")
+        entry_cargo.pack(fill="x", pady=(0,10))
+        
+        # Email
+        ctk.CTkLabel(form_frame, text="Email", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_email = ctk.CTkEntry(form_frame, placeholder_text="email@ejemplo.com")
+        entry_email.pack(fill="x", pady=(0,10))
+        
+        # Teléfono
+        ctk.CTkLabel(form_frame, text="Teléfono", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_telefono = ctk.CTkEntry(form_frame, placeholder_text="Número de teléfono")
+        entry_telefono.pack(fill="x", pady=(0,10))
+        
+        # Contacto principal
+        check_principal = ctk.CTkCheckBox(form_frame, text="🌟 Marcar como contacto principal")
+        check_principal.pack(anchor="w", pady=10)
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        def guardar_contacto():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "El nombre del contacto es obligatorio")
+                return
+            
+            datos = {
+                'nombre': nombre,
+                'cargo': entry_cargo.get().strip(),
+                'email': entry_email.get().strip(),
+                'telefono': entry_telefono.get().strip(),
+                'es_principal': check_principal.get()
+            }
+            
+            if self.crear_contacto_cliente(cliente_id, datos):
+                messagebox.showinfo("Éxito", f"Contacto '{nombre}' creado correctamente")
+                ventana.destroy()
+                # Recargar la pestaña de contactos si está abierta
+            else:
+                messagebox.showerror("Error", "Error al crear el contacto")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Guardar Contacto", 
+                                  command=guardar_contacto,
+                                  width=120)
+        btn_guardar.pack(side="right")
+    
+    def editar_contacto_cliente(self, contacto_id, cliente_id):
+        """Permite editar un contacto existente."""
+        # Obtener datos del contacto
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return
+            
+            cursor.execute("""
+                SELECT nombre, cargo, email, telefono, es_principal
+                FROM contactos_cliente 
+                WHERE contacto_id = ?
+            """, (contacto_id,))
+            
+            contacto = cursor.fetchone()
+            conn.close()
+            
+            if not contacto:
+                messagebox.showerror("Error", "No se pudo cargar el contacto")
+                return
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error cargando contacto: {e}")
+            return
+        
+        # Crear ventana de edición
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Editar Contacto")
+        ventana.geometry("400x500")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="✏️ Editar Contacto", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=300)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Nombre (obligatorio)
+        ctk.CTkLabel(form_frame, text="Nombre del Contacto *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_nombre = ctk.CTkEntry(form_frame, placeholder_text="Nombre completo del contacto")
+        entry_nombre.pack(fill="x", pady=(0,10))
+        entry_nombre.insert(0, contacto[0])
+        
+        # Cargo
+        ctk.CTkLabel(form_frame, text="Cargo", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_cargo = ctk.CTkEntry(form_frame, placeholder_text="Cargo o posición en la empresa")
+        entry_cargo.pack(fill="x", pady=(0,10))
+        entry_cargo.insert(0, contacto[1] or "")
+        
+        # Email
+        ctk.CTkLabel(form_frame, text="Email", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_email = ctk.CTkEntry(form_frame, placeholder_text="email@ejemplo.com")
+        entry_email.pack(fill="x", pady=(0,10))
+        entry_email.insert(0, contacto[2] or "")
+        
+        # Teléfono
+        ctk.CTkLabel(form_frame, text="Teléfono", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_telefono = ctk.CTkEntry(form_frame, placeholder_text="Número de teléfono")
+        entry_telefono.pack(fill="x", pady=(0,10))
+        entry_telefono.insert(0, contacto[3] or "")
+        
+        # Contacto principal
+        check_principal = ctk.CTkCheckBox(form_frame, text="🌟 Marcar como contacto principal")
+        check_principal.pack(anchor="w", pady=10)
+        if contacto[4]:
+            check_principal.select()
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        btn_eliminar = ctk.CTkButton(botones_frame, text="🗑️ Eliminar", 
+                                   command=lambda: self.eliminar_contacto_cliente(contacto_id, ventana),
+                                   width=100, fg_color="red")
+        btn_eliminar.pack(side="left")
+        
+        def actualizar_contacto():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "El nombre del contacto es obligatorio")
+                return
+            
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn: 
+                    return
+                
+                # Si es contacto principal, desmarcar otros
+                if check_principal.get():
+                    cursor.execute("""
+                        UPDATE contactos_cliente 
+                        SET es_principal = 0 
+                        WHERE cliente_id = ? AND contacto_id != ?
+                    """, (cliente_id, contacto_id))
+                
+                cursor.execute("""
+                    UPDATE contactos_cliente 
+                    SET nombre = ?, cargo = ?, email = ?, telefono = ?, es_principal = ?,
+                        fecha_actualizacion = CURRENT_TIMESTAMP
+                    WHERE contacto_id = ?
+                """, (nombre, entry_cargo.get().strip(), entry_email.get().strip(),
+                      entry_telefono.get().strip(), check_principal.get(), contacto_id))
+                
+                conn.commit()
+                conn.close()
+                
+                messagebox.showinfo("Éxito", f"Contacto '{nombre}' actualizado correctamente")
+                ventana.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al actualizar contacto: {e}")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Actualizar", 
+                                  command=actualizar_contacto,
+                                  width=120)
+        btn_guardar.pack(side="right", padx=(10,0))
+    
+    def hacer_contacto_principal(self, contacto_id, cliente_id):
+        """Marca un contacto como principal."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return
+            
+            # Desmarcar todos los contactos del cliente
+            cursor.execute("""
+                UPDATE contactos_cliente 
+                SET es_principal = 0 
+                WHERE cliente_id = ?
+            """, (cliente_id,))
+            
+            # Marcar el contacto seleccionado como principal
+            cursor.execute("""
+                UPDATE contactos_cliente 
+                SET es_principal = 1, fecha_actualizacion = CURRENT_TIMESTAMP
+                WHERE contacto_id = ?
+            """, (contacto_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            messagebox.showinfo("Éxito", "Contacto marcado como principal correctamente")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al marcar contacto como principal: {e}")
+    
+    def eliminar_contacto_cliente(self, contacto_id, ventana_padre):
+        """Elimina un contacto del cliente (eliminación suave)."""
+        if messagebox.askyesno("Confirmar Eliminación", 
+                              "¿Estás seguro de que deseas eliminar este contacto?\n\nEsta acción no se puede deshacer."):
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn: 
+                    return
+                
+                cursor.execute("""
+                    UPDATE contactos_cliente 
+                    SET activo = 0, fecha_actualizacion = CURRENT_TIMESTAMP
+                    WHERE contacto_id = ?
+                """, (contacto_id,))
+                
+                conn.commit()
+                conn.close()
+                
+                messagebox.showinfo("Éxito", "Contacto eliminado correctamente")
+                ventana_padre.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al eliminar contacto: {e}")
+    
+    def nueva_nota_cliente(self, cliente_id, parent_window=None):
+        """Muestra el formulario para agregar una nueva nota."""
+        ventana = ctk.CTkToplevel(parent_window or self)
+        ventana.title("Nueva Nota")
+        ventana.geometry("500x600")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(parent_window or self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="📝 Nueva Nota", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=400)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Título de la nota (obligatorio)
+        ctk.CTkLabel(form_frame, text="Título de la Nota *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_titulo = ctk.CTkEntry(form_frame, placeholder_text="Título descriptivo de la nota")
+        entry_titulo.pack(fill="x", pady=(0,10))
+        
+        # Tipo (usar nombres de la base de datos)
+        ctk.CTkLabel(form_frame, text="Tipo", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        option_tipo = ctk.CTkOptionMenu(form_frame, values=["General", "Incidencia", "Comercial", "Técnica"])
+        option_tipo.set("General")
+        option_tipo.pack(fill="x", pady=(0,10))
+        
+        # Contenido
+        ctk.CTkLabel(form_frame, text="Contenido de la Nota *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        text_contenido = ctk.CTkTextbox(form_frame, height=200)
+        text_contenido.pack(fill="x", pady=(0,10))
+        
+        # Usuario (opcional, se puede pre-rellenar)
+        ctk.CTkLabel(form_frame, text="Usuario", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_usuario = ctk.CTkEntry(form_frame, placeholder_text="Nombre del usuario que crea la nota")
+        entry_usuario.pack(fill="x", pady=(0,10))
+        entry_usuario.insert(0, "Usuario")  # Valor por defecto
+        
+        # Checkbox para nota privada
+        check_privada = ctk.CTkCheckBox(form_frame, text="Nota privada (solo visible para administradores)")
+        check_privada.pack(anchor="w", pady=10)
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        def guardar_nota():
+            titulo = entry_titulo.get().strip()
+            contenido = text_contenido.get("1.0", "end-1c").strip()
+            
+            if not titulo:
+                messagebox.showerror("Error", "El título de la nota es obligatorio")
+                return
+            
+            if not contenido:
+                messagebox.showerror("Error", "El contenido de la nota es obligatorio")
+                return
+            
+            datos = {
+                'titulo': titulo,
+                'contenido': contenido,
+                'tipo': option_tipo.get(),
+                'usuario': entry_usuario.get().strip() or "Usuario",
+                'privada': check_privada.get()
+            }
+            
+            if self.crear_nota_cliente(cliente_id, datos):
+                messagebox.showinfo("Éxito", f"Nota '{titulo}' creada correctamente")
+                ventana.destroy()
+                # Si hay ventana padre, refrescar la lista
+                if hasattr(parent_window, 'title') and 'Gestión de Notas' in parent_window.title():
+                    # Buscar y refrescar la lista de notas en la ventana padre
+                    pass
+            else:
+                messagebox.showerror("Error", "Error al crear la nota")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Guardar Nota", 
+                                  command=guardar_nota,
+                                  width=150)
+        btn_guardar.pack(side="right")
+    
+    def editar_cliente_directo(self, cliente_id, ventana_padre):
+        """Permite editar la información del cliente desde la ficha."""
+        # Obtener datos del cliente
+        cliente = self.obtener_cliente(cliente_id)
+        if not cliente:
+            messagebox.showerror("Error", "No se pudo cargar la información del cliente")
+            return
+        
+        # Crear ventana de edición
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Editar Cliente: {cliente[1]}")
+        ventana.geometry("500x600")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="✏️ Editar Cliente", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=400)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Llenar formulario con datos actuales
+        ctk.CTkLabel(form_frame, text="Nombre del Cliente *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_nombre = ctk.CTkEntry(form_frame, placeholder_text="Nombre completo del cliente")
+        entry_nombre.pack(fill="x", pady=(0,10))
+        entry_nombre.insert(0, cliente[1])
+        
+        ctk.CTkLabel(form_frame, text="Tipo de Cliente", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        option_tipo = ctk.CTkOptionMenu(form_frame, values=["Regular", "Premium", "VIP"])
+        option_tipo.set(cliente[2])
+        option_tipo.pack(fill="x", pady=(0,10))
+        
+        ctk.CTkLabel(form_frame, text="Dirección", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_direccion = ctk.CTkEntry(form_frame, placeholder_text="Dirección completa")
+        entry_direccion.pack(fill="x", pady=(0,10))
+        entry_direccion.insert(0, cliente[3] or "")
+        
+        ctk.CTkLabel(form_frame, text="Teléfono Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_telefono = ctk.CTkEntry(form_frame, placeholder_text="Teléfono de contacto principal")
+        entry_telefono.pack(fill="x", pady=(0,10))
+        entry_telefono.insert(0, cliente[4] or "")
+        
+        ctk.CTkLabel(form_frame, text="Email Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_email = ctk.CTkEntry(form_frame, placeholder_text="Email de contacto principal")
+        entry_email.pack(fill="x", pady=(0,10))
+        entry_email.insert(0, cliente[5] or "")
+        
+        ctk.CTkLabel(form_frame, text="Notas Generales", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        text_notas = ctk.CTkTextbox(form_frame, height=80)
+        text_notas.pack(fill="x", pady=(0,10))
+        text_notas.insert("1.0", cliente[6] or "")
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        def actualizar_cliente():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "El nombre del cliente es obligatorio")
+                return
+            
+            datos = {
+                'nombre': nombre,
+                'tipo_cliente': option_tipo.get(),
+                'direccion': entry_direccion.get().strip(),
+                'telefono_principal': entry_telefono.get().strip(),
+                'email_principal': entry_email.get().strip(),
+                'notas_generales': text_notas.get("1.0", "end-1c").strip()
+            }
+            
+            if self.actualizar_cliente(cliente_id, datos):
+                messagebox.showinfo("Éxito", f"Cliente '{nombre}' actualizado correctamente")
+                ventana.destroy()
+                # Cerrar la ventana padre para que se recargue
+                ventana_padre.destroy()
+                # Reabrir la ficha con datos actualizados
+                self.abrir_ficha_cliente(cliente_id)
+            else:
+                messagebox.showerror("Error", "Error al actualizar el cliente")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Actualizar Cliente", 
+                                  command=actualizar_cliente,
+                                  width=140)
+        btn_guardar.pack(side="right")
+    
+    def editar_cliente(self, cliente_id):
+        """Permite editar la información básica del cliente."""
+        # Obtener datos del cliente
+        cliente = self.obtener_cliente(cliente_id)
+        if not cliente:
+            messagebox.showerror("Error", "No se pudo cargar la información del cliente")
+            return
+        
+        # Crear ventana de edición
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Editar Cliente: {cliente[1]}")
+        ventana.geometry("500x600")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        titulo_frame = ctk.CTkFrame(ventana)
+        titulo_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(titulo_frame, text="✏️ Editar Cliente", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+        
+        # Formulario
+        form_frame = ctk.CTkScrollableFrame(ventana, height=400)
+        form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Llenar formulario con datos actuales
+        ctk.CTkLabel(form_frame, text="Nombre del Cliente *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_nombre = ctk.CTkEntry(form_frame, placeholder_text="Nombre completo del cliente")
+        entry_nombre.pack(fill="x", pady=(0,10))
+        entry_nombre.insert(0, cliente[1])
+        
+        ctk.CTkLabel(form_frame, text="Tipo de Cliente", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        option_tipo = ctk.CTkOptionMenu(form_frame, values=["Regular", "Premium", "VIP"])
+        option_tipo.set(cliente[2])
+        option_tipo.pack(fill="x", pady=(0,10))
+        
+        ctk.CTkLabel(form_frame, text="Dirección", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_direccion = ctk.CTkEntry(form_frame, placeholder_text="Dirección completa")
+        entry_direccion.pack(fill="x", pady=(0,10))
+        entry_direccion.insert(0, cliente[3] or "")
+        
+        ctk.CTkLabel(form_frame, text="Teléfono Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_telefono = ctk.CTkEntry(form_frame, placeholder_text="Teléfono de contacto principal")
+        entry_telefono.pack(fill="x", pady=(0,10))
+        entry_telefono.insert(0, cliente[4] or "")
+        
+        ctk.CTkLabel(form_frame, text="Email Principal", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        entry_email = ctk.CTkEntry(form_frame, placeholder_text="Email de contacto principal")
+        entry_email.pack(fill="x", pady=(0,10))
+        entry_email.insert(0, cliente[5] or "")
+        
+        ctk.CTkLabel(form_frame, text="Notas Generales", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+        text_notas = ctk.CTkTextbox(form_frame, height=80)
+        text_notas.pack(fill="x", pady=(0,10))
+        text_notas.insert("1.0", cliente[6] or "")
+        
+        # Estado del cliente
+        check_activo = ctk.CTkCheckBox(form_frame, text="Cliente activo")
+        check_activo.pack(anchor="w", pady=10)
+        if cliente[7]:  # cliente[7] es activo
+            check_activo.select()
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(ventana)
+        botones_frame.pack(fill="x", padx=20, pady=20)
+        
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                   command=ventana.destroy,
+                                   width=100)
+        btn_cancelar.pack(side="right", padx=(10,0))
+        
+        if cliente[7]:  # Solo mostrar eliminar si está activo
+            btn_eliminar = ctk.CTkButton(botones_frame, text="🗑️ Desactivar", 
+                                       command=lambda: self.confirmar_eliminar_cliente(cliente_id, ventana),
+                                       width=100, fg_color="red")
+            btn_eliminar.pack(side="left")
+        
+        def actualizar_cliente():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "El nombre del cliente es obligatorio")
+                return
+            
+            datos = {
+                'nombre': nombre,
+                'tipo_cliente': option_tipo.get(),
+                'direccion': entry_direccion.get().strip(),
+                'telefono_principal': entry_telefono.get().strip(),
+                'email_principal': entry_email.get().strip(),
+                'notas_generales': text_notas.get("1.0", "end-1c").strip()
+            }
+            
+            # Actualizar estado si cambió
+            if check_activo.get() != cliente[7]:
+                try:
+                    conn, cursor = self.master.conectar_db()
+                    if conn:
+                        cursor.execute("""
+                            UPDATE clientes 
+                            SET activo = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+                            WHERE cliente_id = ?
+                        """, (check_activo.get(), cliente_id))
+                        conn.commit()
+                        conn.close()
+                except Exception as e:
+                    print(f"Error actualizando estado: {e}")
+            
+            if self.actualizar_cliente(cliente_id, datos):
+                messagebox.showinfo("Éxito", f"Cliente '{nombre}' actualizado correctamente")
+                ventana.destroy()
+                self.cargar_lista_clientes()  # Recargar lista
+            else:
+                messagebox.showerror("Error", "Error al actualizar el cliente")
+        
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Actualizar Cliente", 
+                                  command=actualizar_cliente,
+                                  width=140)
+        btn_guardar.pack(side="right")
+    
+    def confirmar_eliminar_cliente(self, cliente_id, ventana_padre):
+        """Confirma y realiza la eliminación suave del cliente."""
+        if messagebox.askyesno("Confirmar Desactivación", 
+                              "¿Estás seguro de que deseas desactivar este cliente?\n\nEl cliente no se eliminará, solo se marcará como inactivo."):
+            if self.eliminar_cliente(cliente_id):
+                messagebox.showinfo("Éxito", "Cliente desactivado correctamente")
+                ventana_padre.destroy()
+                self.cargar_lista_clientes()  # Recargar lista
+            else:
+                messagebox.showerror("Error", "Error al desactivar el cliente")
+    
+    def gestionar_notas_cliente(self, cliente_id):
+        """Gestiona las notas del cliente - Abre ventana de gestión completa."""
+        try:
+            # Crear ventana de gestión de notas
+            ventana_notas = ctk.CTkToplevel(self)
+            ventana_notas.title("Gestión de Notas")
+            ventana_notas.geometry("800x600")
+            ventana_notas.transient(self)
+            
+            # Obtener información del cliente
+            cliente = self.obtener_cliente(cliente_id)
+            if not cliente:
+                messagebox.showerror("Error", "No se pudo obtener información del cliente")
+                ventana_notas.destroy()
+                return
+            
+            # Header
+            header_frame = ctk.CTkFrame(ventana_notas)
+            header_frame.pack(fill="x", padx=10, pady=10)
+            
+            ctk.CTkLabel(header_frame, text=f"📝 Notas de {cliente[1]}", 
+                        font=ctk.CTkFont(size=18, weight="bold")).pack(side="left", padx=10, pady=10)
+            
+            btn_nueva_nota = ctk.CTkButton(header_frame, text="➕ Nueva Nota", 
+                                         command=lambda: self.nueva_nota_cliente(cliente_id, ventana_notas),
+                                         width=120)
+            btn_nueva_nota.pack(side="right", padx=10, pady=10)
+            
+            # Frame para filtros
+            filtros_frame = ctk.CTkFrame(ventana_notas)
+            filtros_frame.pack(fill="x", padx=10, pady=(0,10))
+            
+            ctk.CTkLabel(filtros_frame, text="Filtrar por tipo:").pack(side="left", padx=10, pady=10)
+            
+            tipo_filter = ctk.CTkComboBox(filtros_frame, values=["Todos", "General", "Incidencia", "Comercial", "Técnica"])
+            tipo_filter.set("Todos")
+            tipo_filter.pack(side="left", padx=10, pady=10)
+            
+            # Lista de notas
+            notas_frame = ctk.CTkScrollableFrame(ventana_notas, height=400)
+            notas_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            def cargar_notas():
+                # Limpiar frame
+                for widget in notas_frame.winfo_children():
+                    widget.destroy()
+                
+                # Obtener notas
+                filtro_tipo = tipo_filter.get()
+                notas = self.obtener_notas_cliente(cliente_id, filtro_tipo if filtro_tipo != "Todos" else None)
+                
+                if not notas:
+                    ctk.CTkLabel(notas_frame, 
+                               text="📭 No hay notas que coincidan con el filtro.\nHaz clic en 'Nueva Nota' para agregar una.",
+                               font=ctk.CTkFont(size=13)).pack(pady=50)
+                else:
+                    for nota in notas:
+                        self.crear_item_nota(notas_frame, nota, ventana_notas)
+            
+            # Conectar filtro
+            tipo_filter.configure(command=lambda x: cargar_notas())
+            
+            # Cargar notas inicial
+            cargar_notas()
+            
+            # Botón cerrar
+            btn_cerrar = ctk.CTkButton(ventana_notas, text="Cerrar", 
+                                     command=ventana_notas.destroy,
+                                     width=100)
+            btn_cerrar.pack(pady=10)
+            
+        except Exception as e:
+            print(f"❌ Error gestionando notas: {e}")
+            messagebox.showerror("Error", f"Error al abrir gestión de notas: {e}")
+
+    # ===============================================
+    # FUNCIONES DE BASE DE DATOS PARA CLIENTES
+    # ===============================================
+    
+    def obtener_cliente(self, cliente_id):
+        """Obtiene la información completa de un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return None
+            
+            cursor.execute("""
+                SELECT cliente_id, nombre, tipo_cliente, direccion, telefono_principal,
+                       email_principal, notas_generales, activo, fecha_registro, fecha_actualizacion
+                FROM clientes 
+                WHERE cliente_id = ?
+            """, (cliente_id,))
+            
+            cliente = cursor.fetchone()
+            conn.close()
+            return cliente
+            
+        except Exception as e:
+            print(f"Error obteniendo cliente: {e}")
+            return None
+    
+    def actualizar_cliente(self, cliente_id, datos):
+        """Actualiza la información de un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return False
+            
+            cursor.execute("""
+                UPDATE clientes 
+                SET nombre = ?, tipo_cliente = ?, direccion = ?, telefono_principal = ?,
+                    email_principal = ?, notas_generales = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+                WHERE cliente_id = ?
+            """, (datos['nombre'], datos['tipo_cliente'], datos['direccion'], 
+                  datos['telefono_principal'], datos['email_principal'], 
+                  datos['notas_generales'], cliente_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"Error actualizando cliente: {e}")
+            return False
+    
+    def eliminar_cliente(self, cliente_id):
+        """Marca un cliente como inactivo (eliminación suave)."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return False
+            
+            cursor.execute("""
+                UPDATE clientes 
+                SET activo = 0, fecha_actualizacion = CURRENT_TIMESTAMP
+                WHERE cliente_id = ?
+            """, (cliente_id,))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"Error eliminando cliente: {e}")
+            return False
+    
+    def obtener_contactos_cliente(self, cliente_id):
+        """Obtiene todos los contactos de un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return []
+            
+            cursor.execute("""
+                SELECT contacto_id, nombre, cargo, email, telefono, es_principal, activo,
+                       fecha_creacion, fecha_actualizacion
+                FROM contactos_cliente 
+                WHERE cliente_id = ? AND activo = 1
+                ORDER BY es_principal DESC, nombre
+            """, (cliente_id,))
+            
+            contactos = cursor.fetchall()
+            conn.close()
+            return contactos
+            
+        except Exception as e:
+            print(f"Error obteniendo contactos: {e}")
+            return []
+    
+    def crear_contacto_cliente(self, cliente_id, datos):
+        """Crea un nuevo contacto para un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return False
+            
+            # Si es contacto principal, desmarcar otros
+            if datos.get('es_principal', False):
+                cursor.execute("""
+                    UPDATE contactos_cliente 
+                    SET es_principal = 0 
+                    WHERE cliente_id = ?
+                """, (cliente_id,))
+            
+            cursor.execute("""
+                INSERT INTO contactos_cliente (cliente_id, nombre, cargo, email, telefono, es_principal)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (cliente_id, datos['nombre'], datos.get('cargo', ''), 
+                  datos.get('email', ''), datos.get('telefono', ''), 
+                  datos.get('es_principal', False)))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"Error creando contacto: {e}")
+            return False
+    
+    def obtener_historial_rmas_cliente(self, cliente_id):
+        """Obtiene el historial de RMAs de un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return []
+            
+            # Primero obtener el nombre del cliente
+            cursor.execute("SELECT nombre FROM clientes WHERE cliente_id = ?", (cliente_id,))
+            cliente_info = cursor.fetchone()
+            if not cliente_info:
+                return []
+            
+            nombre_cliente = cliente_info[0]
+            
+            # Obtener RMAs del cliente
+            cursor.execute("""
+                SELECT rm.rma_numero, rm.fecha_creacion, rm.estado, rm.motivo_devolucion,
+                       rd.producto, rd.cantidad, rd.precio_unitario, rd.estado_producto
+                FROM rma_maestro rm
+                LEFT JOIN rma_detalles rd ON rm.rma_numero = rd.rma_numero
+                WHERE rm.cliente = ?
+                ORDER BY rm.fecha_creacion DESC
+            """, (nombre_cliente,))
+            
+            rmas = cursor.fetchall()
+            conn.close()
+            return rmas
+            
+        except Exception as e:
+            print(f"Error obteniendo historial RMAs: {e}")
+            return []
+    
+    def obtener_notas_cliente(self, cliente_id, tipo_filtro=None):
+        """Obtiene todas las notas de un cliente."""
+        try:
+            conn = connect_db()
+            cursor = conn.cursor()
+            
+            # Query base
+            query = """
+                SELECT nota_id, titulo, contenido, tipo, fecha, usuario, privada
+                FROM notas_cliente 
+                WHERE cliente_id = ?
+            """
+            params = [cliente_id]
+            
+            # Agregar filtro por tipo si se especifica
+            if tipo_filtro:
+                query += " AND tipo = ?"
+                params.append(tipo_filtro)
+            
+            query += " ORDER BY fecha DESC"
+            
+            cursor.execute(query, params)
+            notas = cursor.fetchall()
+            conn.close()
+            return notas
+            
+        except Exception as e:
+            print(f"❌ Error obteniendo notas: {e}")
+            return []
+    
+    def crear_nota_cliente(self, cliente_id, datos):
+        """Crea una nueva nota para un cliente."""
+        try:
+            conn = connect_db()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO notas_cliente (cliente_id, usuario, tipo, titulo, contenido, privada)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                cliente_id, 
+                datos.get('usuario', 'Usuario'),
+                datos.get('tipo', 'General'), 
+                datos['titulo'], 
+                datos['contenido'], 
+                datos.get('privada', False)
+            ))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error creando nota: {e}")
+            return False
+
+    def ver_nota_completa(self, nota):
+        """Muestra la nota completa en una ventana emergente."""
+        nota_id, titulo, contenido, tipo, fecha, usuario, privada = nota
+        
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Nota: {titulo}")
+        ventana.geometry("600x500")
+        ventana.transient(self)
+        
+        # Header
+        header_frame = ctk.CTkFrame(ventana)
+        header_frame.pack(fill="x", padx=10, pady=10)
+        
+        titulo_icon = "🔒" if privada else "📝"
+        ctk.CTkLabel(header_frame, text=f"{titulo_icon} {titulo}", 
+                    font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", padx=10, pady=10)
+        
+        # Info
+        info_frame = ctk.CTkFrame(ventana)
+        info_frame.pack(fill="x", padx=10, pady=(0,10))
+        
+        ctk.CTkLabel(info_frame, text=f"🏷️ Tipo: {tipo} | 📅 Fecha: {fecha} | 👤 Usuario: {usuario}", 
+                    font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10, pady=10)
+        
+        # Contenido
+        contenido_frame = ctk.CTkScrollableFrame(ventana, height=300)
+        contenido_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        ctk.CTkLabel(contenido_frame, text=contenido, 
+                    font=ctk.CTkFont(size=12), 
+                    wraplength=550, justify="left").pack(anchor="w", padx=10, pady=10)
+        
+        # Botón cerrar
+        ctk.CTkButton(ventana, text="Cerrar", command=ventana.destroy).pack(pady=10)
+
+    def editar_nota(self, nota_id, parent_window=None):
+        """Permite editar una nota existente."""
+        try:
+            # Obtener datos actuales de la nota
+            conn = connect_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM notas_cliente WHERE nota_id = ?", (nota_id,))
+            nota_actual = cursor.fetchone()
+            conn.close()
+            
+            if not nota_actual:
+                messagebox.showerror("Error", "No se pudo cargar la nota")
+                return
+            
+            # nota_actual: nota_id, cliente_id, usuario, fecha, tipo, titulo, contenido, privada
+            _, cliente_id, usuario_actual, _, tipo_actual, titulo_actual, contenido_actual, privada_actual = nota_actual
+            
+            ventana = ctk.CTkToplevel(parent_window or self)
+            ventana.title("Editar Nota")
+            ventana.geometry("500x600")
+            ventana.transient(parent_window or self)
+            ventana.grab_set()
+            
+            # Formulario similar al de nueva nota
+            titulo_frame = ctk.CTkFrame(ventana)
+            titulo_frame.pack(fill="x", padx=20, pady=20)
+            
+            ctk.CTkLabel(titulo_frame, text="📝 Editar Nota", 
+                        font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+            
+            form_frame = ctk.CTkScrollableFrame(ventana, height=400)
+            form_frame.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            # Título
+            ctk.CTkLabel(form_frame, text="Título de la Nota *", 
+                        font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+            entry_titulo = ctk.CTkEntry(form_frame)
+            entry_titulo.pack(fill="x", pady=(0,10))
+            entry_titulo.insert(0, titulo_actual)
+            
+            # Tipo
+            ctk.CTkLabel(form_frame, text="Tipo", 
+                        font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+            option_tipo = ctk.CTkOptionMenu(form_frame, values=["General", "Incidencia", "Comercial", "Técnica"])
+            option_tipo.set(tipo_actual)
+            option_tipo.pack(fill="x", pady=(0,10))
+            
+            # Contenido
+            ctk.CTkLabel(form_frame, text="Contenido de la Nota *", 
+                        font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+            text_contenido = ctk.CTkTextbox(form_frame, height=200)
+            text_contenido.pack(fill="x", pady=(0,10))
+            text_contenido.insert("1.0", contenido_actual)
+            
+            # Usuario
+            ctk.CTkLabel(form_frame, text="Usuario", 
+                        font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
+            entry_usuario = ctk.CTkEntry(form_frame)
+            entry_usuario.pack(fill="x", pady=(0,10))
+            entry_usuario.insert(0, usuario_actual)
+            
+            # Privada
+            check_privada = ctk.CTkCheckBox(form_frame, text="Nota privada")
+            check_privada.pack(anchor="w", pady=10)
+            if privada_actual:
+                check_privada.select()
+            
+            # Botones
+            botones_frame = ctk.CTkFrame(ventana)
+            botones_frame.pack(fill="x", padx=20, pady=20)
+            
+            btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                       command=ventana.destroy, width=100)
+            btn_cancelar.pack(side="right", padx=(10,0))
+            
+            def guardar_cambios():
+                titulo = entry_titulo.get().strip()
+                contenido = text_contenido.get("1.0", "end-1c").strip()
+                
+                if not titulo or not contenido:
+                    messagebox.showerror("Error", "Título y contenido son obligatorios")
+                    return
+                
+                try:
+                    conn = connect_db()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE notas_cliente 
+                        SET titulo = ?, contenido = ?, tipo = ?, usuario = ?, privada = ?
+                        WHERE nota_id = ?
+                    """, (titulo, contenido, option_tipo.get(), 
+                          entry_usuario.get().strip(), check_privada.get(), nota_id))
+                    
+                    conn.commit()
+                    conn.close()
+                    
+                    messagebox.showinfo("Éxito", "Nota actualizada correctamente")
+                    ventana.destroy()
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al actualizar nota: {e}")
+            
+            btn_guardar = ctk.CTkButton(botones_frame, text="💾 Guardar Cambios", 
+                                      command=guardar_cambios, width=150)
+            btn_guardar.pack(side="right")
+            
+        except Exception as e:
+            print(f"❌ Error editando nota: {e}")
+            messagebox.showerror("Error", f"Error al editar nota: {e}")
+    
+    def obtener_estadisticas_cliente(self, cliente_id):
+        """Obtiene las estadísticas completas de un cliente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return None
+            
+            cursor.execute("""
+                SELECT * FROM estadisticas_cliente 
+                WHERE cliente_id = ?
+            """, (cliente_id,))
+            
+            stats = cursor.fetchone()
+            
+            # También obtener productos problemáticos
+            cursor.execute("""
+                SELECT * FROM productos_problematicos 
+                WHERE cliente_id = ?
+                ORDER BY total_devoluciones DESC
+                LIMIT 10
+            """, (cliente_id,))
+            
+            productos_problematicos = cursor.fetchall()
+            
+            conn.close()
+            
+            return {
+                'estadisticas': stats,
+                'productos_problematicos': productos_problematicos
+            }
+            
+        except Exception as e:
+            print(f"Error obteniendo estadísticas: {e}")
+            return None
 
 # ----------------------------------------------------------------------
 # 7. EJECUCIÓN DEL PROGRAMA
