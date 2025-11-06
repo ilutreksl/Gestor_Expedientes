@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.71"
+APP_VERSION = "v0.0.72"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -796,6 +796,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.crear_diseno()
         
+        # Establecer tamaño mínimo para acomodar el dashboard
+        self.minsize(1400, 700)
+        
         # Configurar atajos de teclado globales
         self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
         self.bind_all("<Control-F>", lambda e: self.mostrar_busqueda_global())
@@ -1216,6 +1219,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         self.content_frame.grid_columnconfigure(0, weight=1)
         
+        # Establecer tamaño mínimo de ventana para acomodar el dashboard
+        self.minsize(1400, 700)
+        
         self.mostrar_lista_rma()
         
         # Actualizar badge de tareas al cargar la ventana
@@ -1303,6 +1309,131 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.historial_busquedas = []
         self.user_settings["historial_busquedas"] = []
         save_user_settings(self.user_settings, self.username)
+    
+    def actualizar_dashboard(self, año=None):
+        """Actualiza las estadísticas del dashboard para el año seleccionado."""
+        if año is None:
+            año = self.combo_año_dashboard.get()
+        
+        # Limpiar estadísticas actuales
+        for widget in self.stats_frame.winfo_children():
+            widget.destroy()
+        
+        # Obtener estadísticas de la base de datos
+        stats = self.obtener_estadisticas_expedientes(año)
+        
+        # Crear interfaz de estadísticas
+        self.crear_interfaz_estadisticas(stats)
+    
+    def obtener_estadisticas_expedientes(self, año):
+        """Obtiene las estadísticas de expedientes para el año especificado."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return {}
+            
+            # Definir los estados a consultar (incluyendo variaciones posibles)
+            estados_mapeados = {
+                'Completado': ['Completado', 'Finalizado', 'Cerrado'],
+                'Pendiente de Autorización': ['Pendiente de Autorización', 'Pendiente de Autorizacion', 'Pendiente Autorización', 'Pendiente', 'Sin Autorizar'],
+                'Recibido': ['Recibido', 'Recepcionado'],
+                'En Trámite': ['En Trámite', 'En Tramite', 'En Proceso', 'Procesando'],
+                'Autorizado': ['Autorizado', 'Aprobado']
+            }
+            
+            estadisticas = {}
+            
+            for estado_display, variaciones in estados_mapeados.items():
+                count = 0
+                for variacion in variaciones:
+                    cursor.execute("""
+                        SELECT COUNT(*) 
+                        FROM rma_maestro 
+                        WHERE estado = ? 
+                        AND strftime('%Y', fecha_emision) = ?
+                    """, (variacion, año))
+                    
+                    result = cursor.fetchone()[0]
+                    count += int(result) if result is not None else 0
+                
+                estadisticas[estado_display] = count
+            
+            # Obtener total del año
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM rma_maestro 
+                WHERE strftime('%Y', fecha_emision) = ?
+            """, (año,))
+            
+            total_result = cursor.fetchone()[0]
+            estadisticas['Total'] = int(total_result) if total_result is not None else 0
+            
+            conn.close()
+            return estadisticas
+            
+        except Exception as e:
+            print(f"Error obteniendo estadísticas: {e}")
+            return {}
+    
+    def crear_interfaz_estadisticas(self, stats):
+        """Crea la interfaz visual para mostrar las estadísticas."""
+        # Título del año
+        año_label = ctk.CTkLabel(self.stats_frame, 
+                                text=f"Expedientes {self.combo_año_dashboard.get()}", 
+                                font=ctk.CTkFont(size=12, weight="bold"))
+        año_label.pack(pady=(8, 12))
+        
+        # Estadística de total
+        total_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#1f538d", "#14375e"))
+        total_frame.pack(fill="x", padx=5, pady=3)
+        
+        ctk.CTkLabel(total_frame, text="📋 TOTAL", 
+                    font=ctk.CTkFont(size=11, weight="bold"), 
+                    text_color="white").pack(pady=(6, 1))
+        ctk.CTkLabel(total_frame, text=str(stats.get('Total', 0)), 
+                    font=ctk.CTkFont(size=16, weight="bold"), 
+                    text_color="white").pack(pady=(0, 6))
+        
+        # Estadísticas por estado
+        estados_info = [
+            ('Completado', '✅', ("#27ae60", "#1e8449")),
+            ('Pendiente de Autorización', '⏳', ("#f39c12", "#d68910")),
+            ('Recibido', '📥', ("#3498db", "#2980b9")),
+            ('En Trámite', '🔄', ("#9b59b6", "#8e44ad")),
+            ('Autorizado', '✔️', ("#2ecc71", "#27ae60"))
+        ]
+        
+        for estado, emoji, colores in estados_info:
+            estado_frame = ctk.CTkFrame(self.stats_frame, fg_color=colores)
+            estado_frame.pack(fill="x", padx=5, pady=1)
+            
+            # Contenido del estado
+            content_frame = ctk.CTkFrame(estado_frame, fg_color="transparent")
+            content_frame.pack(fill="x", padx=6, pady=4)
+            
+            # Estado y emoji (texto más pequeño para caber en 200px)
+            estado_text = f"{emoji} {estado.replace('Pendiente de Autorización', 'Pend. Autor.')}"
+            estado_label = ctk.CTkLabel(content_frame, 
+                                      text=estado_text, 
+                                      font=ctk.CTkFont(size=9, weight="bold"),
+                                      text_color="white",
+                                      anchor="w")
+            estado_label.pack(side="left", fill="x", expand=True)
+            
+            # Número
+            count_label = ctk.CTkLabel(content_frame, 
+                                     text=str(stats.get(estado, 0)), 
+                                     font=ctk.CTkFont(size=12, weight="bold"),
+                                     text_color="white")
+            count_label.pack(side="right")
+        
+        # Botón de actualización
+        btn_actualizar = ctk.CTkButton(self.stats_frame, 
+                                     text="🔄 Actualizar",
+                                     command=self.actualizar_dashboard,
+                                     width=80, height=25,
+                                     font=ctk.CTkFont(size=10))
+        btn_actualizar.pack(pady=(10, 8))
     
     
     # ----------------------------------------------------------------------
@@ -1581,21 +1712,33 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # ----------------------------------------------------------------------
 
     def mostrar_lista_rma(self):
-        """Muestra el listado completo de RMAs, filtros y el botón de crear nuevo RMA."""
+        """Muestra el listado completo de RMAs, filtros y el dashboard de estadísticas."""
         self.limpiar_contenido()
         
-        # 0. Configurar la expansión para el listado (fila 2, ahora)
-        self.content_frame.grid_rowconfigure(0, weight=0) # Título
-        self.content_frame.grid_rowconfigure(1, weight=0) # Filtros
-        self.content_frame.grid_rowconfigure(2, weight=1) # Listado
+        # Configurar layout principal con dos columnas
+        self.content_frame.grid_columnconfigure(0, weight=3, minsize=800)  # Lista principal
+        self.content_frame.grid_columnconfigure(1, weight=0, minsize=200)  # Dashboard (ancho fijo)
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        
+        # === COLUMNA IZQUIERDA: LISTA Y FILTROS ===
+        lista_column = ctk.CTkFrame(self.content_frame)
+        lista_column.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        
+        # Configurar expansión para la columna de lista
+        lista_column.grid_rowconfigure(0, weight=0)  # Título
+        lista_column.grid_rowconfigure(1, weight=0)  # Filtros  
+        lista_column.grid_rowconfigure(2, weight=1)  # Listado
+        lista_column.grid_columnconfigure(0, weight=1)
 
-        # 1. Título y Botón Crear (Fila 0)
-        title_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        # 1. Título y Botón Crear
+        title_frame = ctk.CTkFrame(lista_column, fg_color="transparent")
         title_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
         title_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(title_frame, text="LISTADO", font=ctk.CTkFont(family="Verdana", size=24, weight="bold")).grid(row=0, column=0, sticky="w")
-        # Botón Crear Nuevo RMA: icon-only (usar self.icon_mas si está disponible)
+        ctk.CTkLabel(title_frame, text="LISTADO DE EXPEDIENTES", 
+                    font=ctk.CTkFont(family="Verdana", size=20, weight="bold")).grid(row=0, column=0, sticky="w")
+        
+        # Botón Crear Nuevo RMA
         try:
             btn_bg = None
             if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
@@ -1610,70 +1753,83 @@ class VentanaPrincipal(ctk.CTkToplevel):
                           hover_color=(btn_bg if btn_bg is not None else None),
                           command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
             try:
-                # Añadir tooltip al botón de crear (si la clase Tooltip existe)
                 Tooltip(title_frame.winfo_children()[-1], "Crear nuevo RMA")
             except Exception:
                 pass
         except Exception:
-            # Fallback a botón de texto si algo falla
             ctk.CTkButton(title_frame,
                           text="➕ Crear Nuevo RMA",
                           command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
 
-        # ----------------------------------------------------
-        # 2. NUEVO: Panel de Búsqueda y Filtros (Fila 1)
-        # ----------------------------------------------------
-        filtro_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        # 2. Panel de Búsqueda y Filtros
+        filtro_frame = ctk.CTkFrame(lista_column, fg_color="transparent")
         filtro_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
         
-        # 2a. Búsqueda por texto (Código RMA / Cliente / Documento Cliente)
+        # Búsqueda por texto
         ctk.CTkLabel(filtro_frame, text="Buscar:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
         self.entry_busqueda = ctk.CTkEntry(filtro_frame, placeholder_text="Código RMA, Cliente o Doc.", width=250)
         self.entry_busqueda.grid(row=0, column=1, padx=10, pady=5, sticky="w")
         
-        # 2b. Filtro por Estado
+        # Filtro por Estado
         estados_posibles = self.OPCIONES.get("Estado", ["Todos"])
         if "Todos" not in estados_posibles:
             estados_posibles.insert(0, "Todos")
-        # Asegurarnos de que el estado 'Exportado' esté disponible como opción de filtro
         if 'Exportado' not in estados_posibles:
             estados_posibles.append('Exportado')
             
         ctk.CTkLabel(filtro_frame, text="Estado:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
         self.filtro_estado = ctk.CTkOptionMenu(filtro_frame, 
                                                values=estados_posibles, 
-                                               width=200,
-                                               #fg_color="gray80",        # Color del botón principal
-                                               #button_color="gray70",    # Color del botón de flecha
-                                               #button_hover_color="gray60", # Color al pasar el ratón por el botón de flecha
-                                               #text_color="black"
-                                               )
+                                               width=200)
         self.filtro_estado.set("Todos")
         self.filtro_estado.grid(row=0, column=3, padx=10, pady=5, sticky="w")
         
-        # 2c. Botón de Aplicar Filtro
-        # Ahora el botón llama a la función que aplica los filtros
+        # Botón de Aplicar Filtro
         btn_aplicar_filtro = ctk.CTkButton(filtro_frame,
                                            text="🔍 Aplicar Filtros", 
-                                           command=self.aplicar_filtros_rma,
-                                           #fg_color="gray80",      # Fondo del botón: Gris claro
-                                           #hover_color="gray70",   # Color al pasar el ratón: Ligeramente más oscuro
-                                           #text_color="black"
-                                           )
+                                           command=self.aplicar_filtros_rma)
         btn_aplicar_filtro.grid(row=0, column=4, padx=(20, 0), pady=5, sticky="w")
         
-        # Configurar expansión para que el campo de búsqueda ocupe el espacio extra
-        filtro_frame.grid_columnconfigure(1, weight=1) 
-        # ----------------------------------------------------
+        filtro_frame.grid_columnconfigure(1, weight=1)
 
-        # 3. Listado de RMAs (Fila 2)
-        # RENOMBRAR la referencia de list_scroll_frame a self.lista_rma_frame
-        self.lista_rma_frame = ctk.CTkScrollableFrame(self.content_frame, label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
+        # 3. Listado de RMAs
+        self.lista_rma_frame = ctk.CTkScrollableFrame(lista_column, 
+                                                     label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
         self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
-        self.lista_rma_frame.grid_columnconfigure(0, weight=1) # Columna del listado se expande
+        self.lista_rma_frame.grid_columnconfigure(0, weight=1)
         
-        # 4. Cargar los datos iniciales
-        self.cargar_lista_rma() # Llamada a la función de carga con filtros por defecto
+        # === COLUMNA DERECHA: DASHBOARD ===
+        dashboard_column = ctk.CTkFrame(self.content_frame, width=200, fg_color=("#f0f0f0", "#2b2b2b"))
+        dashboard_column.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
+        dashboard_column.grid_propagate(False)  # Mantener el ancho fijo
+        
+        # Header del dashboard
+        dashboard_header = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        dashboard_header.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkLabel(dashboard_header, text="📊 Estadísticas", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        # Selector de año
+        año_frame = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        año_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(año_frame, text="Año:", font=ctk.CTkFont(size=11)).pack(side="left")
+        
+        años_disponibles = [str(año) for año in range(2020, datetime.datetime.now().year + 2)]
+        self.combo_año_dashboard = ctk.CTkOptionMenu(año_frame, values=años_disponibles, 
+                                                    command=self.actualizar_dashboard,
+                                                    width=60)
+        self.combo_año_dashboard.set(str(datetime.datetime.now().year))
+        self.combo_año_dashboard.pack(side="right")
+        
+        # Frame para las estadísticas
+        self.stats_frame = ctk.CTkFrame(dashboard_column)
+        self.stats_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Cargar datos iniciales
+        self.cargar_lista_rma()  # Cargar lista de RMAs
+        self.actualizar_dashboard()  # Cargar estadísticas del dashboard
 
 
     def cargar_lista_rma(self, texto_busqueda="", estado_filtro="Todos"):
@@ -2122,8 +2278,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Frame principal con dos columnas
         main_frame = ctk.CTkFrame(self.content_frame)
         main_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        main_frame.grid_columnconfigure(0, weight=2)  # Búsqueda principal
-        main_frame.grid_columnconfigure(1, weight=1)  # Historial
+        main_frame.grid_columnconfigure(0, weight=2, minsize=400)  # Búsqueda principal
+        main_frame.grid_columnconfigure(1, weight=1, minsize=250)  # Historial
         
         # === COLUMNA IZQUIERDA: BÚSQUEDA Y FILTROS ===
         search_column = ctk.CTkFrame(main_frame)
