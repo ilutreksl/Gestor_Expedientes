@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.73"
+APP_VERSION = "v0.0.74"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1245,6 +1245,41 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error al contar tareas pendientes: {e}")
             return 0
+
+    def verificar_tareas_pendientes_expediente(self, rma_id):
+        """Verifica si un expediente específico tiene tareas pendientes."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return 0, []
+            
+            # Primero obtenemos el código RMA del expediente
+            cursor.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
+            resultado_rma = cursor.fetchone()
+            if not resultado_rma:
+                conn.close()
+                return 0, []
+            
+            codigo_rma = resultado_rma[0]
+            
+            # Ahora buscamos tareas pendientes usando el código RMA
+            cursor.execute("""
+                SELECT COUNT(*), GROUP_CONCAT(titulo || ' (' || estado || ')') as tareas_pendientes
+                FROM tareas 
+                WHERE codigo_rma = ? 
+                AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
+                AND estado IS NOT NULL
+            """, (codigo_rma,))
+            
+            resultado = cursor.fetchone()
+            count = int(resultado[0]) if resultado[0] else 0
+            tareas_pendientes = resultado[1].split(',') if resultado[1] else []
+            
+            conn.close()
+            return count, tareas_pendientes
+        except Exception as e:
+            print(f"Error al verificar tareas pendientes del expediente: {e}")
+            return 0, []
 
     def actualizar_badge_tareas(self):
         """Actualiza el badge visual del botón de tareas."""
@@ -4719,6 +4754,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # 2.1. INTEGRACIÓN DE LA TRAZABILIDAD - Calcular el nuevo estado
         estado_nuevo = self.determinar_estado_rma(datos_nuevos)
+        
+        # 2.2. CONFIRMACIONES INTELIGENTES: Verificar tareas pendientes antes de completar
+        estado_anterior = datos_antiguos.get('estado', '')
+        if estado_nuevo == 'Completado' and estado_anterior != 'Completado':
+            # El expediente se está intentando completar
+            count_tareas, tareas_pendientes = self.verificar_tareas_pendientes_expediente(rma_id)
+            
+            if count_tareas > 0:
+                # Crear mensaje detallado con las tareas pendientes
+                mensaje_tareas = "\n• ".join(tareas_pendientes[:5])  # Mostrar máximo 5 tareas
+                if len(tareas_pendientes) > 5:
+                    mensaje_tareas += f"\n• ... y {len(tareas_pendientes) - 5} tareas más"
+                
+                respuesta = messagebox.askyesno(
+                    "⚠️ Expediente con tareas pendientes",
+                    f"¿Seguro que deseas completar este expediente?\n\n"
+                    f"Tiene {count_tareas} tarea(s) pendiente(s):\n\n• {mensaje_tareas}\n\n"
+                    f"Se recomienda completar todas las tareas antes de cerrar el expediente.\n\n"
+                    f"¿Continuar de todas formas?"
+                )
+                
+                if not respuesta:
+                    conn.close()
+                    messagebox.showinfo("Operación cancelada", "El expediente no ha sido completado.")
+                    return
         
         # Añadir el estado al diccionario de datos nuevos
         datos_nuevos['estado'] = estado_nuevo 
