@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.72"
+APP_VERSION = "v0.0.73"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1322,8 +1322,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Obtener estadísticas de la base de datos
         stats = self.obtener_estadisticas_expedientes(año)
         
+        # Obtener artículos problemáticos
+        periodo = self.combo_periodo.get()
+        articulos_problematicos = self.obtener_articulos_problematicos(año, periodo)
+        
         # Crear interfaz de estadísticas
-        self.crear_interfaz_estadisticas(stats)
+        self.crear_interfaz_estadisticas(stats, articulos_problematicos)
     
     def obtener_estadisticas_expedientes(self, año):
         """Obtiene las estadísticas de expedientes para el año especificado."""
@@ -1375,7 +1379,90 @@ class VentanaPrincipal(ctk.CTkToplevel):
             print(f"Error obteniendo estadísticas: {e}")
             return {}
     
-    def crear_interfaz_estadisticas(self, stats):
+    def obtener_articulos_problematicos(self, año, periodo):
+        """Obtiene los 10 artículos con más problemas según el período especificado."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return []
+            
+            # Estados problemáticos a considerar (los que realmente aparecerán)
+            estados_problematicos = [
+                "NO FUNCIONA, ABONAR",
+                "NO FUNCIONA ; NO ABONAR",
+                "REPOSICION FALLO PRODUCTO", 
+                "REPOSICION ; ABONAR",
+                "FALLO SOLDADURA ; ABONAR",
+                "FALLO SOLDADURA ; NO ABONAR",
+                "FALLO MODULO ; ABONAR"
+            ]
+            
+            # Crear placeholders para la consulta SQL
+            placeholders = ','.join(['?' for _ in estados_problematicos])
+            
+            # Determinar condición de fecha según el período
+            fecha_condicion = ""
+            if periodo == "Trimestral":
+                # Trimestre actual basado en el mes actual
+                mes_actual = datetime.datetime.now().month
+                if mes_actual <= 3:
+                    trimestre = 1
+                elif mes_actual <= 6:
+                    trimestre = 2
+                elif mes_actual <= 9:
+                    trimestre = 3
+                else:
+                    trimestre = 4
+                
+                mes_inicio = (trimestre - 1) * 3 + 1
+                mes_fin = trimestre * 3
+                fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN {mes_inicio} AND {mes_fin}"
+                
+            elif periodo == "Semestral":
+                # Primer semestre (1-6) o segundo semestre (7-12) según el mes actual
+                mes_actual = datetime.datetime.now().month
+                if mes_actual <= 6:
+                    semestre = 1
+                    fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN 1 AND 6"
+                else:
+                    semestre = 2
+                    fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN 7 AND 12"
+                    
+            else:  # Anual
+                fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}'"
+            
+            # Consulta para obtener artículos problemáticos
+            query = f"""
+                SELECT rd.referencia_articulo, COUNT(*) as problemas
+                FROM rma_detalles rd
+                JOIN rma_maestro rm ON rd.rma_id = rm.id
+                WHERE rd.estado_producto IN ({placeholders})
+                {fecha_condicion}
+                GROUP BY rd.referencia_articulo
+                ORDER BY problemas DESC
+                LIMIT 10
+            """
+            
+            cursor.execute(query, estados_problematicos)
+            resultados = cursor.fetchall()
+            
+            # Convertir a lista de diccionarios para facilitar el manejo
+            articulos_problematicos = [
+                {
+                    'referencia_articulo': row[0],
+                    'problemas': int(row[1])
+                }
+                for row in resultados
+            ]
+            
+            conn.close()
+            return articulos_problematicos
+            
+        except Exception as e:
+            print(f"Error obteniendo artículos problemáticos: {e}")
+            return []
+    
+    def crear_interfaz_estadisticas(self, stats, articulos_problematicos):
         """Crea la interfaz visual para mostrar las estadísticas."""
         # Título del año
         año_label = ctk.CTkLabel(self.stats_frame, 
@@ -1426,6 +1513,48 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                      font=ctk.CTkFont(size=12, weight="bold"),
                                      text_color="white")
             count_label.pack(side="right")
+        
+        # Separador
+        separador = ctk.CTkFrame(self.stats_frame, height=2, fg_color="gray")
+        separador.pack(fill="x", padx=5, pady=(10, 8))
+        
+        # Título de artículos problemáticos
+        periodo_texto = self.combo_periodo.get()
+        titulo_problematicos = ctk.CTkLabel(self.stats_frame, 
+                                          text=f"🔴 Top 10 Problemáticos ({periodo_texto})", 
+                                          font=ctk.CTkFont(size=11, weight="bold"))
+        titulo_problematicos.pack(pady=(0, 8))
+        
+        # Lista de artículos problemáticos
+        if articulos_problematicos:
+            for i, articulo in enumerate(articulos_problematicos[:10], 1):
+                problema_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#e74c3c", "#c0392b"))
+                problema_frame.pack(fill="x", padx=5, pady=1)
+                
+                content_frame = ctk.CTkFrame(problema_frame, fg_color="transparent")
+                content_frame.pack(fill="x", padx=4, pady=2)
+                
+                # Número de ranking y código de artículo
+                ranking_text = f"{i}. {articulo['referencia_articulo'][:12]}..."  # Truncar código si es muy largo
+                ranking_label = ctk.CTkLabel(content_frame, 
+                                           text=ranking_text, 
+                                           font=ctk.CTkFont(size=8, weight="bold"),
+                                           text_color="white",
+                                           anchor="w")
+                ranking_label.pack(side="left", fill="x", expand=True)
+                
+                # Número de problemas
+                problemas_label = ctk.CTkLabel(content_frame, 
+                                             text=str(articulo['problemas']), 
+                                             font=ctk.CTkFont(size=10, weight="bold"),
+                                             text_color="white")
+                problemas_label.pack(side="right")
+        else:
+            no_datos_label = ctk.CTkLabel(self.stats_frame, 
+                                        text="Sin datos para el período seleccionado", 
+                                        font=ctk.CTkFont(size=9),
+                                        text_color="gray")
+            no_datos_label.pack(pady=5)
         
         # Botón de actualización
         btn_actualizar = ctk.CTkButton(self.stats_frame, 
@@ -1822,6 +1951,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                                     width=60)
         self.combo_año_dashboard.set(str(datetime.datetime.now().year))
         self.combo_año_dashboard.pack(side="right")
+        
+        # Selector de período para artículos problemáticos
+        periodo_frame = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        periodo_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(periodo_frame, text="Período:", font=ctk.CTkFont(size=11)).pack(side="left")
+        
+        self.combo_periodo = ctk.CTkOptionMenu(periodo_frame, 
+                                             values=["Anual", "Semestral", "Trimestral"],
+                                             command=self.actualizar_dashboard,
+                                             width=80)
+        self.combo_periodo.set("Anual")
+        self.combo_periodo.pack(side="right")
         
         # Frame para las estadísticas
         self.stats_frame = ctk.CTkFrame(dashboard_column)
@@ -3899,8 +4041,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Añade una fila de artículo a la lista temporal."""
         try:
             referencia = self.art_ref.get()
-            cant_doc = int(self.art_cant_doc.get() or 0)
-            cant_entregada = int(self.art_cant_entregada.get() or 0)
+            # Permitir decimales en las cantidades
+            cant_doc = float(self.art_cant_doc.get().replace(',', '.') or 0.0)
+            cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
             estado = self.art_estado.get()
             # Reemplazar comas por puntos para que float funcione
             precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0) 
