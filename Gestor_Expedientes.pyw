@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.70"
+APP_VERSION = "v0.0.75"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -796,6 +796,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.crear_diseno()
         
+        # Establecer tamaño mínimo para acomodar el dashboard
+        self.minsize(1400, 700)
+        
         # Configurar atajos de teclado globales
         self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
         self.bind_all("<Control-F>", lambda e: self.mostrar_busqueda_global())
@@ -1216,6 +1219,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.content_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         self.content_frame.grid_columnconfigure(0, weight=1)
         
+        # Establecer tamaño mínimo de ventana para acomodar el dashboard
+        self.minsize(1400, 700)
+        
         self.mostrar_lista_rma()
         
         # Actualizar badge de tareas al cargar la ventana
@@ -1239,6 +1245,41 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error al contar tareas pendientes: {e}")
             return 0
+
+    def verificar_tareas_pendientes_expediente(self, rma_id):
+        """Verifica si un expediente específico tiene tareas pendientes."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return 0, []
+            
+            # Primero obtenemos el código RMA del expediente
+            cursor.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
+            resultado_rma = cursor.fetchone()
+            if not resultado_rma:
+                conn.close()
+                return 0, []
+            
+            codigo_rma = resultado_rma[0]
+            
+            # Ahora buscamos tareas pendientes usando el código RMA
+            cursor.execute("""
+                SELECT COUNT(*), GROUP_CONCAT(titulo || ' (' || estado || ')') as tareas_pendientes
+                FROM tareas 
+                WHERE codigo_rma = ? 
+                AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
+                AND estado IS NOT NULL
+            """, (codigo_rma,))
+            
+            resultado = cursor.fetchone()
+            count = int(resultado[0]) if resultado[0] else 0
+            tareas_pendientes = resultado[1].split(',') if resultado[1] else []
+            
+            conn.close()
+            return count, tareas_pendientes
+        except Exception as e:
+            print(f"Error al verificar tareas pendientes del expediente: {e}")
+            return 0, []
 
     def actualizar_badge_tareas(self):
         """Actualiza el badge visual del botón de tareas."""
@@ -1303,6 +1344,260 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.historial_busquedas = []
         self.user_settings["historial_busquedas"] = []
         save_user_settings(self.user_settings, self.username)
+    
+    def actualizar_dashboard(self, año=None):
+        """Actualiza las estadísticas del dashboard para el año seleccionado."""
+        if año is None:
+            año = self.combo_año_dashboard.get()
+        
+        # Limpiar estadísticas actuales
+        for widget in self.stats_frame.winfo_children():
+            widget.destroy()
+        
+        # Obtener estadísticas de la base de datos
+        stats = self.obtener_estadisticas_expedientes(año)
+        
+        # Obtener artículos problemáticos
+        periodo = self.combo_periodo.get()
+        articulos_problematicos = self.obtener_articulos_problematicos(año, periodo)
+        
+        # Crear interfaz de estadísticas
+        self.crear_interfaz_estadisticas(stats, articulos_problematicos)
+    
+    def obtener_estadisticas_expedientes(self, año):
+        """Obtiene las estadísticas de expedientes para el año especificado."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return {}
+            
+            # Definir los estados a consultar (incluyendo variaciones posibles)
+            estados_mapeados = {
+                'Completado': ['Completado', 'Finalizado', 'Cerrado'],
+                'Pendiente de Autorización': ['Pendiente de Autorización', 'Pendiente de Autorizacion', 'Pendiente Autorización', 'Pendiente', 'Sin Autorizar'],
+                'Recibido': ['Recibido', 'Recepcionado'],
+                'En Trámite': ['En Trámite', 'En Tramite', 'En Proceso', 'Procesando'],
+                'Autorizado': ['Autorizado', 'Aprobado']
+            }
+            
+            estadisticas = {}
+            
+            for estado_display, variaciones in estados_mapeados.items():
+                count = 0
+                for variacion in variaciones:
+                    cursor.execute("""
+                        SELECT COUNT(*) 
+                        FROM rma_maestro 
+                        WHERE estado = ? 
+                        AND strftime('%Y', fecha_emision) = ?
+                    """, (variacion, año))
+                    
+                    result = cursor.fetchone()[0]
+                    count += int(result) if result is not None else 0
+                
+                estadisticas[estado_display] = count
+            
+            # Obtener total del año
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM rma_maestro 
+                WHERE strftime('%Y', fecha_emision) = ?
+            """, (año,))
+            
+            total_result = cursor.fetchone()[0]
+            estadisticas['Total'] = int(total_result) if total_result is not None else 0
+            
+            conn.close()
+            return estadisticas
+            
+        except Exception as e:
+            print(f"Error obteniendo estadísticas: {e}")
+            return {}
+    
+    def obtener_articulos_problematicos(self, año, periodo):
+        """Obtiene los 10 artículos con más problemas según el período especificado."""
+        try:
+            conn, cursor = self.conectar_db()
+            if not conn:
+                return []
+            
+            # Estados problemáticos a considerar (los que realmente aparecerán)
+            estados_problematicos = [
+                "NO FUNCIONA, ABONAR",
+                "NO FUNCIONA ; NO ABONAR",
+                "REPOSICION FALLO PRODUCTO", 
+                "REPOSICION ; ABONAR",
+                "FALLO SOLDADURA ; ABONAR",
+                "FALLO SOLDADURA ; NO ABONAR",
+                "FALLO MODULO ; ABONAR"
+            ]
+            
+            # Crear placeholders para la consulta SQL
+            placeholders = ','.join(['?' for _ in estados_problematicos])
+            
+            # Determinar condición de fecha según el período
+            fecha_condicion = ""
+            if periodo == "Trimestral":
+                # Trimestre actual basado en el mes actual
+                mes_actual = datetime.datetime.now().month
+                if mes_actual <= 3:
+                    trimestre = 1
+                elif mes_actual <= 6:
+                    trimestre = 2
+                elif mes_actual <= 9:
+                    trimestre = 3
+                else:
+                    trimestre = 4
+                
+                mes_inicio = (trimestre - 1) * 3 + 1
+                mes_fin = trimestre * 3
+                fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN {mes_inicio} AND {mes_fin}"
+                
+            elif periodo == "Semestral":
+                # Primer semestre (1-6) o segundo semestre (7-12) según el mes actual
+                mes_actual = datetime.datetime.now().month
+                if mes_actual <= 6:
+                    semestre = 1
+                    fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN 1 AND 6"
+                else:
+                    semestre = 2
+                    fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}' AND CAST(strftime('%m', rm.fecha_emision) AS INTEGER) BETWEEN 7 AND 12"
+                    
+            else:  # Anual
+                fecha_condicion = f"AND strftime('%Y', rm.fecha_emision) = '{año}'"
+            
+            # Consulta para obtener artículos problemáticos
+            query = f"""
+                SELECT rd.referencia_articulo, COUNT(*) as problemas
+                FROM rma_detalles rd
+                JOIN rma_maestro rm ON rd.rma_id = rm.id
+                WHERE rd.estado_producto IN ({placeholders})
+                {fecha_condicion}
+                GROUP BY rd.referencia_articulo
+                ORDER BY problemas DESC
+                LIMIT 10
+            """
+            
+            cursor.execute(query, estados_problematicos)
+            resultados = cursor.fetchall()
+            
+            # Convertir a lista de diccionarios para facilitar el manejo
+            articulos_problematicos = [
+                {
+                    'referencia_articulo': row[0],
+                    'problemas': int(row[1])
+                }
+                for row in resultados
+            ]
+            
+            conn.close()
+            return articulos_problematicos
+            
+        except Exception as e:
+            print(f"Error obteniendo artículos problemáticos: {e}")
+            return []
+    
+    def crear_interfaz_estadisticas(self, stats, articulos_problematicos):
+        """Crea la interfaz visual para mostrar las estadísticas."""
+        # Título del año
+        año_label = ctk.CTkLabel(self.stats_frame, 
+                                text=f"Expedientes {self.combo_año_dashboard.get()}", 
+                                font=ctk.CTkFont(size=12, weight="bold"))
+        año_label.pack(pady=(8, 12))
+        
+        # Estadística de total
+        total_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#1f538d", "#14375e"))
+        total_frame.pack(fill="x", padx=5, pady=3)
+        
+        ctk.CTkLabel(total_frame, text="📋 TOTAL", 
+                    font=ctk.CTkFont(size=11, weight="bold"), 
+                    text_color="white").pack(pady=(6, 1))
+        ctk.CTkLabel(total_frame, text=str(stats.get('Total', 0)), 
+                    font=ctk.CTkFont(size=16, weight="bold"), 
+                    text_color="white").pack(pady=(0, 6))
+        
+        # Estadísticas por estado
+        estados_info = [
+            ('Completado', '✅', ("#27ae60", "#1e8449")),
+            ('Pendiente de Autorización', '⏳', ("#f39c12", "#d68910")),
+            ('Recibido', '📥', ("#3498db", "#2980b9")),
+            ('En Trámite', '🔄', ("#9b59b6", "#8e44ad")),
+            ('Autorizado', '✔️', ("#2ecc71", "#27ae60"))
+        ]
+        
+        for estado, emoji, colores in estados_info:
+            estado_frame = ctk.CTkFrame(self.stats_frame, fg_color=colores)
+            estado_frame.pack(fill="x", padx=5, pady=1)
+            
+            # Contenido del estado
+            content_frame = ctk.CTkFrame(estado_frame, fg_color="transparent")
+            content_frame.pack(fill="x", padx=6, pady=4)
+            
+            # Estado y emoji (texto más pequeño para caber en 200px)
+            estado_text = f"{emoji} {estado.replace('Pendiente de Autorización', 'Pend. Autor.')}"
+            estado_label = ctk.CTkLabel(content_frame, 
+                                      text=estado_text, 
+                                      font=ctk.CTkFont(size=9, weight="bold"),
+                                      text_color="white",
+                                      anchor="w")
+            estado_label.pack(side="left", fill="x", expand=True)
+            
+            # Número
+            count_label = ctk.CTkLabel(content_frame, 
+                                     text=str(stats.get(estado, 0)), 
+                                     font=ctk.CTkFont(size=12, weight="bold"),
+                                     text_color="white")
+            count_label.pack(side="right")
+        
+        # Separador
+        separador = ctk.CTkFrame(self.stats_frame, height=2, fg_color="gray")
+        separador.pack(fill="x", padx=5, pady=(10, 8))
+        
+        # Título de artículos problemáticos
+        periodo_texto = self.combo_periodo.get()
+        titulo_problematicos = ctk.CTkLabel(self.stats_frame, 
+                                          text=f"🔴 Top 10 Problemáticos ({periodo_texto})", 
+                                          font=ctk.CTkFont(size=11, weight="bold"))
+        titulo_problematicos.pack(pady=(0, 8))
+        
+        # Lista de artículos problemáticos
+        if articulos_problematicos:
+            for i, articulo in enumerate(articulos_problematicos[:10], 1):
+                problema_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#e74c3c", "#c0392b"))
+                problema_frame.pack(fill="x", padx=5, pady=1)
+                
+                content_frame = ctk.CTkFrame(problema_frame, fg_color="transparent")
+                content_frame.pack(fill="x", padx=4, pady=2)
+                
+                # Número de ranking y código de artículo
+                ranking_text = f"{i}. {articulo['referencia_articulo'][:12]}..."  # Truncar código si es muy largo
+                ranking_label = ctk.CTkLabel(content_frame, 
+                                           text=ranking_text, 
+                                           font=ctk.CTkFont(size=8, weight="bold"),
+                                           text_color="white",
+                                           anchor="w")
+                ranking_label.pack(side="left", fill="x", expand=True)
+                
+                # Número de problemas
+                problemas_label = ctk.CTkLabel(content_frame, 
+                                             text=str(articulo['problemas']), 
+                                             font=ctk.CTkFont(size=10, weight="bold"),
+                                             text_color="white")
+                problemas_label.pack(side="right")
+        else:
+            no_datos_label = ctk.CTkLabel(self.stats_frame, 
+                                        text="Sin datos para el período seleccionado", 
+                                        font=ctk.CTkFont(size=9),
+                                        text_color="gray")
+            no_datos_label.pack(pady=5)
+        
+        # Botón de actualización
+        btn_actualizar = ctk.CTkButton(self.stats_frame, 
+                                     text="🔄 Actualizar",
+                                     command=self.actualizar_dashboard,
+                                     width=80, height=25,
+                                     font=ctk.CTkFont(size=10))
+        btn_actualizar.pack(pady=(10, 8))
     
     
     # ----------------------------------------------------------------------
@@ -1581,21 +1876,33 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # ----------------------------------------------------------------------
 
     def mostrar_lista_rma(self):
-        """Muestra el listado completo de RMAs, filtros y el botón de crear nuevo RMA."""
+        """Muestra el listado completo de RMAs, filtros y el dashboard de estadísticas."""
         self.limpiar_contenido()
         
-        # 0. Configurar la expansión para el listado (fila 2, ahora)
-        self.content_frame.grid_rowconfigure(0, weight=0) # Título
-        self.content_frame.grid_rowconfigure(1, weight=0) # Filtros
-        self.content_frame.grid_rowconfigure(2, weight=1) # Listado
+        # Configurar layout principal con dos columnas
+        self.content_frame.grid_columnconfigure(0, weight=3, minsize=800)  # Lista principal
+        self.content_frame.grid_columnconfigure(1, weight=0, minsize=200)  # Dashboard (ancho fijo)
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        
+        # === COLUMNA IZQUIERDA: LISTA Y FILTROS ===
+        lista_column = ctk.CTkFrame(self.content_frame)
+        lista_column.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        
+        # Configurar expansión para la columna de lista
+        lista_column.grid_rowconfigure(0, weight=0)  # Título
+        lista_column.grid_rowconfigure(1, weight=0)  # Filtros  
+        lista_column.grid_rowconfigure(2, weight=1)  # Listado
+        lista_column.grid_columnconfigure(0, weight=1)
 
-        # 1. Título y Botón Crear (Fila 0)
-        title_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        # 1. Título y Botón Crear
+        title_frame = ctk.CTkFrame(lista_column, fg_color="transparent")
         title_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
         title_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(title_frame, text="LISTADO", font=ctk.CTkFont(family="Verdana", size=24, weight="bold")).grid(row=0, column=0, sticky="w")
-        # Botón Crear Nuevo RMA: icon-only (usar self.icon_mas si está disponible)
+        ctk.CTkLabel(title_frame, text="LISTADO DE EXPEDIENTES", 
+                    font=ctk.CTkFont(family="Verdana", size=20, weight="bold")).grid(row=0, column=0, sticky="w")
+        
+        # Botón Crear Nuevo RMA
         try:
             btn_bg = None
             if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
@@ -1610,70 +1917,96 @@ class VentanaPrincipal(ctk.CTkToplevel):
                           hover_color=(btn_bg if btn_bg is not None else None),
                           command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
             try:
-                # Añadir tooltip al botón de crear (si la clase Tooltip existe)
                 Tooltip(title_frame.winfo_children()[-1], "Crear nuevo RMA")
             except Exception:
                 pass
         except Exception:
-            # Fallback a botón de texto si algo falla
             ctk.CTkButton(title_frame,
                           text="➕ Crear Nuevo RMA",
                           command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
 
-        # ----------------------------------------------------
-        # 2. NUEVO: Panel de Búsqueda y Filtros (Fila 1)
-        # ----------------------------------------------------
-        filtro_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        # 2. Panel de Búsqueda y Filtros
+        filtro_frame = ctk.CTkFrame(lista_column, fg_color="transparent")
         filtro_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
         
-        # 2a. Búsqueda por texto (Código RMA / Cliente / Documento Cliente)
+        # Búsqueda por texto
         ctk.CTkLabel(filtro_frame, text="Buscar:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
         self.entry_busqueda = ctk.CTkEntry(filtro_frame, placeholder_text="Código RMA, Cliente o Doc.", width=250)
         self.entry_busqueda.grid(row=0, column=1, padx=10, pady=5, sticky="w")
         
-        # 2b. Filtro por Estado
+        # Filtro por Estado
         estados_posibles = self.OPCIONES.get("Estado", ["Todos"])
         if "Todos" not in estados_posibles:
             estados_posibles.insert(0, "Todos")
-        # Asegurarnos de que el estado 'Exportado' esté disponible como opción de filtro
         if 'Exportado' not in estados_posibles:
             estados_posibles.append('Exportado')
             
         ctk.CTkLabel(filtro_frame, text="Estado:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
         self.filtro_estado = ctk.CTkOptionMenu(filtro_frame, 
                                                values=estados_posibles, 
-                                               width=200,
-                                               #fg_color="gray80",        # Color del botón principal
-                                               #button_color="gray70",    # Color del botón de flecha
-                                               #button_hover_color="gray60", # Color al pasar el ratón por el botón de flecha
-                                               #text_color="black"
-                                               )
+                                               width=200)
         self.filtro_estado.set("Todos")
         self.filtro_estado.grid(row=0, column=3, padx=10, pady=5, sticky="w")
         
-        # 2c. Botón de Aplicar Filtro
-        # Ahora el botón llama a la función que aplica los filtros
+        # Botón de Aplicar Filtro
         btn_aplicar_filtro = ctk.CTkButton(filtro_frame,
                                            text="🔍 Aplicar Filtros", 
-                                           command=self.aplicar_filtros_rma,
-                                           #fg_color="gray80",      # Fondo del botón: Gris claro
-                                           #hover_color="gray70",   # Color al pasar el ratón: Ligeramente más oscuro
-                                           #text_color="black"
-                                           )
+                                           command=self.aplicar_filtros_rma)
         btn_aplicar_filtro.grid(row=0, column=4, padx=(20, 0), pady=5, sticky="w")
         
-        # Configurar expansión para que el campo de búsqueda ocupe el espacio extra
-        filtro_frame.grid_columnconfigure(1, weight=1) 
-        # ----------------------------------------------------
+        filtro_frame.grid_columnconfigure(1, weight=1)
 
-        # 3. Listado de RMAs (Fila 2)
-        # RENOMBRAR la referencia de list_scroll_frame a self.lista_rma_frame
-        self.lista_rma_frame = ctk.CTkScrollableFrame(self.content_frame, label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
+        # 3. Listado de RMAs
+        self.lista_rma_frame = ctk.CTkScrollableFrame(lista_column, 
+                                                     label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
         self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
-        self.lista_rma_frame.grid_columnconfigure(0, weight=1) # Columna del listado se expande
+        self.lista_rma_frame.grid_columnconfigure(0, weight=1)
         
-        # 4. Cargar los datos iniciales
-        self.cargar_lista_rma() # Llamada a la función de carga con filtros por defecto
+        # === COLUMNA DERECHA: DASHBOARD ===
+        dashboard_column = ctk.CTkFrame(self.content_frame, width=200, fg_color=("#f0f0f0", "#2b2b2b"))
+        dashboard_column.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
+        dashboard_column.grid_propagate(False)  # Mantener el ancho fijo
+        
+        # Header del dashboard
+        dashboard_header = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        dashboard_header.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkLabel(dashboard_header, text="📊 Estadísticas", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        
+        # Selector de año
+        año_frame = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        año_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(año_frame, text="Año:", font=ctk.CTkFont(size=11)).pack(side="left")
+        
+        años_disponibles = [str(año) for año in range(2020, datetime.datetime.now().year + 2)]
+        self.combo_año_dashboard = ctk.CTkOptionMenu(año_frame, values=años_disponibles, 
+                                                    command=self.actualizar_dashboard,
+                                                    width=60)
+        self.combo_año_dashboard.set(str(datetime.datetime.now().year))
+        self.combo_año_dashboard.pack(side="right")
+        
+        # Selector de período para artículos problemáticos
+        periodo_frame = ctk.CTkFrame(dashboard_column, fg_color="transparent")
+        periodo_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(periodo_frame, text="Período:", font=ctk.CTkFont(size=11)).pack(side="left")
+        
+        self.combo_periodo = ctk.CTkOptionMenu(periodo_frame, 
+                                             values=["Anual", "Semestral", "Trimestral"],
+                                             command=self.actualizar_dashboard,
+                                             width=80)
+        self.combo_periodo.set("Anual")
+        self.combo_periodo.pack(side="right")
+        
+        # Frame para las estadísticas
+        self.stats_frame = ctk.CTkFrame(dashboard_column)
+        self.stats_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Cargar datos iniciales
+        self.cargar_lista_rma()  # Cargar lista de RMAs
+        self.actualizar_dashboard()  # Cargar estadísticas del dashboard
 
 
     def cargar_lista_rma(self, texto_busqueda="", estado_filtro="Todos"):
@@ -2122,8 +2455,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Frame principal con dos columnas
         main_frame = ctk.CTkFrame(self.content_frame)
         main_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        main_frame.grid_columnconfigure(0, weight=2)  # Búsqueda principal
-        main_frame.grid_columnconfigure(1, weight=1)  # Historial
+        main_frame.grid_columnconfigure(0, weight=2, minsize=400)  # Búsqueda principal
+        main_frame.grid_columnconfigure(1, weight=1, minsize=250)  # Historial
         
         # === COLUMNA IZQUIERDA: BÚSQUEDA Y FILTROS ===
         search_column = ctk.CTkFrame(main_frame)
@@ -3743,8 +4076,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Añade una fila de artículo a la lista temporal."""
         try:
             referencia = self.art_ref.get()
-            cant_doc = int(self.art_cant_doc.get() or 0)
-            cant_entregada = int(self.art_cant_entregada.get() or 0)
+            # Permitir decimales en las cantidades
+            cant_doc = float(self.art_cant_doc.get().replace(',', '.') or 0.0)
+            cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
             estado = self.art_estado.get()
             # Reemplazar comas por puntos para que float funcione
             precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0) 
@@ -4421,6 +4755,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # 2.1. INTEGRACIÓN DE LA TRAZABILIDAD - Calcular el nuevo estado
         estado_nuevo = self.determinar_estado_rma(datos_nuevos)
         
+        # 2.2. CONFIRMACIONES INTELIGENTES: Verificar tareas pendientes antes de completar
+        estado_anterior = datos_antiguos.get('estado', '')
+        if estado_nuevo == 'Completado' and estado_anterior != 'Completado':
+            # El expediente se está intentando completar
+            count_tareas, tareas_pendientes = self.verificar_tareas_pendientes_expediente(rma_id)
+            
+            if count_tareas > 0:
+                # Crear mensaje detallado con las tareas pendientes
+                mensaje_tareas = "\n• ".join(tareas_pendientes[:5])  # Mostrar máximo 5 tareas
+                if len(tareas_pendientes) > 5:
+                    mensaje_tareas += f"\n• ... y {len(tareas_pendientes) - 5} tareas más"
+                
+                respuesta = messagebox.askyesno(
+                    "⚠️ Expediente con tareas pendientes",
+                    f"¿Seguro que deseas completar este expediente?\n\n"
+                    f"Tiene {count_tareas} tarea(s) pendiente(s):\n\n• {mensaje_tareas}\n\n"
+                    f"Se recomienda completar todas las tareas antes de cerrar el expediente.\n\n"
+                    f"¿Continuar de todas formas?"
+                )
+                
+                if not respuesta:
+                    conn.close()
+                    messagebox.showinfo("Operación cancelada", "El expediente no ha sido completado.")
+                    return
+        
         # Añadir el estado al diccionario de datos nuevos
         datos_nuevos['estado'] = estado_nuevo 
         
@@ -4574,11 +4933,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
         fecha_recepcion = datos_maestro.get('fecha_recepcion')
         fecha_gestion = datos_maestro.get('fecha_gestion')
         fecha_autorizacion = datos_maestro.get('fecha_autorizacion')
+        fecha_proceso = datos_maestro.get('fecha_proceso')
         fecha_emision = datos_maestro.get('fecha_emision')
         
-        # 5. Estado 'Completado' (Último paso)
+        # 6. Estado 'Completado' (Último paso)
         if fecha_gestion:
             return "Completado"
+            
+        # 5. Estado 'En Trámite' (Cuando se ingresa fecha de proceso)
+        elif fecha_proceso:
+            return "En Trámite"
             
         # 4. Estado 'Recibido'
         elif fecha_recepcion:
@@ -6722,12 +7086,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
         btn_next = ctk.CTkButton(header, text="▶", width=40)
         btn_next.grid(row=1, column=5, padx=(2,0), pady=(6,0))
 
-        pb = ttk.Progressbar(header, mode="indeterminate", length=120)
-        try:
-            pb.grid(row=1, column=6, padx=(8,0), pady=(6,0))
-        except Exception:
-            pass
-
         rows_container = ctk.CTkFrame(sf)
         rows_container.pack(fill="both", expand=True)
 
@@ -6816,7 +7174,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         def load_expedientes_thread(page=1):
             try:
-                self.after(0, lambda: pb.start())
                 search = search_var.get().strip()
                 page_size = int(page_size_opt.get())
                 offset = (page - 1) * page_size
@@ -6848,12 +7205,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 cur.execute(sql, tuple(params))
                 filas = cur.fetchall()
                 conn.close()
-                self.after(0, lambda: (pb.stop(), render_rows_expedientes(filas, page, total, page_size)))
+                self.after(0, lambda: render_rows_expedientes(filas, page, total, page_size))
             except Exception as e:
-                try:
-                    pb.stop()
-                except Exception:
-                    pass
                 self.after(0, lambda: messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}"))
 
         def start_load_expedientes(page=1):
