@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.75"
+APP_VERSION = "v0.0.76"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -734,6 +734,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "DANA", "CAMBIO DE PRODUCTO"
         ]
     }
+    
+    def get_color_por_estado(self, estado):
+        """Obtiene el color del dashboard para un estado específico, manteniendo coherencia visual"""
+        # Mapeo de colores del dashboard para coherencia visual
+        colores_dashboard = {
+            'Completado': "#27ae60",
+            'Pendiente de Autorización': "#e74c3c", 
+            'Pendiente de Autorizacion': "#e74c3c",  # Variación sin tilde
+            'Recibido': "#3498db",
+            'En Trámite': "#f39c12",
+            'En Tramite': "#f39c12",  # Variación sin tilde
+            'En Proceso': "#f39c12",  # Variación alternativa
+            'Procesando': "#f39c12",  # Variación alternativa
+            'Autorizado': "#9b59b6"
+        }
+        return colores_dashboard.get(estado, "#7f8c8d")  # Color gris por defecto
     
     def __init__(self, master, username, rol):
         super().__init__(master)
@@ -1519,10 +1535,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Estadísticas por estado
         estados_info = [
             ('Completado', '✅', ("#27ae60", "#1e8449")),
-            ('Pendiente de Autorización', '⏳', ("#f39c12", "#d68910")),
+            ('Pendiente de Autorización', '⏳', ("#e74c3c", "#c0392b")),
             ('Recibido', '📥', ("#3498db", "#2980b9")),
-            ('En Trámite', '🔄', ("#9b59b6", "#8e44ad")),
-            ('Autorizado', '✔️', ("#2ecc71", "#27ae60"))
+            ('En Trámite', '🔄', ("#f39c12", "#d68910")),
+            ('Autorizado', '✔️', ("#9b59b6", "#8e44ad"))
         ]
         
         for estado, emoji, colores in estados_info:
@@ -2121,8 +2137,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
                 row = i + 1
 
-                # Mapeo de color según estado (para la etiqueta de estado)
-                color = {"Pendiente de Autorizacion": "orange", "Autorizado": "blue", "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+                # Mapeo de color según estado (coherente con dashboard)
+                color = self.get_color_por_estado(estado)
 
                 bg = colors[i % 2]
                 # Crear un frame por columna para alinear exactamente con los encabezados
@@ -2952,7 +2968,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
         
         estado = expediente[8] if expediente[8] else "Sin estado"  # estado_expediente
-        color_estado = {"Pendiente": "orange", "Autorizado": "blue", "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+        color_estado = self.get_color_por_estado(estado)
         ctk.CTkLabel(header_frame, text=f"🏷️ {estado}", 
                     text_color=color_estado, font=ctk.CTkFont(size=11)).pack(side="right")
         
@@ -3258,8 +3274,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             # Línea 3: Estado
             if estado:
-                color_estado = {"Pendiente": "orange", "Autorizado": "blue", 
-                              "Recibido": "purple", "Completado": "green"}.get(estado, "gray")
+                color_estado = self.get_color_por_estado(estado)
                 ctk.CTkLabel(info_frame, text=f"🏷️ {estado}", 
                            text_color=color_estado).pack(anchor="w")
             
