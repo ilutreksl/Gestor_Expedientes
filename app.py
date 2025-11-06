@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.74"
+APP_VERSION = "v0.0.75"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4933,11 +4933,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
         fecha_recepcion = datos_maestro.get('fecha_recepcion')
         fecha_gestion = datos_maestro.get('fecha_gestion')
         fecha_autorizacion = datos_maestro.get('fecha_autorizacion')
+        fecha_proceso = datos_maestro.get('fecha_proceso')
         fecha_emision = datos_maestro.get('fecha_emision')
         
-        # 5. Estado 'Completado' (Último paso)
+        # 6. Estado 'Completado' (Último paso)
         if fecha_gestion:
             return "Completado"
+            
+        # 5. Estado 'En Trámite' (Cuando se ingresa fecha de proceso)
+        elif fecha_proceso:
+            return "En Trámite"
             
         # 4. Estado 'Recibido'
         elif fecha_recepcion:
