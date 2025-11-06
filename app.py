@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.77"
+APP_VERSION = "v0.0.78"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -454,6 +454,8 @@ def load_user_settings(username: str = None) -> dict:
         "show_tooltips": True,
         "compact_mode": True,
         "icon_size": 24,
+        "theme": "themes/BH_rime.json",
+        "appearance_mode": "light"
     }
     path = _get_user_settings_path()
     try:
@@ -482,8 +484,6 @@ def load_user_settings(username: str = None) -> dict:
                     if isinstance(user_section, dict):
                         merged.update(user_section)
 
-                # Ensure obsolete keys removed
-                merged.pop("theme", None)
                 return merged
     except Exception as e:
         print(f"Warning: no se pudieron cargar user_settings.json: {e}")
@@ -493,8 +493,6 @@ def save_user_settings(settings: dict, username: str = None) -> bool:
     # Do not persist attachments_dir - it's fixed by the app
     settings_to_save = settings.copy()
     settings_to_save.pop("attachments_dir", None)
-    # Ensure we don't persist obsolete keys like 'theme'
-    settings_to_save.pop("theme", None)
     path = _get_user_settings_path()
     try:
         # Load existing file if present to preserve other users/global settings
@@ -562,7 +560,7 @@ class LoginApp(ctk.CTk):
             pass  # Si no se puede cargar el icono, continuar sin él
         
         ctk.set_appearance_mode("light") 
-        ctk.set_default_color_theme("themes/rime.json")
+        ctk.set_default_color_theme("themes/BH_rime.json")
 
         self.crear_widgets_login()
 
@@ -779,11 +777,41 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_user = None
         self.icon_papel = None
         self.icon_mas = None
-        # Cargar ajustes de usuario (por usuario) pero no aplicar tema en caliente
+        # Cargar ajustes de usuario (por usuario) y aplicar tema/modo si están configurados
         try:
             self.user_settings = load_user_settings(self.username)
+            
+            # Aplicar tema personalizado si está configurado
+            tema_usuario = self.user_settings.get("theme", "themes/BH_rime.json")
+            
+            # Validar que el tema existe y es válido
+            if tema_usuario and tema_usuario != "System" and tema_usuario != "themes/BH_rime.json":
+                if os.path.exists(tema_usuario):
+                    try:
+                        ctk.set_default_color_theme(tema_usuario)
+                    except Exception:
+                        # Si falla, usar tema por defecto
+                        ctk.set_default_color_theme("themes/BH_rime.json")
+                else:
+                    ctk.set_default_color_theme("themes/BH_rime.json")
+            else:
+                ctk.set_default_color_theme("themes/BH_rime.json")
+            
+            # Aplicar modo de apariencia personalizado
+            modo_usuario = self.user_settings.get("appearance_mode", "light")
+            # BH_rime siempre debe usar modo claro
+            if tema_usuario == "themes/BH_rime.json":
+                modo_usuario = "light"
+            try:
+                ctk.set_appearance_mode(modo_usuario)
+            except Exception:
+                ctk.set_appearance_mode("light")
+                
         except Exception:
             self.user_settings = {}
+            # Aplicar valores por defecto
+            ctk.set_default_color_theme("themes/BH_rime.json")
+            ctk.set_appearance_mode("light")
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
             global USER_SETTINGS
@@ -1631,6 +1659,68 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # 3. MÉTODOS AUXILIARES Y GENERACIÓN DE CÓDIGO RMA
     # ----------------------------------------------------------------------
 
+    def obtener_temas_disponibles(self):
+        """Obtiene la lista de temas disponibles desde la carpeta themes/"""
+        import glob
+        import os
+        try:
+            temas = []
+            # Buscar archivos .json en la carpeta themes
+            archivos_tema = glob.glob("themes/*.json")
+            for archivo in archivos_tema:
+                # Normalizar la ruta y extraer solo el nombre del archivo sin la extensión
+                nombre_tema = os.path.basename(archivo).replace(".json", "")
+                # Convertir nombres a formato más amigable
+                if nombre_tema == "BH_rime":
+                    temas.append("BH Rime (Predeterminado)")
+                elif nombre_tema == "rime":
+                    temas.append("Rime")
+                elif nombre_tema == "metal":
+                    temas.append("Metal")
+                elif nombre_tema == "pink":
+                    temas.append("Pink")
+                elif nombre_tema == "red":
+                    temas.append("Red")
+                else:
+                    # Para temas futuros, capitalizar el nombre
+                    temas.append(nombre_tema.title())
+            
+            # Asegurar que BH Rime esté primero
+            temas_ordenados = []
+            if "BH Rime (Predeterminado)" in temas:
+                temas_ordenados.append("BH Rime (Predeterminado)")
+                temas.remove("BH Rime (Predeterminado)")
+            temas_ordenados.extend(sorted(temas))
+            
+            return temas_ordenados if temas_ordenados else ["BH Rime (Predeterminado)"]
+        except Exception:
+            return ["BH Rime (Predeterminado)", "Rime", "Metal", "Pink", "Red"]
+
+    def tema_display_a_archivo(self, tema_display):
+        """Convierte el nombre mostrado del tema al nombre del archivo"""
+        # Limpiar el nombre de entrada por si tiene rutas o caracteres extraños
+        tema_limpio = tema_display.replace("Themes\\", "").replace("Themes/", "").replace("themes\\", "").replace("themes/", "")
+        
+        mapping = {
+            "BH Rime (Predeterminado)": "BH_rime.json",
+            "Rime": "rime.json", 
+            "Metal": "metal.json",
+            "Pink": "pink.json",
+            "Red": "red.json"
+        }
+        return mapping.get(tema_limpio, "BH_rime.json")
+
+    def archivo_a_tema_display(self, archivo_tema):
+        """Convierte el nombre del archivo al nombre mostrado"""
+        mapping = {
+            "BH_rime.json": "BH Rime (Predeterminado)",
+            "rime.json": "Rime",
+            "metal.json": "Metal", 
+            "pink.json": "Pink",
+            "red.json": "Red"
+        }
+        return mapping.get(archivo_tema, "BH Rime (Predeterminado)")
+
     def mostrar_ajustes(self):
         """Abre un diálogo modal para que el usuario modifique sus preferencias."""
         try:
@@ -1638,6 +1728,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             dlg.transient(self)
             dlg.grab_set()
             dlg.title("Ajustes")
+            
+            # Agregar icono personalizado
+            try:
+                dlg.iconbitmap("Icono_Ilutrek.ico")
+            except Exception:
+                pass
 
             frm = ctk.CTkFrame(dlg, fg_color="transparent")
             frm.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
@@ -1662,8 +1758,44 @@ class VentanaPrincipal(ctk.CTkToplevel):
             switch_compact = ctk.CTkSwitch(frm, text="", variable=var_compact, width=40)
             switch_compact.grid(row=2, column=1, sticky="w", padx=6, pady=6)
 
+            # Tema de la aplicación
+            ctk.CTkLabel(frm, text="Tema:").grid(row=3, column=0, sticky="w", padx=6, pady=6)
+            temas_disponibles = self.obtener_temas_disponibles()
+            tema_menu = ctk.CTkOptionMenu(frm, values=temas_disponibles, width=250)
+            # Obtener tema actual del usuario
+            tema_actual = self.user_settings.get("theme", "themes/BH_rime.json")
+            tema_display_actual = self.archivo_a_tema_display(tema_actual.replace("themes/", ""))
+            if tema_display_actual in temas_disponibles:
+                tema_menu.set(tema_display_actual)
+            else:
+                tema_menu.set("BH Rime (Predeterminado)")
+            tema_menu.grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+
+            # Modo claro/oscuro (solo para temas que no sean BH_rime)
+            ctk.CTkLabel(frm, text="Modo:").grid(row=4, column=0, sticky="w", padx=6, pady=6)
+            modo_values = ["Claro", "Oscuro"]
+            modo_menu = ctk.CTkOptionMenu(frm, values=modo_values, width=150)
+            modo_actual = self.user_settings.get("appearance_mode", "light")
+            modo_menu.set("Claro" if modo_actual == "light" else "Oscuro")
+            modo_menu.grid(row=4, column=1, sticky="w", padx=6, pady=6)
+
+            # Función para habilitar/deshabilitar el selector de modo según el tema
+            def actualizar_modo_disponible(*args):
+                tema_seleccionado = tema_menu.get()
+                if tema_seleccionado == "BH Rime (Predeterminado)":
+                    # BH_rime solo funciona en modo claro
+                    modo_menu.set("Claro")
+                    modo_menu.configure(state="disabled")
+                else:
+                    modo_menu.configure(state="normal")
+            
+            # Conectar el evento de cambio de tema
+            tema_menu.configure(command=actualizar_modo_disponible)
+            # Aplicar estado inicial
+            actualizar_modo_disponible()
+
             # Email
-            ctk.CTkLabel(frm, text="Email:").grid(row=3, column=0, sticky="w", padx=6, pady=6)
+            ctk.CTkLabel(frm, text="Email:").grid(row=5, column=0, sticky="w", padx=6, pady=6)
             entry_email = ctk.CTkEntry(frm, width=300)
             # Try to prefill from DB if exists
             try:
@@ -1683,16 +1815,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         pass
             except Exception:
                 pass
-            entry_email.grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+            entry_email.grid(row=5, column=1, sticky="ew", padx=6, pady=6)
 
             # New password
-            ctk.CTkLabel(frm, text="Nueva contraseña:").grid(row=4, column=0, sticky="w", padx=6, pady=6)
+            ctk.CTkLabel(frm, text="Nueva contraseña:").grid(row=6, column=0, sticky="w", padx=6, pady=6)
             entry_password = ctk.CTkEntry(frm, width=300, show="*")
-            entry_password.grid(row=4, column=1, sticky="ew", padx=6, pady=6)
+            entry_password.grid(row=6, column=1, sticky="ew", padx=6, pady=6)
 
-            ctk.CTkLabel(frm, text="Confirmar contraseña:").grid(row=5, column=0, sticky="w", padx=6, pady=6)
+            ctk.CTkLabel(frm, text="Confirmar contraseña:").grid(row=7, column=0, sticky="w", padx=6, pady=6)
             entry_password2 = ctk.CTkEntry(frm, width=300, show="*")
-            entry_password2.grid(row=5, column=1, sticky="ew", padx=6, pady=6)
+            entry_password2.grid(row=7, column=1, sticky="ew", padx=6, pady=6)
 
             # Buttons
             btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
@@ -1700,22 +1832,56 @@ class VentanaPrincipal(ctk.CTkToplevel):
             btn_frame.grid_columnconfigure(0, weight=1)
 
             def guardar():
+                # Obtener archivo del tema seleccionado
+                tema_seleccionado = tema_menu.get()
+                archivo_tema = self.tema_display_a_archivo(tema_seleccionado)
+                
+                # Obtener modo seleccionado
+                modo_seleccionado = modo_menu.get()
+                appearance_mode = "light" if modo_seleccionado == "Claro" else "dark"
+                
+                # Guardar valores actuales para comparar
+                tema_anterior = self.user_settings.get("theme", "")
+                modo_anterior = self.user_settings.get("appearance_mode", "")
+                
                 new = {
                     "date_format": date_menu.get(),
                     "show_tooltips": bool(var_tooltips.get()),
-                    "compact_mode": bool(var_compact.get())
+                    "compact_mode": bool(var_compact.get()),
+                    "theme": f"themes/{archivo_tema}",
+                    "appearance_mode": appearance_mode
                 }
+                
+                # Actualizar configuraciones
                 self.user_settings.update(new)
                 ok = save_user_settings(self.user_settings, self.username)
+                
                 # Exponer globalmente y persistir valores en ejecución
                 try:
                     global USER_SETTINGS
                     USER_SETTINGS = self.user_settings
                 except Exception:
                     pass
-                # Nota: guardamos el theme en las preferencias por usuario, pero NO aplicamos
-                # la apariencia en caliente aquí para evitar re-dibujos. El theme se aplicará
-                # al reiniciar la aplicación.
+                
+                # Mostrar mensaje informativo si se cambió el tema o modo
+                nuevo_tema = new.get("theme", "")
+                nuevo_modo = new.get("appearance_mode", "")
+                
+                if nuevo_tema != tema_anterior or nuevo_modo != modo_anterior:
+                    try:
+                        # Asegurar que el messagebox aparezca en primer plano
+                        dlg.focus_force()
+                        messagebox.showinfo("Ajustes Guardados", 
+                                          "Los cambios de tema y modo se aplicarán al reiniciar la aplicación.",
+                                          parent=dlg)
+                    except Exception:
+                        # Fallback sin parent
+                        try:
+                            messagebox.showinfo("Ajustes Guardados", 
+                                              "Los cambios de tema y modo se aplicarán al reiniciar la aplicación.")
+                        except Exception:
+                            pass
+                
                 # Redibujar listado para aplicar compact mode
                 try:
                     self.mostrar_lista_rma()

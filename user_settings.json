@@ -1,6 +1,6 @@
 {
   "global": {
-    "theme": "System",
+    "theme": "themes/BH_rime.json",
     "date_format": "YYYY-MM-DD",
     "show_tooltips": true,
     "compact_mode": true,
@@ -12,6 +12,8 @@
       "show_tooltips": true,
       "compact_mode": true,
       "icon_size": 24,
+      "theme": "themes/BH_rime.json",
+      "appearance_mode": "dark",
       "historial_busquedas": [
         {
           "termino": "carlos",
