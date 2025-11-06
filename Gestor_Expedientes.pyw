@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.76"
+APP_VERSION = "v0.0.77"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -555,6 +555,12 @@ class LoginApp(ctk.CTk):
         self.geometry("400x300")
         self.resizable(False, False)
         
+        # Agregar icono personalizado de ILUTREK
+        try:
+            self.iconbitmap("Icono_Ilutrek.ico")
+        except Exception:
+            pass  # Si no se puede cargar el icono, continuar sin él
+        
         ctk.set_appearance_mode("light") 
         ctk.set_default_color_theme("themes/rime.json")
 
@@ -803,10 +809,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Título de la ventana principal
         try:
             self.title("Gestión RMA - Expedientes")
+            # Agregar icono personalizado de ILUTREK
+            self.iconbitmap("Icono_Ilutrek.ico")
         except Exception:
             # CTkToplevel puede usar wm_title alternativamente
             try:
                 self.wm_title("Gestión RMA - Expedientes")
+                self.iconbitmap("Icono_Ilutrek.ico")
+            except Exception:
+                pass  # Si no se puede cargar, continuar sin icono
             except Exception:
                 pass
         
@@ -5514,6 +5525,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ventana.title("Gestión de Usuarios")
         ventana.geometry("600x500")
         ventana.grab_set()
+        
+        # Agregar icono personalizado
+        try:
+            ventana.iconbitmap("Icono_Ilutrek.ico")
+        except Exception:
+            pass
 
         # Frame principal
         frame = ctk.CTkFrame(ventana)
@@ -5974,6 +5991,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         win.title("Gestión RMP - Proveedores")
         win.geometry("1000x650")
         win.grab_set()
+        
+        # Agregar icono personalizado
+        try:
+            win.iconbitmap("Icono_Ilutrek.ico")
+        except Exception:
+            pass
 
         main = ctk.CTkFrame(win)
         main.pack(fill="both", expand=True, padx=12, pady=12)
@@ -10476,6 +10499,12 @@ Versión de la App: {APP_VERSION}
             ventana_notas.title("Gestión de Notas")
             ventana_notas.geometry("800x600")
             ventana_notas.transient(self)
+            
+            # Agregar icono personalizado
+            try:
+                ventana_notas.iconbitmap("Icono_Ilutrek.ico")
+            except Exception:
+                pass
             
             # Obtener información del cliente
             cliente = self.obtener_cliente(cliente_id)
