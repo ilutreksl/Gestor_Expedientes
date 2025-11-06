@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.71"
+APP_VERSION = "v0.0.70"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6722,6 +6722,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         btn_next = ctk.CTkButton(header, text="▶", width=40)
         btn_next.grid(row=1, column=5, padx=(2,0), pady=(6,0))
 
+        pb = ttk.Progressbar(header, mode="indeterminate", length=120)
+        try:
+            pb.grid(row=1, column=6, padx=(8,0), pady=(6,0))
+        except Exception:
+            pass
+
         rows_container = ctk.CTkFrame(sf)
         rows_container.pack(fill="both", expand=True)
 
@@ -6810,6 +6816,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         def load_expedientes_thread(page=1):
             try:
+                self.after(0, lambda: pb.start())
                 search = search_var.get().strip()
                 page_size = int(page_size_opt.get())
                 offset = (page - 1) * page_size
@@ -6841,8 +6848,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 cur.execute(sql, tuple(params))
                 filas = cur.fetchall()
                 conn.close()
-                self.after(0, lambda: render_rows_expedientes(filas, page, total, page_size))
+                self.after(0, lambda: (pb.stop(), render_rows_expedientes(filas, page, total, page_size)))
             except Exception as e:
+                try:
+                    pb.stop()
+                except Exception:
+                    pass
                 self.after(0, lambda: messagebox.showerror("Error BD", f"No se pudieron cargar expedientes: {e}"))
 
         def start_load_expedientes(page=1):
