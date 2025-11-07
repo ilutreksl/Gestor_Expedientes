@@ -111,7 +111,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.78"
+APP_VERSION = "v0.0.79"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -613,6 +613,42 @@ class LoginApp(ctk.CTk):
             print(f"Error de base de datos: {e}")
             return None
 
+    def cargar_tema_usuario(self, username):
+        """Carga y aplica el tema personalizado del usuario antes de crear la ventana principal."""
+        try:
+            user_settings = load_user_settings(username)
+            
+            # Aplicar tema personalizado si está configurado
+            tema_usuario = user_settings.get("theme", "themes/BH_rime.json")
+            
+            # Validar que el tema existe y es válido
+            if tema_usuario and tema_usuario != "System":
+                if os.path.exists(tema_usuario):
+                    try:
+                        ctk.set_default_color_theme(tema_usuario)
+                    except Exception as e:
+                        # Si falla, usar tema por defecto
+                        ctk.set_default_color_theme("themes/BH_rime.json")
+                else:
+                    ctk.set_default_color_theme("themes/BH_rime.json")
+            else:
+                ctk.set_default_color_theme("themes/BH_rime.json")
+            
+            # Aplicar modo de apariencia personalizado
+            modo_usuario = user_settings.get("appearance_mode", "light")
+            # BH_rime siempre debe usar modo claro
+            if tema_usuario == "themes/BH_rime.json":
+                modo_usuario = "light"
+            try:
+                ctk.set_appearance_mode(modo_usuario)
+            except Exception as e:
+                ctk.set_appearance_mode("light")
+                
+        except Exception as e:
+            # Aplicar valores por defecto
+            ctk.set_default_color_theme("themes/BH_rime.json")
+            ctk.set_appearance_mode("light")
+
     def verificar_login(self):
         """Comprueba las credenciales del usuario."""
         username = self.username_entry.get()
@@ -654,6 +690,9 @@ class LoginApp(ctk.CTk):
 
     def abrir_ventana_principal(self, username, rol):
         """Abre la ventana principal de la aplicación."""
+        
+        # IMPORTANTE: Cargar y aplicar tema del usuario ANTES de crear la ventana principal
+        self.cargar_tema_usuario(username)
         
         self.withdraw() # Ocultamos la ventana de login
         # Mostrar un splash/transición entre login y la ventana principal
@@ -777,41 +816,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_user = None
         self.icon_papel = None
         self.icon_mas = None
-        # Cargar ajustes de usuario (por usuario) y aplicar tema/modo si están configurados
+        # Cargar ajustes de usuario (ya aplicados en LoginApp, solo necesitamos cargarlos aquí)
         try:
             self.user_settings = load_user_settings(self.username)
-            
-            # Aplicar tema personalizado si está configurado
-            tema_usuario = self.user_settings.get("theme", "themes/BH_rime.json")
-            
-            # Validar que el tema existe y es válido
-            if tema_usuario and tema_usuario != "System" and tema_usuario != "themes/BH_rime.json":
-                if os.path.exists(tema_usuario):
-                    try:
-                        ctk.set_default_color_theme(tema_usuario)
-                    except Exception:
-                        # Si falla, usar tema por defecto
-                        ctk.set_default_color_theme("themes/BH_rime.json")
-                else:
-                    ctk.set_default_color_theme("themes/BH_rime.json")
-            else:
-                ctk.set_default_color_theme("themes/BH_rime.json")
-            
-            # Aplicar modo de apariencia personalizado
-            modo_usuario = self.user_settings.get("appearance_mode", "light")
-            # BH_rime siempre debe usar modo claro
-            if tema_usuario == "themes/BH_rime.json":
-                modo_usuario = "light"
-            try:
-                ctk.set_appearance_mode(modo_usuario)
-            except Exception:
-                ctk.set_appearance_mode("light")
-                
         except Exception:
             self.user_settings = {}
-            # Aplicar valores por defecto
-            ctk.set_default_color_theme("themes/BH_rime.json")
-            ctk.set_appearance_mode("light")
+            
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
             global USER_SETTINGS
@@ -1405,9 +1415,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if año is None:
             año = self.combo_año_dashboard.get()
         
-        # Limpiar estadísticas actuales
-        for widget in self.stats_frame.winfo_children():
-            widget.destroy()
+        # Limpiar estadísticas actuales de forma más exhaustiva
+        try:
+            for widget in self.stats_frame.winfo_children():
+                widget.destroy()
+            # Forzar actualización del frame
+            self.stats_frame.update_idletasks()
+        except Exception as e:
+            print(f"Error limpiando dashboard: {e}")
         
         # Obtener estadísticas de la base de datos
         stats = self.obtener_estadisticas_expedientes(año)
@@ -1553,102 +1568,70 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return []
     
     def crear_interfaz_estadisticas(self, stats, articulos_problematicos):
-        """Crea la interfaz visual para mostrar las estadísticas."""
+        """Crea la interfaz visual para mostrar las estadísticas de forma simple y rápida."""
+        # Verificar que el frame exista y esté limpio
+        if not hasattr(self, 'stats_frame') or not self.stats_frame.winfo_exists():
+            return
+            
+        # Doble verificación: limpiar cualquier widget remanente
+        for widget in self.stats_frame.winfo_children():
+            widget.destroy()
+        
         # Título del año
         año_label = ctk.CTkLabel(self.stats_frame, 
                                 text=f"Expedientes {self.combo_año_dashboard.get()}", 
                                 font=ctk.CTkFont(size=12, weight="bold"))
         año_label.pack(pady=(8, 12))
         
-        # Estadística de total
-        total_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#1f538d", "#14375e"))
-        total_frame.pack(fill="x", padx=5, pady=3)
-        
-        ctk.CTkLabel(total_frame, text="📋 TOTAL", 
-                    font=ctk.CTkFont(size=11, weight="bold"), 
-                    text_color="white").pack(pady=(6, 1))
-        ctk.CTkLabel(total_frame, text=str(stats.get('Total', 0)), 
-                    font=ctk.CTkFont(size=16, weight="bold"), 
-                    text_color="white").pack(pady=(0, 6))
-        
-        # Estadísticas por estado
-        estados_info = [
-            ('Completado', '✅', ("#27ae60", "#1e8449")),
-            ('Pendiente de Autorización', '⏳', ("#e74c3c", "#c0392b")),
-            ('Recibido', '📥', ("#3498db", "#2980b9")),
-            ('En Trámite', '🔄', ("#f39c12", "#d68910")),
-            ('Autorizado', '✔️', ("#9b59b6", "#8e44ad"))
+        # Lista simple de estadísticas sin colores complejos
+        estadisticas_texto = [
+            f"📋 Total: {stats.get('Total', 0)}",
+            f"✅ Completado: {stats.get('Completado', 0)}",
+            f"⏳ Pend. Autor.: {stats.get('Pendiente de Autorización', 0)}",
+            f"📥 Recibido: {stats.get('Recibido', 0)}",
+            f"🔄 En Trámite: {stats.get('En Trámite', 0)}",
+            f"✔️ Autorizado: {stats.get('Autorizado', 0)}"
         ]
         
-        for estado, emoji, colores in estados_info:
-            estado_frame = ctk.CTkFrame(self.stats_frame, fg_color=colores)
-            estado_frame.pack(fill="x", padx=5, pady=1)
-            
-            # Contenido del estado
-            content_frame = ctk.CTkFrame(estado_frame, fg_color="transparent")
-            content_frame.pack(fill="x", padx=6, pady=4)
-            
-            # Estado y emoji (texto más pequeño para caber en 200px)
-            estado_text = f"{emoji} {estado.replace('Pendiente de Autorización', 'Pend. Autor.')}"
-            estado_label = ctk.CTkLabel(content_frame, 
-                                      text=estado_text, 
-                                      font=ctk.CTkFont(size=9, weight="bold"),
-                                      text_color="white",
-                                      anchor="w")
-            estado_label.pack(side="left", fill="x", expand=True)
-            
-            # Número
-            count_label = ctk.CTkLabel(content_frame, 
-                                     text=str(stats.get(estado, 0)), 
-                                     font=ctk.CTkFont(size=12, weight="bold"),
-                                     text_color="white")
-            count_label.pack(side="right")
+        # Mostrar cada estadística en una fila simple
+        for texto in estadisticas_texto:
+            fila_label = ctk.CTkLabel(self.stats_frame, 
+                                    text=texto, 
+                                    font=ctk.CTkFont(size=10),
+                                    anchor="w")
+            fila_label.pack(fill="x", padx=10, pady=1)
         
-        # Separador
-        separador = ctk.CTkFrame(self.stats_frame, height=2, fg_color="gray")
-        separador.pack(fill="x", padx=5, pady=(10, 8))
+        # Separador simple
+        separador = ctk.CTkLabel(self.stats_frame, text="─" * 25, 
+                               font=ctk.CTkFont(size=8))
+        separador.pack(pady=(8, 4))
         
-        # Título de artículos problemáticos
+        # Título de artículos problemáticos simplificado
         periodo_texto = self.combo_periodo.get()
         titulo_problematicos = ctk.CTkLabel(self.stats_frame, 
-                                          text=f"🔴 Top 10 Problemáticos ({periodo_texto})", 
-                                          font=ctk.CTkFont(size=11, weight="bold"))
-        titulo_problematicos.pack(pady=(0, 8))
+                                          text=f"🔴 Problemáticos ({periodo_texto})", 
+                                          font=ctk.CTkFont(size=10, weight="bold"))
+        titulo_problematicos.pack(pady=(0, 4))
         
-        # Lista de artículos problemáticos
+        # Lista simple de artículos problemáticos (solo top 5 para mejor rendimiento)
         if articulos_problematicos:
-            for i, articulo in enumerate(articulos_problematicos[:10], 1):
-                problema_frame = ctk.CTkFrame(self.stats_frame, fg_color=("#e74c3c", "#c0392b"))
-                problema_frame.pack(fill="x", padx=5, pady=1)
-                
-                content_frame = ctk.CTkFrame(problema_frame, fg_color="transparent")
-                content_frame.pack(fill="x", padx=4, pady=2)
-                
-                # Número de ranking y código de artículo
-                ranking_text = f"{i}. {articulo['referencia_articulo'][:12]}..."  # Truncar código si es muy largo
-                ranking_label = ctk.CTkLabel(content_frame, 
-                                           text=ranking_text, 
-                                           font=ctk.CTkFont(size=8, weight="bold"),
-                                           text_color="white",
-                                           anchor="w")
-                ranking_label.pack(side="left", fill="x", expand=True)
-                
-                # Número de problemas
-                problemas_label = ctk.CTkLabel(content_frame, 
-                                             text=str(articulo['problemas']), 
-                                             font=ctk.CTkFont(size=10, weight="bold"),
-                                             text_color="white")
-                problemas_label.pack(side="right")
+            for i, articulo in enumerate(articulos_problematicos[:5], 1):
+                # Texto simple sin marcos complejos
+                problema_texto = f"{i}. {articulo['referencia_articulo'][:15]}... ({articulo['problemas']})"
+                problema_label = ctk.CTkLabel(self.stats_frame, 
+                                            text=problema_texto, 
+                                            font=ctk.CTkFont(size=9),
+                                            anchor="w")
+                problema_label.pack(fill="x", padx=10, pady=1)
         else:
             no_datos_label = ctk.CTkLabel(self.stats_frame, 
-                                        text="Sin datos para el período seleccionado", 
-                                        font=ctk.CTkFont(size=9),
-                                        text_color="gray")
-            no_datos_label.pack(pady=5)
+                                        text="Sin datos", 
+                                        font=ctk.CTkFont(size=9))
+            no_datos_label.pack(pady=2)
         
-        # Botón de actualización
+        # Botón de actualización simple
         btn_actualizar = ctk.CTkButton(self.stats_frame, 
-                                     text="🔄 Actualizar",
+                                     text="� Actualizar",
                                      command=self.actualizar_dashboard,
                                      width=80, height=25,
                                      font=ctk.CTkFont(size=10))
