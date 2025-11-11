@@ -122,7 +122,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.82"
+APP_VERSION = "v0.0.83"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5972,8 +5972,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def generar_informe_dinamico(self):
         """
-        Genera un informe dinámico usando python-docx, lo guarda en la carpeta 
-        de adjuntos del RMA y lo registra en la base de datos.
+        Genera un informe dinámico usando python-docx, lo guarda en Dropbox 
+        y lo registra en la base de datos.
         """
         # 1. Validaciones y Obtención de Datos
         if not self.current_rma_id:
@@ -5992,16 +5992,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
              messagebox.showerror("Error", "Los datos del RMA no están cargados. Intente recargar el expediente.")
              return
 
-        # 2. Rutas
+        # 2. Rutas - Plantilla sigue siendo local
         plantilla_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas", "Plantilla_RMA.docx")
         
         # Nombre del archivo final: Ej. RMA2024-001_Informe_20240920.docx
         fecha_str = datetime.datetime.now().strftime("%Y%m%d")
         nombre_archivo_final = f"{codigo_rma}_Informe_{fecha_str}.docx"
-        
-        # Ruta donde se guardará el archivo final (usando tu método existente para la carpeta)
-        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
-        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo_final)
 
         try:
             # 3. Cargar la plantilla y definir mapeo de marcadores
@@ -6012,7 +6008,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 '[[CODIGO_RMA]]': codigo_rma,
                 '[[CLIENTE]]': nombre_cliente,
                 '[[FECHA_EMISION]]': datos.get('fecha_emision', 'N/A'),
-                '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'), # Asumo que 'estado' es parte de los datos cargados
+                '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'),
                 '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
             }
             
@@ -6022,24 +6018,64 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     if clave in p.text:
                         p.text = p.text.replace(clave, valor)
             
-            # 5. Guardar el documento final
-            os.makedirs(ruta_destino_dir, exist_ok=True) 
-            document.save(ruta_destino_completa)
+            # 5. Guardar temporalmente para subirlo a Dropbox
+            temp_dir = tempfile.mkdtemp(prefix="informe_rma_")
+            temp_file_path = os.path.join(temp_dir, nombre_archivo_final)
+            document.save(temp_file_path)
             
-            # 6. Registrar en la Base de Datos
-            ruta_relativa = os.path.join(codigo_rma, nombre_archivo_final)
+            # 6. Decidir dónde guardar (Dropbox o local)
+            if usar_dropbox():
+                # Subir a Dropbox
+                exito, ruta_relativa = self._subir_archivo_dropbox(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'dropbox'
+                ubicacion_desc = "Dropbox"
+            else:
+                # Guardar localmente (fallback)
+                exito, ruta_relativa = self._subir_archivo_local(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'local'
+                ubicacion_desc = "local"
+            
+            # 7. Limpiar archivo temporal
+            try:
+                os.remove(temp_file_path)
+                os.rmdir(temp_dir)
+            except:
+                pass
+            
+            if not exito:
+                messagebox.showerror("Error", f"No se pudo guardar el informe en {ubicacion_desc}.")
+                return
+            
+            # 8. Registrar en la Base de Datos
             conn, cursor = self.master.conectar_db()
             try:
-                cursor.execute("""
-                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    self.current_rma_id, 
-                    nombre_archivo_final, 
-                    ruta_relativa, 
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                    self.username
-                ))
+                # Verificar esquema de BD antes de insertar
+                self._verificar_columna_tipo_almacenamiento(cursor)
+                
+                # Preparar inserción con o sin tipo_almacenamiento según el esquema
+                if getattr(self, '_usar_tipo_almacenamiento', False):
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        nombre_archivo_final, 
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username,
+                        tipo_almacenamiento
+                    ))
+                else:
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        nombre_archivo_final, 
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username
+                    ))
                 
                 # Registro en el historial
                 cursor.execute("""
@@ -6047,25 +6083,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     VALUES (?, ?, ?, ?)
                 """, (
                     self.current_rma_id, 
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                    f"Generado documento de Informe: {nombre_archivo_final}", 
+                    datetime.datetime.now().isoformat(),
+                    f"Generado documento de Informe: {nombre_archivo_final} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})", 
                     self.username
                 ))
                 
                 conn.commit()
                 self.cargar_lista_adjuntos(self.current_rma_id) # Refresca la lista de adjuntos
+                
                 try:
-                    # Llamamos al método que recarga el contenido de la pestaña
-                    self.mostrar_historial(self.historial_tab) 
+                    # Actualizar historial si está visible
+                    if hasattr(self, 'historial_tab'):
+                        self.mostrar_historial(self.historial_tab)
                 except AttributeError:
-                    # Si la pestaña historial_tab no está definida (ej. en modo "nuevo"), ignoramos.
+                    # Si la pestaña historial_tab no está definida, ignoramos.
                     pass
                 
-                messagebox.showinfo("Éxito", f"Informe '{nombre_archivo_final}' generado y adjuntado correctamente.")
+                # Mensaje personalizado según donde se guardó
+                if usar_dropbox():
+                    messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y subido a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+                else:
+                    messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y guardado localmente.")
                 
             except Exception as db_e:
                 conn.rollback()
-                messagebox.showerror("Error DB", f"Informe generado, pero error al registrar en DB. Revise la carpeta de adjuntos.\nError: {db_e}")
+                messagebox.showerror("Error DB", f"Informe generado, pero error al registrar en DB.\nError: {db_e}")
             finally:
                 conn.close()
 
@@ -6077,7 +6119,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
     def generar_reposicion_devolucion(self):
         """
         Genera el documento de Reposición/Devolución usando la plantilla
-        "Reposicion_RMA.docx", lo guarda y lo registra como adjunto.
+        "Reposicion_RMA.docx", lo guarda en Dropbox y lo registra como adjunto.
         """
         # 1. Validaciones y Obtención de Datos
         if not self.current_rma_id:
@@ -6095,18 +6137,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
              messagebox.showerror("Error", "No se pudieron cargar los datos clave del RMA. Intente recargar el expediente.")
              return
 
-        # 2. Rutas y Nombres de Archivo
-        # 🚨 ¡Diferencia Clave! Usamos la nueva plantilla
+        # 2. Rutas y Nombres de Archivo - Plantilla sigue siendo local
         nombre_plantilla = "Reposicion_RMA.docx" 
         plantilla_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas", nombre_plantilla)
         
         # Nombre del archivo final: Ej. RMA2024-001_Reposicion_20251016.docx
         fecha_str = datetime.datetime.now().strftime("%Y%m%d")
         nombre_archivo_final = f"{codigo_rma}_Reposicion_{fecha_str}.docx"
-        
-        # Ruta donde se guardará el archivo final (usando tu método existente para la carpeta)
-        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
-        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo_final)
 
         # 3. Verificar la Plantilla
         if not os.path.exists(plantilla_path):
@@ -6117,7 +6154,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # 4. Cargar la plantilla y definir mapeo de marcadores
             document = docx.Document(plantilla_path)
             
-            # Mapeo: Reutilizamos el mapeo existente (si tienes nuevos campos, añádelos aquí)
+            # Mapeo: Reutilizamos el mapeo existente
             mapeo = {
                 '[[CODIGO_RMA]]': codigo_rma,
                 '[[CLIENTE]]': nombre_cliente,
@@ -6126,19 +6163,108 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
             }
             
-            # 5. Reemplazar marcadores en párrafos (Usando la lógica robusta que ya funciona)
+            # 5. Reemplazar marcadores en párrafos
             for p in document.paragraphs:
                 for clave, valor in mapeo.items():
                     valor_a_insertar = str(valor) if valor is not None else "" 
                     if clave in p.text:
                         p.text = p.text.replace(clave, valor_a_insertar)
             
-            # 6. Guardar el documento final
-            os.makedirs(ruta_destino_dir, exist_ok=True) 
-            document.save(ruta_destino_completa)
+            # 6. Guardar temporalmente para subirlo a Dropbox
+            temp_dir = tempfile.mkdtemp(prefix="reposicion_rma_")
+            temp_file_path = os.path.join(temp_dir, nombre_archivo_final)
+            document.save(temp_file_path)
             
-            # 7. Registrar en la Base de Datos (Misma lógica para adjuntos e historial)
-            ruta_relativa = os.path.join(codigo_rma, nombre_archivo_final)
+            # 7. Decidir dónde guardar (Dropbox o local)
+            if usar_dropbox():
+                # Subir a Dropbox
+                exito, ruta_relativa = self._subir_archivo_dropbox(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'dropbox'
+                ubicacion_desc = "Dropbox"
+            else:
+                # Guardar localmente (fallback)
+                exito, ruta_relativa = self._subir_archivo_local(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'local'
+                ubicacion_desc = "local"
+            
+            # 8. Limpiar archivo temporal
+            try:
+                os.remove(temp_file_path)
+                os.rmdir(temp_dir)
+            except:
+                pass
+            
+            if not exito:
+                messagebox.showerror("Error", f"No se pudo guardar el documento de reposición en {ubicacion_desc}.")
+                return
+            
+            # 9. Registrar en la Base de Datos
+            conn, cursor = self.master.conectar_db()
+            try:
+                # Verificar esquema de BD antes de insertar
+                self._verificar_columna_tipo_almacenamiento(cursor)
+                
+                # Preparar inserción con o sin tipo_almacenamiento según el esquema
+                if getattr(self, '_usar_tipo_almacenamiento', False):
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        nombre_archivo_final, 
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username,
+                        tipo_almacenamiento
+                    ))
+                else:
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        nombre_archivo_final, 
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username
+                    ))
+                
+                # Registro en el historial
+                cursor.execute("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, descripcion_cambio, usuario)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    datetime.datetime.now().isoformat(),
+                    f"Generado documento de Reposición/Devolución: {nombre_archivo_final} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})", 
+                    self.username
+                ))
+                
+                conn.commit()
+                self.cargar_lista_adjuntos(self.current_rma_id) # Refresca la lista de adjuntos
+                
+                try:
+                    # Actualizar historial si está visible
+                    if hasattr(self, 'historial_tab'):
+                        self.mostrar_historial(self.historial_tab)
+                except AttributeError:
+                    # Si la pestaña historial_tab no está definida, ignoramos.
+                    pass
+                
+                # Mensaje personalizado según donde se guardó
+                if usar_dropbox():
+                    messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y subido a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+                else:
+                    messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y guardado localmente.")
+                
+            except Exception as db_e:
+                conn.rollback()
+                messagebox.showerror("Error DB", f"Documento generado, pero error al registrar en DB/Historial. Error: {db_e}")
+            finally:
+                conn.close()
+
+        except Exception as e:
+            messagebox.showerror("Error de Generación", f"No se pudo generar el documento. Asegúrese de que la plantilla existe y es un archivo .docx válido.\nError: {e}")
             conn, cursor = self.master.conectar_db()
             try:
                 # Registro en rma_adjuntos
