@@ -27,6 +27,17 @@ from CTkDatePicker import CTkDatePicker
 import tkinter as tk
 from tkinter import ttk
 import threading
+import tempfile
+
+# Importaciones para Dropbox
+import dropbox
+from dropbox.exceptions import ApiError, AuthError
+try:
+    from dropbox_config import DROPBOX_ACCESS_TOKEN, DROPBOX_ROOT_FOLDER
+except ImportError:
+    print("ADVERTENCIA: No se pudo cargar dropbox_config.py. El sistema de adjuntos usará almacenamiento local.")
+    DROPBOX_ACCESS_TOKEN = None
+    DROPBOX_ROOT_FOLDER = "/Adjuntos_RMA"
 
 
 class Tooltip:
@@ -111,7 +122,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.79"
+APP_VERSION = "v0.0.80"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -253,10 +264,13 @@ def connect_db(timeout: float | None = None):
                         result_item = results[0]
                         if result_item.get("type") == "error":
                             error_msg = result_item.get("error", {}).get("message", "Unknown error")
-                            print(f"SQL Error: {error_msg}")
-                            print(f"Query: {sql}")
-                            print(f"Params: {params}")
-                            self._result = {}
+                            # No imprimir errores de verificación de esquema que son normales
+                            if not ("tipo_almacenamiento" in sql and "SELECT" in sql):
+                                print(f"SQL Error: {error_msg}")
+                                print(f"Query: {sql}")
+                                print(f"Params: {params}")
+                            # Lanzar excepción para que pueda ser manejada por el código que llama
+                            raise sqlite3.OperationalError(f"SQLite error: {error_msg}")
                         else:
                             result = result_item.get("response", {}).get("result", {})
                             self._result = result
@@ -438,6 +452,43 @@ def optimize_database():
 # --- NUEVA VARIABLE GLOBAL ---
 ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
 # -----------------------------
+
+# --- CONFIGURACIÓN Y FUNCIONES PARA DROPBOX ---
+def get_dropbox_client():
+    """
+    Crea y retorna un cliente de Dropbox si las credenciales están configuradas.
+    Retorna None si no está configurado o hay error.
+    """
+    if not DROPBOX_ACCESS_TOKEN or DROPBOX_ACCESS_TOKEN == "tu_access_token_aqui":
+        return None
+    
+    try:
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        # Verificar que el token funciona haciendo una llamada simple
+        dbx.users_get_current_account()
+        return dbx
+    except (AuthError, ApiError) as e:
+        print(f"Error de autenticación con Dropbox: {e}")
+        return None
+    except Exception as e:
+        print(f"Error conectando con Dropbox: {e}")
+        return None
+
+def usar_dropbox():
+    """
+    Determina si se debe usar Dropbox o almacenamiento local.
+    """
+    return get_dropbox_client() is not None
+
+def normalizar_ruta_dropbox(ruta):
+    """
+    Normaliza una ruta para Dropbox (debe empezar con /).
+    """
+    if not ruta.startswith('/'):
+        ruta = '/' + ruta
+    return ruta.replace('\\', '/')
+
+# ------------------------------------------------
 
 # --- User settings persistence (simple JSON file) ---
 import json
@@ -803,6 +854,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.toaster = ToastNotifier() if ToastNotifier else None
         except Exception:
             self.toaster = None
+
+        # Configuración para compatibilidad de esquema de BD
+        self._usar_tipo_almacenamiento = True  # Por defecto asumimos que funciona
 
         # Inicializar referencias de iconos por defecto para evitar AttributeError
         # Icon placeholders (se asignarán en crear_diseno)
@@ -3658,7 +3712,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         contabilidad_tab = self.tabview.add("💰 Contabilidad")
         # Nueva pestaña para información técnica — por si en el futuro añadimos más campos técnicos
         info_tecnica_tab = self.tabview.add("🔧 Información Técnica")
-        adjuntos_tab = self.tabview.add("📎 Adjuntos (Pendiente)")
+        # Determinar título de la pestaña según el modo de almacenamiento
+        if usar_dropbox():
+            adjuntos_tab = self.tabview.add("📎 Adjuntos (Dropbox)")
+        else:
+            adjuntos_tab = self.tabview.add("📎 Adjuntos (Local)")
         historial_tab = self.tabview.add("📜 Historial de Cambios")
         # Pestaña de Tareas por RMA (creación/edición desde la ficha del expediente)
         tareas_tab = self.tabview.add("🗒️ Tareas")
@@ -4431,7 +4489,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     cursor_check = conn_check.cursor()
                     cursor_check.execute("SELECT COUNT(*) FROM rma_maestro WHERE lower(numero_documento_cliente) = ?", (numero_doc_norm,))
                     count = cursor_check.fetchone()[0]
-                    if count and count > 0:
+                    # Convertir a entero para evitar errores de comparación
+                    count = int(count) if count is not None else 0
+                    if count > 0:
                         conn_check.close()
                         messagebox.showwarning("Valor duplicado", f"El número de documento '{numero_doc}' ya existe en otro expediente.")
                         return
@@ -5154,16 +5214,43 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     ruta_relativa TEXT NOT NULL,
                     fecha_subida TEXT,
                     usuario_subida TEXT,
+                    tipo_almacenamiento TEXT DEFAULT 'local',
                     FOREIGN KEY (rma_id) REFERENCES rma_maestro (id)
                 )
             """)
+            
+            # Verificar si podemos usar la nueva columna
+            self._verificar_columna_tipo_almacenamiento(cursor)
+            
             conn.commit()
-            print("Tabla 'rma_adjuntos' verificada/creada.")
+            if getattr(self, '_usar_tipo_almacenamiento', False):
+                print("✓ Sistema de adjuntos configurado con esquema nuevo (Dropbox/Local tracking)")
+            else:
+                print("✓ Sistema de adjuntos configurado con esquema clásico (compatible)")
         except sqlite3.Error as e:
             print(f"Error al crear la tabla 'rma_adjuntos': {e}")
         finally:
             conn.close()
 
+    def _verificar_columna_tipo_almacenamiento(self, cursor):
+        """Verifica si la columna tipo_almacenamiento existe y funciona."""
+        try:
+            # Intentar hacer un SELECT con la columna
+            cursor.execute("SELECT tipo_almacenamiento FROM rma_adjuntos LIMIT 1")
+            self._usar_tipo_almacenamiento = True
+            print("✓ Esquema nuevo detectado - usando columna tipo_almacenamiento")
+        except Exception as e:
+            error_str = str(e).lower()
+            if ("no column named tipo_almacenamiento" in error_str or 
+                "table rma_adjuntos has no column named tipo_almacenamiento" in error_str or
+                "no such table" in error_str or
+                "no such column: tipo_almacenamiento" in error_str):
+                self._usar_tipo_almacenamiento = False
+                print("✓ Esquema clásico detectado - usando compatibilidad con BD existente")
+            else:
+                # Si es otro error, usar esquema compatible por seguridad
+                self._usar_tipo_almacenamiento = False
+                print(f"✓ Usando esquema compatible por seguridad: {e}")
 
     def crear_tabla_tareas(self):
         """Crea la tabla 'tareas' si no existe. Asociada a RMA por código o libre."""
@@ -5193,9 +5280,53 @@ class VentanaPrincipal(ctk.CTkToplevel):
     
     def crear_carpeta_adjuntos_rma(self, codigo_rma):
         """
-        Crea la carpeta específica para el RMA (Ej: Adjuntos_RMA/RMA25001) 
-        si no existe.
+        Crea la carpeta específica para el RMA en Dropbox o localmente.
+        Retorna la ruta (para Dropbox será la ruta remota, para local será la ruta física).
         """
+        if usar_dropbox():
+            return self._crear_carpeta_dropbox(codigo_rma)
+        else:
+            return self._crear_carpeta_local(codigo_rma)
+    
+    def _crear_carpeta_dropbox(self, codigo_rma):
+        """Crea una carpeta en Dropbox para el RMA."""
+        dbx = get_dropbox_client()
+        if not dbx:
+            # Fallback a almacenamiento local si Dropbox falla
+            print("Dropbox no disponible, usando almacenamiento local")
+            return self._crear_carpeta_local(codigo_rma)
+        
+        # Ruta en Dropbox: /Adjuntos_RMA/RMA25001
+        carpeta_rma = f"{DROPBOX_ROOT_FOLDER}/{codigo_rma}"
+        carpeta_rma = normalizar_ruta_dropbox(carpeta_rma)
+        
+        try:
+            # Verificar si la carpeta ya existe
+            dbx.files_get_metadata(carpeta_rma)
+            print(f"Carpeta Dropbox ya existe: {carpeta_rma}")
+        except ApiError as e:
+            # Verificar si el error es porque la carpeta no existe
+            error_details = str(e)
+            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
+                # La carpeta no existe, crearla
+                try:
+                    dbx.files_create_folder_v2(carpeta_rma)
+                    print(f"Carpeta Dropbox creada: {carpeta_rma}")
+                except ApiError as create_error:
+                    print(f"Error creando carpeta en Dropbox: {create_error}")
+                    # Fallback a almacenamiento local
+                    return self._crear_carpeta_local(codigo_rma)
+            else:
+                print(f"Error verificando carpeta Dropbox: {e}")
+                return self._crear_carpeta_local(codigo_rma)
+        except Exception as e:
+            print(f"Error inesperado verificando carpeta Dropbox: {e}")
+            return self._crear_carpeta_local(codigo_rma)
+        
+        return carpeta_rma
+    
+    def _crear_carpeta_local(self, codigo_rma):
+        """Crea una carpeta local para el RMA (implementación original)."""
         # 1. Asegurarse de que la carpeta raíz exista (Adjuntos_RMA)
         if not os.path.exists(ADJUNTOS_ROOT_DIR):
             os.makedirs(ADJUNTOS_ROOT_DIR)
@@ -5212,40 +5343,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
             messagebox.showwarning("Advertencia", "Debe guardar el RMA al menos una vez antes de adjuntar archivos.")
             return
         
-        
-        # -----------------------------------------------------------------
-        # LÓGICA DE OBTENCIÓN DEL CÓDIGO RMA (Igual que en tu código original)
-        # -----------------------------------------------------------------
-        # Obtener el texto completo de la etiqueta (Ej: "Código RMA: RMA25001")
+        # Obtener el código RMA
         texto_completo = self.lbl_codigo_rma.cget("text") 
-        # Extraer solo el código RMA dividiendo el texto por ": "
         codigo_rma = texto_completo.split(": ")[1] 
         
         # -----------------------------------------------------------------
         # LÓGICA DE ABRIR CARPETA (Modo Informe)
         # -----------------------------------------------------------------
         if modo_abrir_carpeta:
-            # 1. Obtener la ruta de destino y crear la carpeta (usando tu método existente)
-            ruta_destino_base = self.crear_carpeta_adjuntos_rma(codigo_rma)
-            
-            # 2. Abrir la carpeta de destino en el explorador de archivos
-            try:
-                if os.name == 'nt':
-                    # Para Windows, usar os.startfile para abrir la carpeta
-                    os.startfile(ruta_destino_base)
-                elif sys.platform == 'darwin':
-                    # Para macOS
-                    subprocess.Popen(['open', ruta_destino_base])
-                else:
-                    # Para Linux (usa el comando genérico xdg-open)
-                    subprocess.Popen(['xdg-open', ruta_destino_base])
-                
-                # ¡IMPORTANTE! Aquí termina la ejecución en modo carpeta
-                return
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo abrir la carpeta de destino:\n{ruta_destino_base}\nError: {e}")
-                return
+            if usar_dropbox():
+                self._abrir_carpeta_dropbox(codigo_rma)
+            else:
+                self._abrir_carpeta_local(codigo_rma)
+            return
 
+        # -----------------------------------------------------------------
+        # LÓGICA DE SUBIDA DE ARCHIVO
+        # -----------------------------------------------------------------
         # 2. Abrir diálogo para seleccionar archivo
         filepath = filedialog.askopenfilename(
             title="Seleccionar Archivo a Adjuntar",
@@ -5256,59 +5370,158 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return # El usuario canceló
 
         nombre_original = os.path.basename(filepath)
-        # 1. Obtener el texto completo de la etiqueta (Ej: "Código RMA: RMA25001")
-        texto_completo = self.lbl_codigo_rma.cget("text") 
         
-        # 2. Extraer solo el código RMA dividiendo el texto por ": "
-        codigo_rma = texto_completo.split(": ")[1] 
-        # --------------------------
-
-        # 3. Preparar rutas
-        # Crear la ruta de destino: Adjuntos_RMA/RMA25001/nombre_archivo.ext
-        ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
-        ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_original)
+        # 3. Subir archivo (Dropbox o local)
+        if usar_dropbox():
+            exito, ruta_relativa = self._subir_archivo_dropbox(filepath, codigo_rma, nombre_original)
+        else:
+            exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_original)
         
-        # 4. Copiar el archivo
-        try:
-            # shutil.copy2 copia el archivo y preserva metadatos
-            shutil.copy2(filepath, ruta_destino_completa)
-        except Exception as e:
-            messagebox.showerror("Error de Copia", f"No se pudo copiar el archivo. ¿Permisos?\nError: {e}")
-            return
+        if not exito:
+            return  # Error ya mostrado en las funciones auxiliares
         
-        # 5. Insertar registro en la base de datos
-        # La ruta relativa es la que guardamos en la DB (Ej: RMA25001/nombre_archivo.ext)
-        ruta_relativa = os.path.join(codigo_rma, nombre_original)
+        # 4. Insertar registro en la base de datos
+        # Asegurar que la tabla existe y verificar esquema
+        self.crear_tabla_adjuntos()
         
         conn, cursor = self.master.conectar_db()
         try:
-            cursor.execute("""
-                INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                self.current_rma_id, 
-                nombre_original, 
-                ruta_relativa, 
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                self.username
-            ))
+            if getattr(self, '_usar_tipo_almacenamiento', False):
+                # Usar esquema nuevo con tipo_almacenamiento
+                tipo_almacenamiento = 'dropbox' if usar_dropbox() else 'local'
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    nombre_original, 
+                    ruta_relativa, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    self.username,
+                    tipo_almacenamiento
+                ))
+            else:
+                # Usar esquema antiguo sin tipo_almacenamiento
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id, 
+                    nombre_original, 
+                    ruta_relativa, 
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                    self.username
+                ))
+            
             conn.commit()
             messagebox.showinfo("Éxito", f"Archivo '{nombre_original}' adjuntado correctamente.")
-            
             self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
             
-            # NOTA: Llamar a self.cargar_lista_adjuntos(self.current_rma_id) aquí
-            # para recargar la lista se implementará en el siguiente paso.
-            # Si ya tienes una implementación básica, añádela aquí.
-            
         except Exception as e:
-            conn.rollback()
-            # Si falla la DB, eliminar el archivo copiado para evitar inconsistencias
-            if os.path.exists(ruta_destino_completa):
-                os.remove(ruta_destino_completa)
+            try:
+                conn.rollback()
+            except AttributeError:
+                # TursoConnection no tiene rollback, no hacer nada
+                pass
+            # Si falla la DB, intentar limpiar el archivo subido
+            self._limpiar_archivo_subido(ruta_relativa)
             messagebox.showerror("Error DB", f"Error al guardar registro en la base de datos: {e}")
         finally:
             conn.close()
+    
+    def _abrir_carpeta_dropbox(self, codigo_rma):
+        """Maneja la apertura de carpeta en modo Dropbox."""
+        # Para Dropbox, podemos abrir el URL web o crear una carpeta local temporal
+        messagebox.showinfo("Dropbox", 
+            f"Los adjuntos están almacenados en Dropbox.\n"
+            f"Carpeta: {DROPBOX_ROOT_FOLDER}/{codigo_rma}\n\n"
+            f"Para acceder, ve a tu Dropbox web o aplicación.")
+    
+    def _abrir_carpeta_local(self, codigo_rma):
+        """Maneja la apertura de carpeta en modo local (implementación original)."""
+        ruta_destino_base = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        
+        try:
+            if os.name == 'nt':
+                os.startfile(ruta_destino_base)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', ruta_destino_base])
+            else:
+                subprocess.Popen(['xdg-open', ruta_destino_base])
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la carpeta:\n{ruta_destino_base}\nError: {e}")
+    
+    def _subir_archivo_dropbox(self, filepath, codigo_rma, nombre_archivo):
+        """
+        Sube un archivo a Dropbox.
+        Retorna: (éxito: bool, ruta_relativa: str)
+        """
+        dbx = get_dropbox_client()
+        if not dbx:
+            messagebox.showerror("Error", "No se puede conectar con Dropbox. Usando almacenamiento local.")
+            return self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
+        
+        # Crear la carpeta si no existe
+        ruta_carpeta = self.crear_carpeta_adjuntos_rma(codigo_rma)
+        
+        # Ruta completa en Dropbox
+        ruta_dropbox = f"{ruta_carpeta}/{nombre_archivo}"
+        ruta_dropbox = normalizar_ruta_dropbox(ruta_dropbox)
+        
+        try:
+            # Leer el archivo y subirlo
+            with open(filepath, 'rb') as f:
+                dbx.files_upload(
+                    f.read(), 
+                    ruta_dropbox, 
+                    mode=dropbox.files.WriteMode('overwrite')
+                )
+            
+            # La ruta relativa para BD será: RMA25001/archivo.pdf
+            ruta_relativa = f"{codigo_rma}/{nombre_archivo}"
+            return True, ruta_relativa
+            
+        except Exception as e:
+            messagebox.showerror("Error Dropbox", f"No se pudo subir el archivo a Dropbox: {e}")
+            return False, ""
+    
+    def _subir_archivo_local(self, filepath, codigo_rma, nombre_archivo):
+        """
+        Sube un archivo al almacenamiento local (implementación original).
+        Retorna: (éxito: bool, ruta_relativa: str)
+        """
+        try:
+            ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
+            ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo)
+            
+            # Copiar archivo
+            shutil.copy2(filepath, ruta_destino_completa)
+            
+            # Ruta relativa para BD
+            ruta_relativa = os.path.join(codigo_rma, nombre_archivo)
+            return True, ruta_relativa
+            
+        except Exception as e:
+            messagebox.showerror("Error de Copia", f"No se pudo copiar el archivo: {e}")
+            return False, ""
+    
+    def _limpiar_archivo_subido(self, ruta_relativa):
+        """Intenta eliminar un archivo subido si falla la inserción en BD."""
+        if usar_dropbox():
+            dbx = get_dropbox_client()
+            if dbx:
+                try:
+                    ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+                    dbx.files_delete_v2(ruta_dropbox)
+                except:
+                    pass  # No importa si falla la limpieza
+        else:
+            try:
+                ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
+                if os.path.exists(ruta_completa):
+                    os.remove(ruta_completa)
+            except:
+                pass  # No importa si falla la limpieza
     def cargar_lista_adjuntos(self, rma_id):
         """Consulta y muestra el listado de adjuntos para un RMA específico."""
         
@@ -5356,25 +5569,76 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
         # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
     def abrir_adjunto(self, ruta_relativa):
-        """Abre el archivo adjunto usando el programa predeterminado del sistema operativo."""
+        """Abre el archivo adjunto desde Dropbox o almacenamiento local."""
+        if usar_dropbox():
+            self._abrir_adjunto_dropbox(ruta_relativa)
+        else:
+            self._abrir_adjunto_local(ruta_relativa)
+    
+    def _abrir_adjunto_dropbox(self, ruta_relativa):
+        """Descarga temporalmente un archivo de Dropbox y lo abre."""
+        dbx = get_dropbox_client()
+        if not dbx:
+            messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+            return
+        
+        # Construir ruta en Dropbox
+        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        
+        try:
+            # Crear archivo temporal
+            nombre_archivo = os.path.basename(ruta_relativa)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{nombre_archivo}") as temp_file:
+                temp_path = temp_file.name
+                
+                # Descargar archivo de Dropbox
+                metadata, response = dbx.files_download(ruta_dropbox)
+                temp_file.write(response.content)
+            
+            # Abrir archivo temporal
+            self._abrir_archivo_sistema(temp_path)
+            
+            # Programar eliminación del archivo temporal después de un tiempo
+            # (El usuario tendrá tiempo para abrirlo en su programa)
+            def limpiar_temp():
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+            
+            # Limpiar después de 60 segundos (suficiente tiempo para que se abra)
+            threading.Timer(60.0, limpiar_temp).start()
+            
+        except ApiError as e:
+            error_details = str(e)
+            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
+                messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+            else:
+                messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error procesando archivo de Dropbox: {e}")
+    
+    def _abrir_adjunto_local(self, ruta_relativa):
+        """Abre un archivo del almacenamiento local (implementación original)."""
         ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
         
         if not os.path.exists(ruta_completa):
-            messagebox.showerror("Error", f"Archivo no encontrado: {ruta_completa}. Posiblemente haya sido movido o eliminado manualmente.")
+            messagebox.showerror("Error", f"Archivo no encontrado: {ruta_completa}")
             return
-
+        
+        self._abrir_archivo_sistema(ruta_completa)
+    
+    def _abrir_archivo_sistema(self, ruta_archivo):
+        """Abre un archivo con el programa predeterminado del sistema."""
         try:
             if sys.platform == "win32":
-                # Windows
-                os.startfile(ruta_completa)
+                os.startfile(ruta_archivo)
             elif sys.platform == "darwin":
-                # macOS
-                subprocess.call(['open', ruta_completa])
+                subprocess.call(['open', ruta_archivo])
             else:
-                # Linux (Usa xdg-open para el programa predeterminado)
-                subprocess.call(['xdg-open', ruta_completa])
+                subprocess.call(['xdg-open', ruta_archivo])
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir el archivo. Error: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
     
     def confirmar_eliminar_adjunto(self, adjunto_id, ruta_relativa):
         """Pide confirmación antes de eliminar el registro y el archivo."""
@@ -5383,25 +5647,75 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def eliminar_adjunto(self, adjunto_id, ruta_relativa):
         """Elimina el registro de la base de datos y el archivo físico."""
-        ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
-        
         conn, cursor = self.master.conectar_db()
         try:
-            # 1. Eliminar registro de la DB
+            # 1. Eliminar archivo físico primero
+            if usar_dropbox():
+                exito_archivo = self._eliminar_archivo_dropbox(ruta_relativa)
+            else:
+                exito_archivo = self._eliminar_archivo_local(ruta_relativa)
+            
+            # 2. Eliminar registro de la BD (incluso si el archivo falló)
             cursor.execute("DELETE FROM rma_adjuntos WHERE id = ?", (adjunto_id,))
-            
-            # 2. Eliminar archivo físico
-            if os.path.exists(ruta_completa):
-                os.remove(ruta_completa)
-            
             conn.commit()
-            messagebox.showinfo("Éxito", "Adjunto eliminado correctamente.")
+            
+            if exito_archivo:
+                messagebox.showinfo("Éxito", "Adjunto eliminado correctamente.")
+            else:
+                messagebox.showwarning("Parcial", "Registro eliminado de la base de datos, pero hubo problemas eliminando el archivo.")
+            
             self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
+            
         except Exception as e:
             conn.rollback()
             messagebox.showerror("Error", f"Error al eliminar el adjunto: {e}")
         finally:
             conn.close()
+    
+    def _eliminar_archivo_dropbox(self, ruta_relativa):
+        """
+        Elimina un archivo de Dropbox.
+        Retorna True si fue exitoso, False si hubo error.
+        """
+        dbx = get_dropbox_client()
+        if not dbx:
+            print("No se puede conectar con Dropbox para eliminar archivo")
+            return False
+        
+        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        
+        try:
+            dbx.files_delete_v2(ruta_dropbox)
+            return True
+        except ApiError as e:
+            error_details = str(e)
+            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
+                print(f"Archivo no encontrado en Dropbox (ya eliminado?): {ruta_dropbox}")
+                return True  # Considerarlo exitoso si ya no existe
+            else:
+                print(f"Error eliminando archivo de Dropbox: {e}")
+                return False
+        except Exception as e:
+            print(f"Error eliminando archivo de Dropbox: {e}")
+            return False
+    
+    def _eliminar_archivo_local(self, ruta_relativa):
+        """
+        Elimina un archivo del almacenamiento local.
+        Retorna True si fue exitoso, False si hubo error.
+        """
+        ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa)
+        
+        try:
+            if os.path.exists(ruta_completa):
+                os.remove(ruta_completa)
+                return True
+            else:
+                print(f"Archivo local no encontrado (ya eliminado?): {ruta_completa}")
+                return True  # Considerarlo exitoso si ya no existe
+        except Exception as e:
+            print(f"Error eliminando archivo local: {e}")
+            return False
     
     # Dentro de la clase VentanaPrincipal
 
@@ -7158,6 +7472,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     else:
                         cur.execute("SELECT COUNT(DISTINCT referencia_articulo) FROM rma_detalles")
                     total = cur.fetchone()[0]
+                    total = int(total) if total is not None else 0
                 except Exception:
                     total = 0
 
@@ -7377,6 +7692,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         cnt_sql = "SELECT COUNT(DISTINCT T2.id) FROM rma_detalles T1 JOIN rma_maestro T2 ON T1.rma_id = T2.id WHERE T1.referencia_articulo = ?"
                         cur.execute(cnt_sql, (referencia,))
                     total = cur.fetchone()[0]
+                    total = int(total) if total is not None else 0
                 except Exception:
                     total = 0
 

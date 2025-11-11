@@ -21,6 +21,9 @@ pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx 
 Si prefieres instalar una por una:
 
 ```bash
+# Manejo Dropbox
+pip install dropbox
+
 # Interfaz gráfica moderna
 pip install customtkinter
 

@@ -1,6 +1,9 @@
 # Archivos de entorno
 .env
 
+# Configuración de Dropbox (contiene credenciales sensibles)
+dropbox_config.py
+
 # Archivos de Python
 __pycache__/
 *.py[cod]

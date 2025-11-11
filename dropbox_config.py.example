@@ -1,0 +1,36 @@
+# Configuración para Dropbox API - PLANTILLA
+# 
+# INSTRUCCIONES PARA CONFIGURAR:
+# 1. Copia este archivo como "dropbox_config.py"
+# 2. Ve a https://www.dropbox.com/developers/apps
+# 3. Crea una nueva app eligiendo "Scoped access"
+# 4. Selecciona "Full Dropbox" para acceso completo
+# 5. En "Settings" > "Permissions", asegúrate de tener:
+#    - files.content.read
+#    - files.content.write  
+#    - files.metadata.read
+#    - files.metadata.write
+# 6. En "Settings" > "OAuth 2" > "Generated access token", genera un token
+# 7. Completa las credenciales abajo con tus valores reales
+# 8. Ejecuta test_dropbox_config.py para verificar que funciona
+
+# Credenciales de Dropbox (completar con tus valores reales)
+DROPBOX_APP_KEY = "tu_app_key_aqui"
+DROPBOX_APP_SECRET = "tu_app_secret_aqui" 
+DROPBOX_ACCESS_TOKEN = "tu_access_token_aqui"
+
+# Configuración de rutas en Dropbox
+DROPBOX_ROOT_FOLDER = "/Adjuntos_RMA"  # Carpeta raíz en Dropbox donde se guardarán todos los adjuntos
+
+# EJEMPLO DE CONFIGURACIÓN COMPLETA:
+# DROPBOX_APP_KEY = "abc123def456"
+# DROPBOX_APP_SECRET = "xyz789uvw012"
+# DROPBOX_ACCESS_TOKEN = "sl.B1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7"
+# DROPBOX_ROOT_FOLDER = "/Adjuntos_RMA"
+
+# IMPORTANTE: 
+# - Este archivo contiene credenciales sensibles
+# - NO lo subas a GitHub (está en .gitignore)
+# - Los tokens de acceso tienen permisos completos sobre tu Dropbox
+# - Mantén estas credenciales seguras
+# - Si el token se compromete, revócalo desde tu panel de Dropbox
