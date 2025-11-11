@@ -122,7 +122,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.80"
+APP_VERSION = "v0.0.81"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5545,16 +5545,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
             item_frame.pack(fill='x', padx=5, pady=2)
 
             # Etiqueta del nombre del archivo
-            ctk.CTkLabel(item_frame, text=nombre, width=300, anchor='w').pack(side='left', padx=5)
+            ctk.CTkLabel(item_frame, text=nombre, width=250, anchor='w').pack(side='left', padx=5)
 
-            # Botón Visualizar
-            # El comando usa lambda para pasar la ruta del archivo
+            # Botón Visualizar (solo lectura)
             ctk.CTkButton(
                 item_frame, 
-                text="👁️ Abrir", 
-                width=80, 
+                text="👁️ Ver", 
+                width=70, 
                 command=lambda r=ruta: self.abrir_adjunto(r)
-            ).pack(side='right', padx=5)
+            ).pack(side='right', padx=2)
+
+            # Botón Editar (descarga, edita y resube)
+            if usar_dropbox():  # Solo mostrar editar en modo Dropbox
+                ctk.CTkButton(
+                    item_frame, 
+                    text="� Editar", 
+                    width=70,
+                    fg_color="#2B7A0B",
+                    hover_color="#1F5F08",
+                    command=lambda r=ruta, aid=adjunto_id: self.editar_adjunto(r, aid)
+                ).pack(side='right', padx=2)
 
             # Botón Eliminar
             # El comando usa lambda para pasar el ID del adjunto y la ruta
@@ -5640,6 +5650,245 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
     
+    def _abrir_archivo_sistema(self, ruta_archivo):
+        """Abre un archivo con el programa predeterminado del sistema."""
+        try:
+            if sys.platform.startswith('win'):
+                os.startfile(ruta_archivo)
+            elif sys.platform.startswith('darwin'):  # macOS
+                os.system(f'open "{ruta_archivo}"')
+            else:  # Linux y otros
+                os.system(f'xdg-open "{ruta_archivo}"')
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
+    
+    def editar_adjunto(self, ruta_relativa, adjunto_id):
+        """
+        Descarga un archivo de Dropbox, permite editarlo y lo resube automáticamente.
+        """
+        if not usar_dropbox():
+            messagebox.showinfo("Información", "La función de editar solo está disponible con archivos de Dropbox.")
+            return
+            
+        dbx = get_dropbox_client()
+        if not dbx:
+            messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+            return
+            
+        # Construir ruta en Dropbox
+        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        nombre_archivo = os.path.basename(ruta_relativa)
+        
+        try:
+            # 1. Crear archivo temporal para edición
+            temp_dir = tempfile.mkdtemp(prefix="dropbox_edit_")
+            temp_path = os.path.join(temp_dir, nombre_archivo)
+            
+            # 2. Descargar archivo de Dropbox
+            print(f"Descargando {nombre_archivo} para edición...")
+            metadata, response = dbx.files_download(ruta_dropbox)
+            with open(temp_path, 'wb') as temp_file:
+                temp_file.write(response.content)
+            
+            # 3. Mostrar diálogo informativo
+            respuesta = messagebox.askyesno(
+                "Editar Archivo",
+                f"Se va a abrir '{nombre_archivo}' para edición.\n\n"
+                f"IMPORTANTE:\n"
+                f"• El archivo se descargará temporalmente\n"
+                f"• Podrás editarlo con el programa predeterminado\n"
+                f"• Cuando GUARDES y CIERRES el programa, se resubirá automáticamente\n"
+                f"• Los cambios se sincronizarán con Dropbox\n\n"
+                f"¿Continuar?"
+            )
+            
+            if not respuesta:
+                # Limpiar archivo temporal si el usuario cancela
+                try:
+                    os.remove(temp_path)
+                    os.rmdir(temp_dir)
+                except:
+                    pass
+                return
+            
+            # 4. Obtener tiempo de modificación inicial
+            tiempo_inicial = os.path.getmtime(temp_path)
+            
+            # 5. Abrir archivo para edición
+            self._abrir_archivo_sistema(temp_path)
+            
+            # 6. Crear diálogo de seguimiento
+            self._crear_dialogo_seguimiento_edicion(temp_path, ruta_dropbox, tiempo_inicial, temp_dir, nombre_archivo)
+            
+        except ApiError as e:
+            error_details = str(e)
+            if "not_found" in error_details.lower():
+                messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+            else:
+                messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error procesando archivo para edición: {e}")
+
+    def _crear_dialogo_seguimiento_edicion(self, temp_path, ruta_dropbox, tiempo_inicial, temp_dir, nombre_archivo):
+        """Crea un diálogo para hacer seguimiento del proceso de edición."""
+        
+        # Crear ventana de seguimiento
+        dialogo = Toplevel(self)
+        dialogo.title("Editando archivo...")
+        dialogo.geometry("500x300")
+        dialogo.resizable(False, False)
+        dialogo.transient(self)
+        dialogo.grab_set()
+        
+        # Centrar en pantalla
+        dialogo.update_idletasks()
+        x = (dialogo.winfo_screenwidth() // 2) - (500 // 2)
+        y = (dialogo.winfo_screenheight() // 2) - (300 // 2)
+        dialogo.geometry(f"500x300+{x}+{y}")
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(dialogo)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Título
+        titulo = ctk.CTkLabel(main_frame, text=f"📝 Editando: {nombre_archivo}", 
+                             font=ctk.CTkFont(size=16, weight="bold"))
+        titulo.pack(pady=(10, 20))
+        
+        # Estado
+        self.estado_label = ctk.CTkLabel(main_frame, 
+                                        text="🟡 Archivo abierto para edición...\nGuarda los cambios y cierra el programa cuando termines.",
+                                        font=ctk.CTkFont(size=12))
+        self.estado_label.pack(pady=10)
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(main_frame)
+        botones_frame.pack(pady=20, fill="x")
+        
+        # Botón para verificar cambios manualmente
+        btn_verificar = ctk.CTkButton(botones_frame, text="🔄 Verificar cambios",
+                                     command=lambda: self._verificar_cambios_manual(temp_path, tiempo_inicial))
+        btn_verificar.pack(side="left", padx=10, pady=10)
+        
+        # Botón para subir cambios
+        self.btn_subir = ctk.CTkButton(botones_frame, text="⬆️ Subir cambios", 
+                                      state="disabled",
+                                      command=lambda: self._subir_cambios_editados(temp_path, ruta_dropbox, temp_dir, dialogo))
+        self.btn_subir.pack(side="left", padx=10, pady=10)
+        
+        # Botón cancelar
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", 
+                                    fg_color="#D32F2F", hover_color="#B71C1C",
+                                    command=lambda: self._cancelar_edicion(temp_path, temp_dir, dialogo))
+        btn_cancelar.pack(side="right", padx=10, pady=10)
+        
+        # Variables de estado
+        dialogo.tiempo_inicial = tiempo_inicial
+        dialogo.temp_path = temp_path
+        dialogo.cambios_detectados = False
+        
+        # Iniciar verificación automática cada 3 segundos
+        self._verificar_cambios_automatico(dialogo, temp_path, tiempo_inicial)
+
+    def _verificar_cambios_automatico(self, dialogo, temp_path, tiempo_inicial):
+        """Verifica automáticamente si el archivo ha sido modificado."""
+        try:
+            if not os.path.exists(temp_path) or not dialogo.winfo_exists():
+                return
+                
+            tiempo_actual = os.path.getmtime(temp_path)
+            
+            if tiempo_actual > tiempo_inicial and not dialogo.cambios_detectados:
+                # ¡Cambios detectados!
+                dialogo.cambios_detectados = True
+                self.estado_label.configure(
+                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Dropbox ahora.",
+                    text_color="green"
+                )
+                self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
+                dialogo.tiempo_inicial = tiempo_actual  # Actualizar para futuras verificaciones
+            
+            # Programar próxima verificación
+            dialogo.after(3000, lambda: self._verificar_cambios_automatico(dialogo, temp_path, tiempo_inicial))
+            
+        except Exception as e:
+            print(f"Error verificando cambios: {e}")
+            
+    def _verificar_cambios_manual(self, temp_path, tiempo_inicial):
+        """Verificación manual de cambios."""
+        try:
+            if not os.path.exists(temp_path):
+                self.estado_label.configure(text="❌ Error: Archivo temporal no encontrado", text_color="red")
+                return
+                
+            tiempo_actual = os.path.getmtime(temp_path)
+            
+            if tiempo_actual > tiempo_inicial:
+                self.estado_label.configure(
+                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Dropbox.",
+                    text_color="green"
+                )
+                self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
+            else:
+                self.estado_label.configure(
+                    text="ℹ️ No se detectaron cambios aún.\nGuarda el archivo en tu programa de edición.",
+                    text_color="blue"
+                )
+        except Exception as e:
+            self.estado_label.configure(text=f"❌ Error verificando cambios: {e}", text_color="red")
+
+    def _subir_cambios_editados(self, temp_path, ruta_dropbox, temp_dir, dialogo):
+        """Sube los cambios editados de vuelta a Dropbox."""
+        try:
+            if not os.path.exists(temp_path):
+                messagebox.showerror("Error", "Archivo temporal no encontrado.")
+                return
+                
+            dbx = get_dropbox_client()
+            if not dbx:
+                messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+                return
+            
+            # Leer archivo modificado
+            with open(temp_path, 'rb') as archivo:
+                contenido = archivo.read()
+            
+            # Subir a Dropbox (sobrescribir)
+            dbx.files_upload(contenido, ruta_dropbox, mode=dropbox.files.WriteMode('overwrite'))
+            
+            # Limpiar archivos temporales
+            try:
+                os.remove(temp_path)
+                os.rmdir(temp_dir)
+            except:
+                pass
+            
+            # Cerrar diálogo y mostrar éxito
+            dialogo.destroy()
+            messagebox.showinfo("Éxito", "¡Archivo editado y sincronizado con Dropbox correctamente!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error subiendo cambios a Dropbox: {e}")
+
+    def _cancelar_edicion(self, temp_path, temp_dir, dialogo):
+        """Cancela la edición y limpia archivos temporales."""
+        respuesta = messagebox.askyesno(
+            "Cancelar edición", 
+            "¿Estás seguro de que quieres cancelar?\nSe perderán todos los cambios no subidos."
+        )
+        
+        if respuesta:
+            # Limpiar archivos temporales
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                os.rmdir(temp_dir)
+            except Exception as e:
+                print(f"Error limpiando archivos temporales: {e}")
+            
+            # Cerrar diálogo
+            dialogo.destroy()
+
     def confirmar_eliminar_adjunto(self, adjunto_id, ruta_relativa):
         """Pide confirmación antes de eliminar el registro y el archivo."""
         if messagebox.askyesno("Confirmar Eliminación", "¿Está seguro de que desea eliminar este adjunto? Esta acción es irreversible y también eliminará el archivo del disco."):
