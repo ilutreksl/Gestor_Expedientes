@@ -122,7 +122,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.83"
+APP_VERSION = "v0.0.84"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4459,6 +4459,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Conversión especial para Autorizacion (SI/NO a 1/0)
                 if campo == 'Autorizacion':
                     datos_maestro[campo.lower()] = 1 if valor == "SI" else 0
+                # Conversión especial para Email_de_Contacto (siempre en minúsculas)
+                elif campo == 'Email_de_Contacto':
+                    datos_maestro[campo.lower()] = valor.lower() if valor else ''
                 else:
                     datos_maestro[campo.lower()] = valor
 
@@ -4641,6 +4644,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     # Conversión especial para Autorizacion (SI/NO a 1/0)
                     if campo == 'Autorizacion':
                         datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
+                    # Conversión especial para Email_de_Contacto (siempre en minúsculas)
+                    elif campo == 'Email_de_Contacto':
+                        datos_maestro[campo.lower()] = valor.lower() if valor else ''
                     else:
                         datos_maestro[campo.lower()] = valor
         
@@ -9074,7 +9080,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     new_cliente = entry_cliente.get().strip()
                     new_num_doc = entry_num_doc.get().strip()
                     new_fecha = entry_fecha.get().strip()
-                    new_email = entry_email.get().strip()
+                    new_email = entry_email.get().strip().lower()  # Convertir a minúsculas
                     new_motivo = txt_motivo.get("1.0", "end-1c").strip()
 
                     try:
