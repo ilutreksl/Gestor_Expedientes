@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.87"
+APP_VERSION = "v0.0.88"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6882,7 +6882,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ventana = ctk.CTkToplevel(self)
         ventana.title("Gestión de Usuarios")
         ventana.geometry("600x500")
-        ventana.grab_set()
+        
+        # Configurar para permitir minimización
+        ventana.resizable(True, True)
+        ventana.attributes('-topmost', False)
+        ventana.minsize(500, 400)
+        # No usar grab_set para permitir minimización completa
+        ventana.focus_set()  # Solo dar foco sin modalidad
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        ventana.attributes('-topmost', True)   # Temporalmente al frente
+        ventana.lift()
+        ventana.focus_force()
+        ventana.after(500, lambda: ventana.attributes('-topmost', False))  # Quitar topmost después de 500ms
         
         # Agregar icono personalizado
         try:
@@ -6993,8 +7005,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 cursor = conn.cursor()
                 # Asegurarnos de que la columna email exista (añadir si no)
                 try:
-                    cursor.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
-                    conn.commit()
+                    cursor.execute("PRAGMA table_info('usuarios')")
+                    cols = [r[1] for r in cursor.fetchall()]
+                    if 'email' not in cols:
+                        cursor.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+                        conn.commit()
                 except Exception:
                     # Ignorar si ya existe o si el backend no permite ALTER (p.ej. versiones restringidas)
                     pass
@@ -7133,7 +7148,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     except Exception:
                         # Si UPDATE falla porque la columna email no existe, intentar crearla y reintentar
                         try:
-                            cur2.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+                            cur2.execute("PRAGMA table_info('usuarios')")
+                            cols = [r[1] for r in cur2.fetchall()]
+                            if 'email' not in cols:
+                                cur2.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
                             cur2.execute("UPDATE usuarios SET rol = ?, email = ? WHERE nombre_usuario = ?", (nuevo_rol, nuevo_email, username))
                         except Exception:
                             pass
@@ -7178,7 +7196,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ventana = ctk.CTkToplevel(self)
         ventana.title("Listado de Tareas")
         ventana.geometry("700x550")
-        ventana.grab_set()
+        
+        # Configurar para permitir minimización
+        ventana.resizable(True, True)
+        ventana.attributes('-topmost', False)
+        ventana.minsize(600, 400)
+        # No usar transient ni grab_set para permitir minimización completa
+        ventana.focus_set()  # Dar foco sin bloquear
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        ventana.attributes('-topmost', True)   # Temporalmente al frente
+        ventana.lift()
+        ventana.focus_force()
+        ventana.after(500, lambda: ventana.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
         frame = ctk.CTkFrame(ventana)
         frame.pack(fill="both", expand=True, padx=15, pady=15)
@@ -7348,7 +7378,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         win = self.gestion_rmp_window
         win.title("Gestión RMP - Proveedores")
         win.geometry("1000x650")
-        win.grab_set()
+        
+        # Configurar para permitir minimización
+        win.resizable(True, True)
+        win.attributes('-topmost', False)
+        win.minsize(800, 500)
+        # No usar transient ni grab_set para permitir minimización completa
+        win.focus_set()  # Dar foco sin bloquear
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        win.attributes('-topmost', True)   # Temporalmente al frente
+        win.lift()
+        win.focus_force()
+        win.after(500, lambda: win.attributes('-topmost', False))  # Quitar topmost después de 500ms
         
         # Agregar icono personalizado
         try:
@@ -7441,7 +7483,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 vent_hist = ctk.CTkToplevel(self)
                 vent_hist.title(f"Historial - {proveedor_nombre}")
                 vent_hist.geometry("700x500")
-                vent_hist.grab_set()
+                
+                # Configurar para permitir minimización
+                vent_hist.resizable(True, True)
+                vent_hist.attributes('-topmost', False)
+                vent_hist.minsize(600, 400)
+                # No usar transient para permitir minimización completa
+                vent_hist.focus_set()  # Dar foco sin bloquear
+                
+                # Forzar aparición al frente (incluso si la principal está maximizada)
+                vent_hist.attributes('-topmost', True)   # Temporalmente al frente
+                vent_hist.lift()
+                vent_hist.focus_force()
+                vent_hist.after(500, lambda: vent_hist.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
                 cont = ctk.CTkFrame(vent_hist)
                 cont.pack(fill="both", expand=True, padx=10, pady=10)
@@ -7811,7 +7865,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
             vent = ctk.CTkToplevel(self)
             vent.title(f"Detalle RMP - {proveedor_nombre}")
             vent.geometry("1200x900")
-            vent.grab_set()
+            
+            # Configurar para permitir minimización
+            vent.resizable(True, True)
+            vent.attributes('-topmost', False)
+            vent.minsize(900, 600)
+            # No usar transient para permitir minimización completa
+            vent.focus_set()  # Dar foco sin bloquear
+            
+            # Forzar aparición al frente (incluso si la principal está maximizada)
+            vent.attributes('-topmost', True)   # Temporalmente al frente
+            vent.lift()
+            vent.focus_force()
+            vent.after(500, lambda: vent.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
             cont = ctk.CTkFrame(vent)
             cont.pack(fill="both", expand=True, padx=12, pady=12)
@@ -8228,7 +8294,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         win = self.articulos_window
         win.title("Artículos")
         win.geometry("800x600")
-        win.grab_set()
+        
+        # Configurar para permitir minimización
+        win.resizable(True, True)
+        win.attributes('-topmost', False)
+        win.minsize(600, 400)
+        # No usar transient ni grab_set para permitir minimización completa
+        win.focus_set()  # Dar foco sin bloquear
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        win.attributes('-topmost', True)   # Temporalmente al frente
+        win.lift()
+        win.focus_force()
+        win.after(500, lambda: win.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
         main = ctk.CTkFrame(win)
         main.pack(fill="both", expand=True, padx=12, pady=12)
@@ -8440,7 +8518,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         vent = ctk.CTkToplevel(self)
         vent.title(f"Expedientes - {referencia}")
         vent.geometry("900x600")
-        vent.grab_set()
+        
+        # Configurar para permitir minimización
+        vent.resizable(True, True)
+        vent.attributes('-topmost', False)
+        vent.minsize(700, 450)
+        # No usar transient para permitir minimización completa
+        vent.focus_set()  # Dar foco sin bloquear
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        vent.attributes('-topmost', True)   # Temporalmente al frente
+        vent.lift()
+        vent.focus_force()
+        vent.after(500, lambda: vent.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
         main = ctk.CTkFrame(vent)
         main.pack(fill="both", expand=True, padx=12, pady=12)
@@ -8703,6 +8793,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.stats_window.title("Módulo de Estadísticas")
         self.stats_window.geometry("1600x900")
         self.stats_window.minsize(800, 600)  # Tamaño mínimo para asegurar legibilidad
+        
+        # Configurar para permitir minimización
+        self.stats_window.resizable(True, True)
+        self.stats_window.attributes('-topmost', False)
         
         # Centrar la ventana en la pantalla
         screen_width = self.stats_window.winfo_screenwidth()
@@ -10780,9 +10874,17 @@ Versión de la App: {APP_VERSION}
         ventana.geometry("900x700")
         ventana.resizable(True, True)
         
-        # Centrar ventana
-        ventana.transient(self)
-        ventana.grab_set()
+        # Configurar para permitir minimización
+        ventana.attributes('-topmost', False)
+        ventana.minsize(700, 500)
+        # No usar transient para permitir minimización completa
+        ventana.focus_set()  # Dar foco sin bloquear
+        
+        # Forzar aparición al frente (incluso si la principal está maximizada)
+        ventana.attributes('-topmost', True)   # Temporalmente al frente
+        ventana.lift()
+        ventana.focus_force()
+        ventana.after(500, lambda: ventana.attributes('-topmost', False))  # Quitar topmost después de 500ms
         
         # Header con información básica
         header_frame = ctk.CTkFrame(ventana)
@@ -12271,7 +12373,19 @@ Versión de la App: {APP_VERSION}
             ventana_notas = ctk.CTkToplevel(self)
             ventana_notas.title("Gestión de Notas")
             ventana_notas.geometry("800x600")
-            ventana_notas.transient(self)
+            
+            # Configurar para permitir minimización
+            ventana_notas.resizable(True, True)
+            ventana_notas.attributes('-topmost', False)
+            ventana_notas.minsize(600, 400)
+            # No usar transient para permitir minimización completa
+            ventana_notas.focus_set()  # Dar foco sin bloquear
+            
+            # Forzar aparición al frente (incluso si la principal está maximizada)
+            ventana_notas.attributes('-topmost', True)   # Temporalmente al frente
+            ventana_notas.lift()
+            ventana_notas.focus_force()
+            ventana_notas.after(500, lambda: ventana_notas.attributes('-topmost', False))  # Quitar topmost después de 500ms
             
             # Agregar icono personalizado
             try:
