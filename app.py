@@ -54,6 +54,105 @@ except ImportError:
 _dropbox_client_cache = None
 _last_token_check = 0
 
+# ================================
+# FUNCIONES DE COMPRESIÓN DE IMÁGENES
+# ================================
+
+def es_imagen(filepath):
+    """Detecta si un archivo es una imagen basándose en la extensión."""
+    extensiones_imagen = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.heic', '.heif'}
+    ext = os.path.splitext(filepath)[1].lower()
+    return ext in extensiones_imagen
+
+def comprimir_imagen_inteligente(filepath_original, callback_progreso=None):
+    """
+    Comprime una imagen siguiendo la estrategia inteligente (Opción 1):
+    - Si > 2MB: Redimensionar a 1920x1080 máx, calidad 85%
+    - Si > 500KB: Solo recomprimir con calidad 90%
+    - Si < 500KB: No modificar
+    
+    Returns: (filepath_comprimido, tamaño_original_mb, tamaño_final_mb) o (None, 0, 0) si hay error
+    """
+    try:
+        from PIL import Image
+        import tempfile
+        
+        if callback_progreso:
+            callback_progreso("🔍 Analizando imagen...")
+        
+        # Obtener tamaño original
+        tamaño_original = os.path.getsize(filepath_original)
+        tamaño_original_mb = tamaño_original / (1024 * 1024)
+        
+        # Si es muy pequeña, no comprimir
+        if tamaño_original < 500 * 1024:  # 500KB
+            if callback_progreso:
+                callback_progreso(f"✅ Imagen pequeña ({tamaño_original_mb:.1f}MB), no necesita compresión")
+            return filepath_original, tamaño_original_mb, tamaño_original_mb
+        
+        if callback_progreso:
+            callback_progreso(f"📏 Imagen {tamaño_original_mb:.1f}MB - iniciando compresión...")
+        
+        # Abrir imagen
+        with Image.open(filepath_original) as img:
+            # Convertir HEIC/HEIF a RGB si es necesario
+            if img.format in ['HEIC', 'HEIF'] or img.mode in ['RGBA', 'LA']:
+                if callback_progreso:
+                    callback_progreso("🔄 Convirtiendo formato...")
+                # Crear fondo blanco para transparencias
+                if img.mode in ['RGBA', 'LA']:
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                    img = background
+                else:
+                    img = img.convert('RGB')
+            
+            # Determinar parámetros de compresión según tamaño
+            if tamaño_original > 2 * 1024 * 1024:  # > 2MB
+                # Redimensionar y comprimir agresivamente
+                max_width, max_height = 1920, 1080
+                calidad = 85
+                if callback_progreso:
+                    callback_progreso("🎯 Redimensionando a Full HD y comprimiendo...")
+            else:
+                # Solo recomprimir
+                max_width, max_height = img.size
+                calidad = 90
+                if callback_progreso:
+                    callback_progreso("🔧 Recomprimiendo con calidad optimizada...")
+            
+            # Redimensionar manteniendo aspecto si es necesario
+            if img.width > max_width or img.height > max_height:
+                img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                if callback_progreso:
+                    callback_progreso(f"📐 Redimensionado a {img.width}x{img.height}")
+            
+            # Crear archivo temporal comprimido
+            temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+            os.close(temp_fd)
+            
+            # Guardar imagen comprimida
+            if callback_progreso:
+                callback_progreso("💾 Guardando imagen optimizada...")
+                
+            img.save(temp_path, 'JPEG', quality=calidad, optimize=True, progressive=True)
+        
+        # Verificar resultado
+        tamaño_final = os.path.getsize(temp_path)
+        tamaño_final_mb = tamaño_final / (1024 * 1024)
+        reduccion = ((tamaño_original - tamaño_final) / tamaño_original) * 100
+        
+        if callback_progreso:
+            callback_progreso(f"✅ Compresión completada: {tamaño_original_mb:.1f}MB → {tamaño_final_mb:.1f}MB ({reduccion:.1f}% reducción)")
+        
+        return temp_path, tamaño_original_mb, tamaño_final_mb
+        
+    except Exception as e:
+        if callback_progreso:
+            callback_progreso(f"❌ Error en compresión: {e}")
+        print(f"Error comprimiendo imagen {filepath_original}: {e}")
+        return None, 0, 0
+
 
 class Tooltip:
     """Simple tooltip for tkinter widgets. Shows a small Toplevel on hover."""
@@ -138,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.86"
+APP_VERSION = "v0.0.87"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5566,74 +5665,157 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # -----------------------------------------------------------------
         # LÓGICA DE SUBIDA DE ARCHIVO
         # -----------------------------------------------------------------
-        # 2. Abrir diálogo para seleccionar archivo
-        filepath = filedialog.askopenfilename(
-            title="Seleccionar Archivo a Adjuntar",
-            filetypes=(("Todos los archivos", "*.*"), ("Documentos PDF", "*.pdf"), ("Imágenes", "*.jpg;*.png"))
+        # 2. Abrir diálogo para seleccionar archivo(s) - MÚLTIPLE SELECCIÓN
+        filepaths = filedialog.askopenfilenames(  # Cambio a askopenfilenames para múltiples
+            title="Seleccionar Archivo(s) a Adjuntar - ¡Puedes seleccionar varias imágenes!",
+            filetypes=(
+                ("Todos los archivos", "*.*"), 
+                ("Imágenes", "*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp;*.heic"),
+                ("Documentos PDF", "*.pdf")
+            )
         )
         
-        if not filepath:
-            return # El usuario canceló
+        if not filepaths:
+            return  # El usuario canceló
 
-        nombre_original = os.path.basename(filepath)
+        # 3. Procesar cada archivo seleccionado
+        total_archivos = len(filepaths)
+        archivos_exitosos = 0
         
-        # 3. Subir archivo (Dropbox o local)
-        if usar_dropbox():
-            exito, ruta_relativa = self._subir_archivo_dropbox(filepath, codigo_rma, nombre_original)
-        else:
-            exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_original)
+        # Crear una única ventana de progreso para múltiples archivos
+        ventana_progreso_general = None
+        if total_archivos > 1:
+            ventana_progreso_general = ctk.CTkToplevel(self)
+            ventana_progreso_general.title(f"📁 Procesando {total_archivos} archivos")
+            ventana_progreso_general.geometry("450x130")
+            ventana_progreso_general.transient(self)
+            ventana_progreso_general.grab_set()
+            
+            # Centrar ventana
+            ventana_progreso_general.update_idletasks()
+            x = (ventana_progreso_general.winfo_screenwidth() // 2) - (450 // 2)
+            y = (ventana_progreso_general.winfo_screenheight() // 2) - (130 // 2)
+            ventana_progreso_general.geometry(f"450x130+{x}+{y}")
+            
+            label_archivo_actual = ctk.CTkLabel(ventana_progreso_general, text="", wraplength=420)
+            label_archivo_actual.pack(pady=(10, 5))
+            
+            barra_general = ctk.CTkProgressBar(ventana_progreso_general, width=400)
+            barra_general.pack(pady=5)
+            barra_general.set(0)
         
-        if not exito:
-            return  # Error ya mostrado en las funciones auxiliares
-        
-        # 4. Insertar registro en la base de datos
-        # Asegurar que la tabla existe y verificar esquema
-        self.crear_tabla_adjuntos()
-        
-        conn, cursor = self.master.conectar_db()
-        try:
-            if getattr(self, '_usar_tipo_almacenamiento', False):
-                # Usar esquema nuevo con tipo_almacenamiento
-                tipo_almacenamiento = 'dropbox' if usar_dropbox() else 'local'
-                cursor.execute("""
-                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    self.current_rma_id, 
-                    nombre_original, 
-                    ruta_relativa, 
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                    self.username,
-                    tipo_almacenamiento
-                ))
+        for i, filepath in enumerate(filepaths, 1):
+            nombre_original = os.path.basename(filepath)
+            
+            # Actualizar progreso general si hay múltiples archivos
+            if ventana_progreso_general:
+                label_archivo_actual.configure(text=f"📁 Procesando {i}/{total_archivos}: {nombre_original}")
+                barra_general.set((i-1) / total_archivos)
+                ventana_progreso_general.update()
             else:
-                # Usar esquema antiguo sin tipo_almacenamiento
-                cursor.execute("""
-                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    self.current_rma_id, 
-                    nombre_original, 
-                    ruta_relativa, 
-                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                    self.username
-                ))
+                # Mostrar progreso en consola para archivo único
+                print(f"📁 Procesando archivo: {nombre_original}")
             
-            conn.commit()
-            messagebox.showinfo("Éxito", f"Archivo '{nombre_original}' adjuntado correctamente.")
-            self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
+            # Subir archivo (Dropbox o local) con compresión automática para imágenes
+            if usar_dropbox():
+                exito, ruta_relativa = self._subir_archivo_dropbox(filepath, codigo_rma, nombre_original, ventana_progreso_general)
+            else:
+                exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_original)
             
-        except Exception as e:
+            if not exito:
+                continue  # Error ya mostrado, continuar con el siguiente archivo
+            
+            # 4. Insertar registro en la base de datos para este archivo
+            self.crear_tabla_adjuntos()
+            
+            conn, cursor = self.master.conectar_db()
             try:
-                conn.rollback()
-            except AttributeError:
-                # TursoConnection no tiene rollback, no hacer nada
-                pass
-            # Si falla la DB, intentar limpiar el archivo subido
-            self._limpiar_archivo_subido(ruta_relativa)
-            messagebox.showerror("Error DB", f"Error al guardar registro en la base de datos: {e}")
-        finally:
-            conn.close()
+                if getattr(self, '_usar_tipo_almacenamiento', False):
+                    # Usar esquema nuevo con tipo_almacenamiento
+                    tipo_almacenamiento = 'dropbox' if usar_dropbox() else 'local'
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        os.path.basename(ruta_relativa),  # Usar el nombre del archivo final (podría ser _optimizada.jpg)
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username,
+                        tipo_almacenamiento
+                    ))
+                else:
+                    # Usar esquema antiguo sin tipo_almacenamiento
+                    cursor.execute("""
+                        INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida) 
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        self.current_rma_id, 
+                        os.path.basename(ruta_relativa),  # Usar el nombre del archivo final
+                        ruta_relativa, 
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                        self.username
+                    ))
+                
+                conn.commit()
+                archivos_exitosos += 1
+                
+            except Exception as e:
+                print(f"Error insertando adjunto {nombre_original} en BD: {e}")
+                messagebox.showerror("Error de BD", f"No se pudo registrar el adjunto {nombre_original}: {e}")
+            finally:
+                conn.close()
+        
+        # Cerrar ventana de progreso general y mostrar resumen
+        if ventana_progreso_general:
+            barra_general.set(1.0)
+            label_archivo_actual.configure(text=f"✅ Completado: {archivos_exitosos}/{total_archivos} archivos procesados")
+            ventana_progreso_general.update()
+            ventana_progreso_general.after(2000, lambda: ventana_progreso_general.destroy())
+        
+        # 5. Mostrar mensaje final y recargar adjuntos
+        if archivos_exitosos == total_archivos:
+            if total_archivos == 1:
+                messagebox.showinfo("Éxito", f"Archivo procesado y subido correctamente.")
+            else:
+                messagebox.showinfo("Éxito", f"¡Todos los archivos procesados correctamente!\n{archivos_exitosos} archivos subidos.")
+        elif archivos_exitosos > 0:
+            messagebox.showwarning("Parcialmente completado", f"Se procesaron {archivos_exitosos} de {total_archivos} archivos.\nRevisa los errores en la consola.")
+        else:
+            messagebox.showerror("Error", "No se pudo procesar ningún archivo.")
+        
+        # Recargar la lista de adjuntos
+        try:
+            self.cargar_lista_adjuntos(self.current_rma_id)
+        except Exception as e:
+            print(f"Error recargando adjuntos: {e}")
+        
+        # 5. Mostrar resultado final
+        if total_archivos == 1:
+            if archivos_exitosos == 1:
+                mensaje = f"✅ Archivo adjuntado correctamente"
+                if es_imagen(filepaths[0]):
+                    mensaje += " (imagen optimizada automáticamente)"
+                messagebox.showinfo("Éxito", mensaje)
+            # Si falla, el error ya se mostró arriba
+        else:
+            # Múltiples archivos
+            if archivos_exitosos == total_archivos:
+                mensaje = f"✅ Todos los archivos ({total_archivos}) adjuntados correctamente"
+                imagenes_count = sum(1 for fp in filepaths if es_imagen(fp))
+                if imagenes_count > 0:
+                    mensaje += f"\n🖼️ {imagenes_count} imagen(es) optimizada(s) automáticamente"
+                messagebox.showinfo("Éxito", mensaje)
+            elif archivos_exitosos > 0:
+                messagebox.showwarning("Parcialmente exitoso", 
+                    f"Se adjuntaron {archivos_exitosos} de {total_archivos} archivos.\n"
+                    f"Revisa los mensajes de error anteriores.")
+            else:
+                messagebox.showerror("Error", "No se pudo adjuntar ningún archivo.")
+        
+        # 6. Recargar lista de adjuntos si hubo éxitos
+        if archivos_exitosos > 0:
+            self.cargar_lista_adjuntos(self.current_rma_id)
     
     def _abrir_carpeta_dropbox(self, codigo_rma):
         """Maneja la apertura de carpeta en modo Dropbox."""
@@ -5657,9 +5839,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta:\n{ruta_destino_base}\nError: {e}")
     
-    def _subir_archivo_dropbox(self, filepath, codigo_rma, nombre_archivo):
+    def _subir_archivo_dropbox(self, filepath, codigo_rma, nombre_archivo, ventana_progreso_externa=None):
         """
-        Sube un archivo a Dropbox.
+        Sube un archivo a Dropbox con compresión inteligente para imágenes.
         Retorna: (éxito: bool, ruta_relativa: str)
         """
         dbx = get_dropbox_client()
@@ -5667,27 +5849,118 @@ class VentanaPrincipal(ctk.CTkToplevel):
             messagebox.showerror("Error", "No se puede conectar con Dropbox. Usando almacenamiento local.")
             return self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
         
+        archivo_a_subir = filepath
+        archivo_temporal = None
+        nombre_archivo_final = nombre_archivo
+        
+        # ===== COMPRESIÓN DE IMÁGENES =====
+        if es_imagen(filepath):
+            try:
+                ventana_progreso = None
+                label_progreso = None
+                barra_progreso = None
+                
+                # Solo crear ventana de progreso si no hay una externa (archivo único)
+                if not ventana_progreso_externa:
+                    ventana_progreso = ctk.CTkToplevel(self)
+                    ventana_progreso.title("🖼️ Optimizando imagen")
+                    ventana_progreso.geometry("400x120")
+                    ventana_progreso.transient(self)
+                    ventana_progreso.grab_set()
+                    
+                    # Centrar ventana
+                    ventana_progreso.update_idletasks()
+                    x = (ventana_progreso.winfo_screenwidth() // 2) - (400 // 2)
+                    y = (ventana_progreso.winfo_screenheight() // 2) - (120 // 2)
+                    ventana_progreso.geometry(f"400x120+{x}+{y}")
+                    
+                    label_progreso = ctk.CTkLabel(ventana_progreso, text="Preparando compresión...", wraplength=380)
+                    label_progreso.pack(pady=(20, 10))
+                    
+                    barra_progreso = ctk.CTkProgressBar(ventana_progreso, width=350)
+                    barra_progreso.pack(pady=10)
+                    barra_progreso.set(0.1)
+                
+                # Función callback para actualizar progreso
+                def actualizar_progreso(mensaje):
+                    if ventana_progreso:
+                        # Ventana individual
+                        label_progreso.configure(text=mensaje)
+                        ventana_progreso.update()
+                        if barra_progreso.get() < 0.9:
+                            barra_progreso.set(barra_progreso.get() + 0.15)
+                    else:
+                        # Solo log para ventana externa
+                        print(f"  🎨 {mensaje}")
+                
+                if ventana_progreso:
+                    ventana_progreso.update()
+                
+                # Comprimir imagen
+                resultado = comprimir_imagen_inteligente(filepath, callback_progreso=actualizar_progreso)
+                archivo_comprimido, tamaño_original, tamaño_final = resultado
+                
+                if archivo_comprimido and archivo_comprimido != filepath:
+                    archivo_a_subir = archivo_comprimido
+                    archivo_temporal = archivo_comprimido
+                    
+                    # Cambiar extensión a .jpg si se comprimió
+                    nombre_base = os.path.splitext(nombre_archivo)[0]
+                    nombre_archivo_final = f"{nombre_base}_optimizada.jpg"
+                    
+                    # Mostrar resultado final
+                    if ventana_progreso:
+                        barra_progreso.set(1.0)
+                        if tamaño_original > tamaño_final:
+                            actualizar_progreso(f"✅ ¡Imagen optimizada! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                        else:
+                            actualizar_progreso(f"✅ Imagen procesada ({tamaño_original:.1f}MB)")
+                
+                # Cerrar ventana individual después de un tiempo
+                if ventana_progreso:
+                    ventana_progreso.after(1500, lambda: ventana_progreso.destroy())
+                
+            except Exception as e:
+                # Si falla la compresión, usar archivo original
+                print(f"Error en compresión de imagen: {e}")
+                if ventana_progreso:
+                    ventana_progreso.destroy()
+        
+        # ===== SUBIDA A DROPBOX =====
         # Crear la carpeta si no existe
         ruta_carpeta = self.crear_carpeta_adjuntos_rma(codigo_rma)
         
         # Ruta completa en Dropbox
-        ruta_dropbox = f"{ruta_carpeta}/{nombre_archivo}"
+        ruta_dropbox = f"{ruta_carpeta}/{nombre_archivo_final}"
         ruta_dropbox = normalizar_ruta_dropbox(ruta_dropbox)
         
         try:
-            # Leer el archivo y subirlo
-            with open(filepath, 'rb') as f:
+            # Leer el archivo (original o comprimido) y subirlo
+            with open(archivo_a_subir, 'rb') as f:
                 dbx.files_upload(
                     f.read(), 
                     ruta_dropbox, 
                     mode=dropbox.files.WriteMode('overwrite')
                 )
             
+            # Limpiar archivo temporal si existe
+            if archivo_temporal:
+                try:
+                    os.unlink(archivo_temporal)
+                except:
+                    pass
+            
             # La ruta relativa para BD será: RMA25001/archivo.pdf
-            ruta_relativa = f"{codigo_rma}/{nombre_archivo}"
+            ruta_relativa = f"{codigo_rma}/{nombre_archivo_final}"
             return True, ruta_relativa
             
         except Exception as e:
+            # Limpiar archivo temporal en caso de error
+            if archivo_temporal:
+                try:
+                    os.unlink(archivo_temporal)
+                except:
+                    pass
             messagebox.showerror("Error Dropbox", f"No se pudo subir el archivo a Dropbox: {e}")
             return False, ""
     
