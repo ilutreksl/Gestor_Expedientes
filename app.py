@@ -138,7 +138,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.85"
+APP_VERSION = "v0.0.86"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7260,13 +7260,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         "CREATE TABLE IF NOT EXISTS rma_proveedor_hist (id INTEGER PRIMARY KEY, proveedor TEXT, estado TEXT, comentario TEXT, usuario TEXT, fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
                     )
                     conn.commit()
-                    # Añadir columna factura_abono si no existe (para migración)
-                    try:
-                        cur.execute("ALTER TABLE rma_proveedor ADD COLUMN factura_abono TEXT")
-                        conn.commit()
-                    except Exception:
-                        # La columna ya existe o el dialecto no soporta ALTER TABLE
-                        pass
+                    # Nota: La columna factura_abono ya está incluida en la creación de la tabla arriba
                 except Exception:
                     # Si no podemos crearla en Turso u otro backend, seguimos sin persistencia
                     pass
@@ -7741,6 +7735,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
 
                     messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
+
+                    # Subir archivo a Dropbox
+                    if usar_dropbox():
+                        try:
+                            # Crear ruta en Dropbox: /RMP/{nombre_proveedor}.xlsx
+                            dropbox_path = f"/RMP/{safe_name}.xlsx"
+                            
+                            dbx_client = get_dropbox_client()
+                            with open(file_path, 'rb') as f:
+                                # Subir archivo a Dropbox (sobreescribir si existe)
+                                dbx_client.files_upload(
+                                    f.read(),
+                                    dropbox_path,
+                                    mode=dropbox.files.WriteMode('overwrite')
+                                )
+                            
+                            print(f"✅ Excel RMP subido a Dropbox: {dropbox_path}")
+                            # Opcional: mostrar confirmación al usuario
+                            # messagebox.showinfo('Dropbox', f'Archivo también guardado en Dropbox: {dropbox_path}')
+                            
+                        except Exception as e:
+                            print(f"⚠️ Error subiendo Excel RMP a Dropbox: {e}")
+                            # No mostrar error al usuario para no interrumpir el flujo
+                    else:
+                        print("ℹ️ Dropbox no configurado, Excel solo guardado localmente")
 
                     # Añadir a historial
                     try:
