@@ -91,141 +91,86 @@ def fill_pdf(template_path: str, output_path: str, field_values: Dict[str, str])
     - field_values keys deben corresponder a nombres exactos de campos en el PDF.
     - No aplana el PDF.
     """
-    # Preferir pdfrw si está disponible: suele manejar mejor las apariciones de formulario
-    if PR_PdfReader is not None:
-        # pdfrw approach: set annotation /V and /AP may be left to viewer; set NeedAppearances
-        trailer = PR_PdfReader(template_path)
-        if not trailer:
-            raise ValueError("No se pudo leer la plantilla PDF con pdfrw")
-
-        for page in trailer.pages:
-            annotations = page.Annots
-            if annotations:
-                for annot in annotations:
-                    if annot.Subtype == PdfName('Widget') and annot.T:
-                        name = str(annot.T)[1:-1] if str(annot.T).startswith('(') else str(annot.T)
-                        # Buscar valor por nombre exacto
-                        if name in field_values:
-                            val = field_values[name]
-                        else:
-                            # intentar normalizado
-                            norm = _normalize(name)
-                            # buscar matching por normalized key
-                            found = None
-                            for k,v in field_values.items():
-                                if _normalize(k) == norm:
-                                    found = v; break
-                            val = found if found is not None else None
-
-                        if val is not None:
-                            # Establecer /V y /DV
-                            try:
-                                annot.update(PdfDict(V='{}'.format(val)))
-                                annot.update(PdfDict(DV='{}'.format(val)))
-                            except Exception:
-                                try:
-                                    annot.V = '{}'.format(val)
-                                except Exception:
-                                    pass
-                            # Intentar crear apariencia visible (/AP) si reportlab está disponible
-                            try:
-                                if REPORTLAB_AVAILABLE:
-                                    # Obtener rect y crear appearance con ese tamaño
-                                    r = annot.Rect
-                                    if r and len(r) >= 4:
-                                        try:
-                                            # Coordenadas: [llx, lly, urx, ury]
-                                            llx, lly, urx, ury = [float(x) for x in r]
-                                            width = abs(urx - llx)
-                                            height = abs(ury - lly)
-                                        except Exception:
-                                            width = 200
-                                            height = 20
-                                    else:
-                                        width = 200; height = 20
-
-                                    # Crear pequeño PDF con reportlab que contiene el texto
-                                    import tempfile
-                                    tmpf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-                                    tmpf.close()
-                                    c = rl_canvas.Canvas(tmpf.name, pagesize=(width, height))
-                                    # Ajustar tamaño de fuente según espacio
-                                    font_size = 10
-                                    try:
-                                        c.setFont('Helvetica', font_size)
-                                    except Exception:
-                                        pass
-                                    # Dibujar texto con un pequeño margen
-                                    text_x = 2
-                                    text_y = height - font_size - 2
-                                    c.drawString(text_x, max(0, text_y), str(val))
-                                    c.save()
-
-                                    # Leer el PDF generado y extraer XObject
-                                    ap_trailer = PR_PdfReader(tmpf.name)
-                                    try:
-                                        ap_page = ap_trailer.pages[0]
-                                        xobj = ap_page.Resources.XObject
-                                        if xobj:
-                                            # Establecer annot.AP = << /N xobj >>
-                                            annot.AP = PdfDict(N=xobj)
-                                    except Exception:
-                                        pass
-                                    finally:
-                                        try:
-                                            os.unlink(tmpf.name)
-                                        except Exception:
-                                            pass
-                            except Exception:
-                                pass
-
-        # Forzar NeedAppearances
-        try:
-            if trailer.Root is not None:
-                if trailer.Root.AcroForm is None:
-                    trailer.Root.AcroForm = PdfDict(NeedAppearances=PdfName('true'))
-                else:
-                    trailer.Root.AcroForm.update(PdfDict(NeedAppearances=PdfName('true')))
-        except Exception:
-            pass
-
-        PR_PdfWriter().write(output_path, trailer)
-        return
-
-    # Fallback a pypdf si pdfrw no está presente
+    print(f"\n🔍 fill_pdf DEBUG INICIO:")
+    print(f"  Template: {template_path}")
+    print(f"  Output: {output_path}")
+    print(f"  Valores a rellenar: {len(field_values)} campos")
+    for k, v in field_values.items():
+        print(f"    '{k}' = '{v}'")
+    
+    # Usar pypdf como método principal - mejor soporte para campos de formulario
+    print(f"  📚 Usando método pypdf (mejor para formularios)")
     reader = PdfReader(template_path)
     writer = PdfWriter()
 
-    # Copiar páginas
-    for p in reader.pages:
-        writer.add_page(p)
-
-    # Rellenar: actualizamos cada página con los valores proporcionados
-    for page in writer.pages:
-        try:
-            writer.update_page_form_field_values(page, field_values)
-        except Exception:
-            # Algunas versiones de pypdf requieren pasar la página original del reader;
-            # intentamos de todos modos continuar.
-            pass
-
-    # Intentar forzar NeedAppearances para mejorar la visualización en algunos visores
+    # IMPORTANTE: Copiar AcroForm ANTES que las páginas
     try:
         root = reader.trailer.get("/Root")
         if root and "/AcroForm" in root:
             acro = root["/AcroForm"]
-            # Adjuntar el AcroForm original al writer y forzar NeedAppearances
+            # Copiar el AcroForm al writer PRIMERO
             writer._root_object.update({NameObject("/AcroForm"): acro})
+            print(f"  📋 AcroForm copiado exitosamente")
+            
+            # Forzar NeedAppearances
             try:
                 writer._root_object[NameObject("/AcroForm")][NameObject("/NeedAppearances")] = BooleanObject(True)
-            except Exception:
-                # Ignorar si no se puede establecer
-                pass
-    except Exception:
-        pass
+                print(f"      ✅ NeedAppearances=true establecido")
+            except Exception as e:
+                print(f"      ❌ Error al establecer NeedAppearances: {e}")
+        else:
+            print(f"  ❌ No se encontró AcroForm en el PDF original")
+            return  # Sin formulario no podemos rellenar
+    except Exception as e:
+        print(f"  ❌ Error al copiar AcroForm: {e}")
+        return
 
-    with open(output_path, "wb") as f:
-        writer.write(f)
+    # Copiar páginas DESPUÉS de copiar AcroForm
+    for p in reader.pages:
+        writer.add_page(p)
+        
+    print(f"  📄 Páginas copiadas: {len(writer.pages)}")
+
+    # Filtrar valores vacíos para el relleno principal
+    valores_no_vacios = {k: v for k, v in field_values.items() if v.strip()}
+    print(f"  🔤 Campos con texto a rellenar: {len(valores_no_vacios)}")
+    for k, v in valores_no_vacios.items():
+        print(f"    '{k}' = '{v}'")
+    
+    # Rellenar: actualizamos cada página con los valores proporcionados
+    campos_rellenados = 0
+    for page_idx, page in enumerate(writer.pages):
+        try:
+            if valores_no_vacios:  # Solo si hay valores no vacíos
+                writer.update_page_form_field_values(page, valores_no_vacios)
+                campos_rellenados += len(valores_no_vacios)
+                print(f"    ✅ Página {page_idx+1}: {len(valores_no_vacios)} campos actualizados")
+            else:
+                print(f"    ⚪ Página {page_idx+1}: Sin valores para rellenar")
+        except Exception as e:
+            print(f"    ❌ Página {page_idx+1}: Error al actualizar campos: {e}")
+
+    # Intentar relleno alternativo si el método estándar falla
+    if campos_rellenados == 0 and valores_no_vacios:
+        print(f"  🔄 Intentando método alternativo de relleno...")
+        try:
+            # Método alternativo: llenar todos los campos a la vez
+            writer.update_page_form_field_values(writer.pages[0], valores_no_vacios)
+            campos_rellenados = len(valores_no_vacios)
+            print(f"    ✅ Método alternativo exitoso: {campos_rellenados} campos")
+        except Exception as e:
+            print(f"    ❌ Método alternativo falló: {e}")
+
+    try:
+        with open(output_path, "wb") as output_file:
+            writer.write(output_file)
+        print(f"  💾 Archivo guardado con pypdf")
+        print(f"  📊 Total campos rellenados: {campos_rellenados}")
+    except Exception as e:
+        print(f"  ❌ Error al guardar con pypdf: {e}")
+        raise
+        
+    print(f"🔍 fill_pdf DEBUG FIN (método pypdf)\n")
 
 
 def fill_pdf_for_rma(db_path: str, codigo_rma: str, template_path: str, output_path: str, mapping: Optional[Dict[str, str]] = None,

@@ -33,11 +33,26 @@ import tempfile
 import dropbox
 from dropbox.exceptions import ApiError, AuthError
 try:
-    from dropbox_config import DROPBOX_ACCESS_TOKEN, DROPBOX_ROOT_FOLDER
+    from dropbox_config import (
+        DROPBOX_ACCESS_TOKEN, DROPBOX_ROOT_FOLDER, 
+        DROPBOX_APP_KEY, DROPBOX_APP_SECRET
+    )
+    # Intentar importar refresh token si existe
+    try:
+        from dropbox_config import DROPBOX_REFRESH_TOKEN
+    except ImportError:
+        DROPBOX_REFRESH_TOKEN = None
 except ImportError:
     print("ADVERTENCIA: No se pudo cargar dropbox_config.py. El sistema de adjuntos usará almacenamiento local.")
     DROPBOX_ACCESS_TOKEN = None
+    DROPBOX_REFRESH_TOKEN = None
+    DROPBOX_APP_KEY = None
+    DROPBOX_APP_SECRET = None
     DROPBOX_ROOT_FOLDER = "/Adjuntos_RMA"
+
+# Variables globales para cache de cliente de Dropbox
+_dropbox_client_cache = None
+_last_token_check = 0
 
 
 class Tooltip:
@@ -111,18 +126,19 @@ except Exception:
 
 # Módulo para rellenado de PDFs
 try:
-    from lib.pdf_fill import fill_pdf_for_rma, get_pdf_field_names
+    from lib.pdf_fill import fill_pdf_for_rma, get_pdf_field_names, fill_pdf
 except Exception:
     # Si no está instalado/ disponible aún, seguiremos sin la funcionalidad
     fill_pdf_for_rma = None
     get_pdf_field_names = None
+    fill_pdf = None
 
 # Definición de las variables globales de la base de datos
 DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.84"
+APP_VERSION = "v0.0.85"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -456,23 +472,68 @@ ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los ar
 # --- CONFIGURACIÓN Y FUNCIONES PARA DROPBOX ---
 def get_dropbox_client():
     """
-    Crea y retorna un cliente de Dropbox si las credenciales están configuradas.
-    Retorna None si no está configurado o hay error.
+    Crea y retorna un cliente de Dropbox con manejo automático de tokens expirados.
+    Intenta usar refresh token si está disponible, sino usa access token temporal.
+    Retorna None si no está configurado o hay error irrecuperable.
     """
-    if not DROPBOX_ACCESS_TOKEN or DROPBOX_ACCESS_TOKEN == "tu_access_token_aqui":
+    global _dropbox_client_cache, _last_token_check
+    import time
+    
+    # Cache del cliente para evitar múltiples verificaciones
+    current_time = time.time()
+    if _dropbox_client_cache and (current_time - _last_token_check < 300):  # Cache por 5 minutos
+        return _dropbox_client_cache
+    
+    # Verificar si tenemos las credenciales básicas
+    if not DROPBOX_APP_KEY or not DROPBOX_APP_SECRET:
+        print("DROPBOX: App key y app secret requeridos")
         return None
     
-    try:
-        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-        # Verificar que el token funciona haciendo una llamada simple
-        dbx.users_get_current_account()
-        return dbx
-    except (AuthError, ApiError) as e:
-        print(f"Error de autenticación con Dropbox: {e}")
-        return None
-    except Exception as e:
-        print(f"Error conectando con Dropbox: {e}")
-        return None
+    # Método 1: Intentar usar refresh token (permanente)
+    if DROPBOX_REFRESH_TOKEN:
+        try:
+            dbx = dropbox.Dropbox(
+                oauth2_refresh_token=DROPBOX_REFRESH_TOKEN,
+                app_key=DROPBOX_APP_KEY,
+                app_secret=DROPBOX_APP_SECRET
+            )
+            # Verificar que funciona
+            dbx.users_get_current_account()
+            _dropbox_client_cache = dbx
+            _last_token_check = current_time
+            print("DROPBOX: Conectado usando refresh token")
+            return dbx
+        except (AuthError, ApiError) as e:
+            print(f"DROPBOX: Error con refresh token: {e}")
+        except Exception as e:
+            print(f"DROPBOX: Error inesperado con refresh token: {e}")
+    
+    # Método 2: Intentar usar access token temporal (4 horas)
+    if DROPBOX_ACCESS_TOKEN and DROPBOX_ACCESS_TOKEN != "tu_access_token_aqui":
+        try:
+            dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+            # Verificar que funciona
+            dbx.users_get_current_account()
+            _dropbox_client_cache = dbx
+            _last_token_check = current_time
+            print("DROPBOX: Conectado usando access token temporal")
+            return dbx
+        except AuthError as e:
+            if 'expired_access_token' in str(e):
+                print("DROPBOX: Token de acceso expirado. Necesitas generar uno nuevo.")
+                print("DROPBOX: Ve a https://www.dropbox.com/developers/apps > Settings > OAuth 2 > Generate access token")
+            else:
+                print(f"DROPBOX: Error de autenticación: {e}")
+        except (ApiError) as e:
+            print(f"DROPBOX: Error de API: {e}")
+        except Exception as e:
+            print(f"DROPBOX: Error inesperado: {e}")
+    
+    # Si llegamos aquí, no pudimos conectar
+    print("DROPBOX: No se pudo establecer conexión. Sistema funcionará en modo local.")
+    _dropbox_client_cache = None
+    _last_token_check = current_time
+    return None
 
 def usar_dropbox():
     """
@@ -4655,11 +4716,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         return datos_maestro
 
     def autorrellena_pdf(self):
-        """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda como adjunto.
+        """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda en Dropbox.
 
-        Busca primero 'Plantilla_RMA.pdf' en la carpeta plantillas/. Si no existe, abre
+        Busca 'Plantilla_SOLICITUD RMA.pdf' en la carpeta plantillas/. Si no existe, abre
         un diálogo para seleccionar la plantilla. Luego llama a la función de librería
-        para rellenar el PDF y registra el archivo en la tabla rma_adjuntos.
+        para rellenar el PDF y lo sube a Dropbox como adjunto.
         """
         # Validaciones
         if not hasattr(self, 'current_rma_id') or not self.current_rma_id:
@@ -4675,119 +4736,258 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Determinar plantilla por defecto
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        plantilla_def = os.path.join(base_dir, 'plantillas', 'Plantilla_RMA.pdf')
+        plantilla_def = os.path.join(base_dir, 'plantillas', 'Plantilla_SOLICITUD RMA.pdf')
         if os.path.exists(plantilla_def):
             plantilla_path = plantilla_def
         else:
             # Pedir al usuario que seleccione la plantilla
-            plantilla_path = filedialog.askopenfilename(title='Seleccionar plantilla PDF', initialdir=os.path.join(base_dir, 'plantillas'), filetypes=[('PDF files', '*.pdf')])
+            plantilla_path = filedialog.askopenfilename(
+                title='Seleccionar plantilla PDF', 
+                initialdir=os.path.join(base_dir, 'plantillas'), 
+                filetypes=[('PDF files', '*.pdf')]
+            )
             if not plantilla_path:
                 return
 
         # Comprobar que la función de relleno esté disponible
-        if fill_pdf_for_rma is None:
+        if fill_pdf is None:
             messagebox.showerror("Dependencia falta", "La funcionalidad de rellenado PDF no está disponible. Instala la dependencia o revisa el módulo lib.pdf_fill.")
             return
 
-        # Preparar rutas de salida
-        carpeta_destino = self.crear_carpeta_adjuntos_rma(codigo_rma)
-        # Nombre base requerido por el usuario: <CODIGO_RMA>_Solicitud_RMA.pdf
-        nombre_base = f"{codigo_rma}_Solicitud_RMA.pdf"
-        nombre_salida = nombre_base
-        # Si el archivo ya existe, añadimos timestamp para evitar sobrescribir
-        if os.path.exists(os.path.join(carpeta_destino, nombre_salida)):
-            fecha_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            nombre_salida = f"{codigo_rma}_Solicitud_RMA_{fecha_str}.pdf"
-        ruta_salida = os.path.join(carpeta_destino, nombre_salida)
-
-        # Llamar a la librería para rellenar y aplanar según requisitos del usuario
+        # Obtener datos del RMA desde Turso usando la conexión de la aplicación
         try:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DB_NAME)
-            # Mapping explícito solicitado:
-            mapping = {
-                # Asignar el campo PDF "Ubicación de las fuentes en la instalación" a db:obs_tecnica
-                'Ubicación de las fuentes en la instalación': 'db:obs_tecnica',
-                # Serial
-                'N mero de serie': 'db:n_serie',
-                # Referencia para devolución -> código RMA
-                'Referencia para devoluci n': 'db:codigo_rma',
-                'Referencia para devolución': 'db:codigo_rma',
-                # No mapear Email para preservar el valor que ya contiene la plantilla (se indica en skip_fields)
-            }
-
-            # Campos que queremos que queden editables en el PDF final
-            exclude_from_flatten = [
-                'Cantidad afectada', 'N Pedido', 'Nº RMA', 'N° RMA', 'N RMA', 'N� RMA',
-                'N� de pedido  Albar�n', 'N� de pedido Albar�n', 'N Pedido Albarán', 'N� de pedido Albaran'
-            ]
-
-            # Forzar que ciertos campos queden vacíos y editables
-            force_empty = [
-                'Cantidad afectada', 'N Pedido', 'N� de pedido  Albar�n', 'N� de pedido Albar�n',
-                'N Pedido Albarán', 'N� de pedido Albaran', 'Nº RMA'
-            ]
-
-            # Campos a NO sobreescribir (preservar tal como están en la plantilla)
-            skip_fields = [
-                'Empresa', 'Dirección de entrega', 'Persona de contactoDepartamento', 'Teléfono', 'Email',
-                'Nº de pedido  Albarán', 'Nº de pedido Albarán', 'N Pedido Albarán', 'Nº de pedido Albaran'
-            ]
-
-            salida_generada = fill_pdf_for_rma(
-                db_path, codigo_rma, plantilla_path, ruta_salida,
-                mapping=mapping,
-                flatten=True,
-                exclude_from_flatten=exclude_from_flatten,
-                force_empty_fields=force_empty,
-                skip_fields=skip_fields
-            )
+            conn, cursor = self.master.conectar_db()
+            cursor.execute("SELECT codigo_rma, modelo, n_serie, obs_tecnica FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+            datos_rma = cursor.fetchone()
+            conn.close()
+            
+            if not datos_rma:
+                messagebox.showerror("Error", f"No se encontraron datos para el RMA {codigo_rma} en la base de datos.")
+                return
+            
+            codigo_bd, modelo, n_serie, obs_tecnica = datos_rma
+            
+            # Debug: Mostrar datos obtenidos de Turso
+            print(f"DEBUG PDF - Datos desde TURSO para {codigo_bd}:")
+            print(f"  modelo: '{modelo}'" + (" ✓" if modelo else " [VACÍO]"))
+            print(f"  n_serie: '{n_serie}'" + (" ✓" if n_serie else " [VACÍO]"))
+            print(f"  obs_tecnica: '{obs_tecnica}'" + (" ✓" if obs_tecnica else " [VACÍO]"))
+            
         except Exception as e:
+            messagebox.showerror("Error BD", f"Error obteniendo datos de la base de datos: {e}")
+            return
+
+        # Preparar nombres de archivo
+        nombre_base = f"{codigo_rma}_SOLICITUD RMA.pdf"
+        
+        # Si el archivo ya existe en Dropbox, añadimos timestamp para evitar sobrescribir
+        nombre_salida = nombre_base
+        if usar_dropbox():
+            # Verificar si ya existe en Dropbox
+            dbx = get_dropbox_client()
+            if dbx:
+                try:
+                    ruta_check = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{codigo_rma}/{nombre_base}")
+                    dbx.files_get_metadata(ruta_check)
+                    # Si llegamos aquí, el archivo existe, añadir timestamp
+                    fecha_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    nombre_salida = f"{codigo_rma}_SOLICITUD RMA_{fecha_str}.pdf"
+                except:
+                    # El archivo no existe, podemos usar el nombre base
+                    pass
+
+        # Crear archivo temporal para el PDF generado
+        temp_dir = tempfile.mkdtemp(prefix="solicitud_rma_")
+        temp_pdf_path = os.path.join(temp_dir, nombre_salida)
+
+        # Rellenar PDF con datos obtenidos de Turso
+        try:
+            # Campos que queremos que queden vacíos y editables
+            force_empty = [
+                'Cantidad afectada', 'N Pedido', 'Nº de pedido  Albarán', 'Nº de pedido Albarán',
+                'N Pedido Albarán', 'Nº de pedido Albaran', 'Nº RMA'
+            ]
+
+            # Preparar valores para rellenar el PDF directamente con datos de Turso
+            valores_pdf = {}
+            
+            # Aplicar mapping: De campos PDF a valores de BD obtenidos de Turso
+            if modelo:
+                valores_pdf['Modelo'] = modelo
+            if n_serie: 
+                valores_pdf['Número de serie'] = n_serie
+            if obs_tecnica:
+                valores_pdf['Ubicación de las fuentes en la instalación'] = obs_tecnica
+            if codigo_rma:
+                valores_pdf['Referencia para devolución'] = codigo_rma
+            
+            # Campos que queremos que queden vacíos y editables
+            for campo_vacio in force_empty:
+                valores_pdf[campo_vacio] = ''
+            
+            print(f"DEBUG PDF - Valores que se van a escribir en PDF:")
+            for campo, valor in valores_pdf.items():
+                print(f"  '{campo}' = '{valor}'")
+            
+            # DEBUG: Verificar campos disponibles en el PDF antes de rellenar
+            try:
+                from lib.pdf_fill import get_pdf_field_names
+                if get_pdf_field_names:
+                    campos_pdf = get_pdf_field_names(plantilla_path)
+                    print(f"\nDEBUG PDF - Campos disponibles en la plantilla ({len(campos_pdf)} total):")
+                    for i, campo in enumerate(campos_pdf, 1):
+                        estado = "✓ MATCH" if campo in valores_pdf else "○ Sin mapear"
+                        print(f"  {i:2d}. '{campo}' {estado}")
+                    
+                    # Verificar matching exacto
+                    print(f"\nDEBUG PDF - Verificación de coincidencias:")
+                    for campo_valor, valor in valores_pdf.items():
+                        if campo_valor in campos_pdf:
+                            print(f"  ✅ '{campo_valor}' -> EXISTE en PDF")
+                        else:
+                            print(f"  ❌ '{campo_valor}' -> NO EXISTE en PDF")
+                            # Buscar campos similares
+                            similares = [c for c in campos_pdf if campo_valor.lower() in c.lower() or c.lower() in campo_valor.lower()]
+                            if similares:
+                                print(f"     Similares: {similares}")
+            except Exception as debug_e:
+                print(f"DEBUG PDF - Error obteniendo campos PDF: {debug_e}")
+            
+            # Rellenar PDF usando función directa (sin consulta a BD adicional)
+            print(f"\nDEBUG PDF - Ejecutando fill_pdf...")
+            print(f"  Plantilla: {plantilla_path}")
+            print(f"  Salida: {temp_pdf_path}")
+            
+            # Verificar que la plantilla existe y es accesible
+            if os.path.exists(plantilla_path):
+                size_plantilla = os.path.getsize(plantilla_path)
+                print(f"  Plantilla existe: {size_plantilla} bytes")
+            else:
+                print(f"  ❌ Plantilla NO existe")
+                
+            fill_pdf(plantilla_path, temp_pdf_path, valores_pdf)
+            
+            # Verificar que el archivo de salida se generó
+            if os.path.exists(temp_pdf_path):
+                size_salida = os.path.getsize(temp_pdf_path)
+                print(f"  ✅ PDF generado: {size_salida} bytes")
+                
+                # Verificar si el tamaño cambió (indicaría que se modificó)
+                if abs(size_salida - size_plantilla) > 100:  # Al menos 100 bytes de diferencia
+                    print(f"  ✅ PDF modificado (diferencia: {size_salida - size_plantilla} bytes)")
+                else:
+                    print(f"  ⚠️  PDF no modificado o cambio mínimo (diferencia: {size_salida - size_plantilla} bytes)")
+            else:
+                print(f"  ❌ PDF NO se generó")
+                
+            print(f"DEBUG PDF - fill_pdf completado")
+        except Exception as e:
+            # Limpiar archivo temporal
+            try:
+                os.remove(temp_pdf_path)
+                os.rmdir(temp_dir)
+            except:
+                pass
             messagebox.showerror("Error Rellenado", f"Error al rellenar la plantilla: {e}")
             return
 
+        # Decidir dónde guardar (Dropbox o local)
+        if usar_dropbox():
+            # Subir a Dropbox
+            exito, ruta_relativa = self._subir_archivo_dropbox(temp_pdf_path, codigo_rma, nombre_salida)
+            tipo_almacenamiento = 'dropbox'
+            ubicacion_desc = "Dropbox"
+        else:
+            # Guardar localmente (fallback)
+            exito, ruta_relativa = self._subir_archivo_local(temp_pdf_path, codigo_rma, nombre_salida)
+            tipo_almacenamiento = 'local'
+            ubicacion_desc = "local"
+        
+        # Limpiar archivo temporal
+        try:
+            os.remove(temp_pdf_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
+        
+        if not exito:
+            messagebox.showerror("Error", f"No se pudo guardar la solicitud PDF en {ubicacion_desc}.")
+            return
+
         # Registrar en la base de datos como adjunto
-        ruta_relativa = os.path.join(codigo_rma, nombre_salida)
         try:
             conn, cursor = self.master.conectar_db()
-            cursor.execute("""
-                INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                self.current_rma_id,
-                nombre_salida,
-                ruta_relativa,
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                self.username
-            ))
-            # También registrar entrada en rma_historial
+            
+            # Verificar esquema de BD antes de insertar
+            self._verificar_columna_tipo_almacenamiento(cursor)
+            
+            # Preparar inserción con o sin tipo_almacenamiento según el esquema
+            if getattr(self, '_usar_tipo_almacenamiento', False):
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id,
+                    nombre_salida,
+                    ruta_relativa,
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    self.username,
+                    tipo_almacenamiento
+                ))
+            else:
+                cursor.execute("""
+                    INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    self.current_rma_id,
+                    nombre_salida,
+                    ruta_relativa,
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    self.username
+                ))
+            
+            # También registrar entrada en rma_historial con información de ubicación
             cursor.execute("""
                 INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
                 VALUES (?, ?, ?, ?)
             """, (
                 self.current_rma_id,
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.datetime.now().isoformat(),
                 self.username,
-                f"Generada Solicitud RMA: {nombre_salida}"
+                f"Generada Solicitud RMA: {nombre_salida} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})"
             ))
 
             conn.commit()
             conn.close()
+            
+            # Refrescar lista de adjuntos
+            try:
+                self.cargar_lista_adjuntos(self.current_rma_id)
+            except Exception:
+                pass
+            
+            # Actualizar historial si está visible
+            try:
+                if hasattr(self, 'historial_tab'):
+                    self.mostrar_historial(self.historial_tab)
+            except AttributeError:
+                pass
+                
+            # Feedback al usuario personalizado según ubicación
+            if usar_dropbox():
+                messagebox.showinfo("Éxito", f"✅ Solicitud PDF '{nombre_salida}' generada y subida a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+            else:
+                messagebox.showinfo("Éxito", f"✅ Solicitud PDF '{nombre_salida}' generada y guardada localmente.")
+                
         except Exception as e:
-            messagebox.showwarning("Aviso", f"PDF generado en disco, pero no se pudo registrar en la BD: {e}")
+            # Limpiar archivo temporal si hubo error
+            try:
+                os.remove(temp_pdf_path)
+                os.rmdir(temp_dir)
+            except:
+                pass
+            messagebox.showwarning("Aviso", f"PDF generado, pero no se pudo registrar en la BD: {e}")
             return
-
-        # Refrescar lista de adjuntos
-        try:
-            self.cargar_lista_adjuntos(self.current_rma_id)
-        except Exception:
-            pass
-
-        # Feedback al usuario
-        try:
-            messagebox.showinfo("Éxito", f"Solicitud generada y adjuntada: {ruta_relativa}")
-        except Exception:
-            # En entornos sin GUI activo, ignorar
-            pass
 
 
     def cargar_datos_rma(self, rma_id):
@@ -5531,14 +5731,29 @@ class VentanaPrincipal(ctk.CTkToplevel):
     def cargar_lista_adjuntos(self, rma_id):
         """Consulta y muestra el listado de adjuntos para un RMA específico."""
         
+        # Verificar que el frame existe y la aplicación sigue activa
+        try:
+            if not hasattr(self, 'adjuntos_list_frame') or not self.adjuntos_list_frame.winfo_exists():
+                return
+        except Exception:
+            return
+        
         # Limpiar el frame antes de cargar la nueva lista
-        for widget in self.adjuntos_list_frame.winfo_children():
-            widget.destroy()
+        try:
+            for widget in self.adjuntos_list_frame.winfo_children():
+                widget.destroy()
+        except Exception as e:
+            print(f"Error limpiando widgets: {e}")
+            return
 
-        conn, cursor = self.master.conectar_db()
-        cursor.execute("SELECT id, nombre_archivo, ruta_relativa FROM rma_adjuntos WHERE rma_id = ?", (rma_id,))
-        adjuntos = cursor.fetchall()
-        conn.close()
+        try:
+            conn, cursor = self.master.conectar_db()
+            cursor.execute("SELECT id, nombre_archivo, ruta_relativa FROM rma_adjuntos WHERE rma_id = ?", (rma_id,))
+            adjuntos = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            print(f"Error cargando adjuntos: {e}")
+            return
 
         if not adjuntos:
             ctk.CTkLabel(self.adjuntos_list_frame, text="No hay archivos adjuntos para este expediente.").pack(pady=10)
@@ -5897,12 +6112,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def confirmar_eliminar_adjunto(self, adjunto_id, ruta_relativa):
         """Pide confirmación antes de eliminar el registro y el archivo."""
-        if messagebox.askyesno("Confirmar Eliminación", "¿Está seguro de que desea eliminar este adjunto? Esta acción es irreversible y también eliminará el archivo del disco."):
-            self.eliminar_adjunto(adjunto_id, ruta_relativa)
+        try:
+            # Verificar que la aplicación sigue activa
+            if not hasattr(self, 'master') or not self.master.winfo_exists():
+                return
+            
+            if messagebox.askyesno("Confirmar Eliminación", 
+                                 "¿Está seguro de que desea eliminar este adjunto? Esta acción es irreversible y también eliminará el archivo del disco."):
+                self.eliminar_adjunto(adjunto_id, ruta_relativa)
+        except Exception as e:
+            print(f"Error en confirmación de eliminación: {e}")
 
     def eliminar_adjunto(self, adjunto_id, ruta_relativa):
         """Elimina el registro de la base de datos y el archivo físico."""
-        conn, cursor = self.master.conectar_db()
+        try:
+            conn, cursor = self.master.conectar_db()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error conectando a la base de datos: {e}")
+            return
+        
         try:
             # 1. Eliminar archivo físico primero
             if usar_dropbox():
@@ -5919,13 +6147,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
             else:
                 messagebox.showwarning("Parcial", "Registro eliminado de la base de datos, pero hubo problemas eliminando el archivo.")
             
-            self.cargar_lista_adjuntos(self.current_rma_id) # Recargar el listado
+            # Recargar el listado solo si la aplicación sigue activa
+            try:
+                if hasattr(self, 'adjuntos_list_frame') and self.adjuntos_list_frame.winfo_exists():
+                    self.cargar_lista_adjuntos(self.current_rma_id)
+            except Exception as e:
+                print(f"No se pudo recargar lista de adjuntos: {e}")
             
         except Exception as e:
-            conn.rollback()
+            # Manejar rollback de forma compatible con diferentes tipos de BD
+            try:
+                if hasattr(conn, 'rollback'):
+                    conn.rollback()
+            except Exception:
+                pass  # Ignorar errores de rollback en Turso
             messagebox.showerror("Error", f"Error al eliminar el adjunto: {e}")
         finally:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
     
     def _eliminar_archivo_dropbox(self, ruta_relativa):
         """
