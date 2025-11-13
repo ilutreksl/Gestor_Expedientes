@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.88"
+APP_VERSION = "v0.0.89"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2157,7 +2157,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         return quincenas
 
     def obtener_siguiente_rma(self):
-        """Calcula el siguiente código RMA (Ej: RMA25001)."""
+        """Calcula el siguiente código RMA para mostrar como número temporal (Ej: RMA25001)."""
         conn, cursor = self.master.conectar_db()
         if not conn: return "ERROR-DB"
 
@@ -2186,6 +2186,35 @@ class VentanaPrincipal(ctk.CTkToplevel):
         codigo_numerico = str(siguiente_numero).zfill(3)
         conn.close()
         
+        return f"RMA{anio_actual_str}{codigo_numerico}"
+    
+    def generar_codigo_rma_final(self, cursor):
+        """
+        Genera y asigna el código RMA definitivo dentro de una transacción.
+        Esta función debe ejecutarse dentro de una transacción activa.
+        """
+        anio_actual_str = str(datetime.datetime.now().year)[2:]
+        prefijo_busqueda = f"RMA{anio_actual_str}%" 
+        
+        # Buscar el último número asignado en la misma transacción
+        cursor.execute("""
+            SELECT codigo_rma FROM rma_maestro 
+            WHERE codigo_rma LIKE ? 
+            ORDER BY id DESC 
+            LIMIT 1
+        """, (prefijo_busqueda,))
+        
+        ultimo_rma = cursor.fetchone()
+        siguiente_numero = 1
+        
+        if ultimo_rma:
+            numero_str = ultimo_rma[0].replace(f"RMA{anio_actual_str}", "")
+            try:
+                siguiente_numero = int(numero_str) + 1
+            except ValueError:
+                siguiente_numero = 1
+        
+        codigo_numerico = str(siguiente_numero).zfill(3)
         return f"RMA{anio_actual_str}{codigo_numerico}"
 
     def crear_campo(self, parent, fila, label_text, campo_bd, valor_defecto="", deshabilitado=False, tipo="entry", opciones=None):
@@ -3811,12 +3840,28 @@ class VentanaPrincipal(ctk.CTkToplevel):
             row = cur.fetchone()
             conn.close()
             codigo_rma_mostrar = row[0] if row else "(Desconocido)"
+            texto_expediente = f"Nº EXPEDIENTE: {codigo_rma_mostrar}"
+            color_texto = "grey30"
         else:
-            codigo_rma_mostrar = self.obtener_siguiente_rma()
-        self.lbl_codigo_rma = ctk.CTkLabel(fila1_control_frame, text=f"Nº EXPEDIENTE: {codigo_rma_mostrar}", 
+            codigo_rma_temporal = self.obtener_siguiente_rma()
+            texto_expediente = f"Nº EXPEDIENTE: {codigo_rma_temporal} (Temporal)"
+            color_texto = "orange"  # Color naranja para indicar que es temporal
+        
+        self.lbl_codigo_rma = ctk.CTkLabel(fila1_control_frame, text=texto_expediente, 
                      font=ctk.CTkFont(size=18, weight="bold"), 
-                     text_color="grey30")
+                     text_color=color_texto)
         self.lbl_codigo_rma.grid(row=0, column=0, padx=10, pady=5, sticky="w") 
+        
+        # Añadir texto explicativo para números temporales
+        if not es_edicion:
+            self.lbl_explicacion = ctk.CTkLabel(fila1_control_frame, 
+                         text="⚠️ Este número es temporal. El número definitivo se asignará al guardar.", 
+                         font=ctk.CTkFont(size=10),
+                         text_color="gray50")
+            self.lbl_explicacion.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="w")
+        
+        # Guardar si es modo edición para usar en el guardado
+        self.es_modo_edicion = es_edicion 
         
         
         # B) CAJA DE COMENTARIOS (Columna 1)
@@ -4384,11 +4429,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.btn_enviar_email.pack(side="left", padx=(5, 15))
 
         # 2. Botón de Guardar
-        guardar_texto = "💾 ACTUALIZAR" if es_edicion else "💾 GUARDAR"
+        if es_edicion:
+            guardar_texto = "💾 ACTUALIZAR"
+            color_boton = None  # Color por defecto
+        else:
+            guardar_texto = "💾 GUARDAR Y ASIGNAR NÚMERO"
+            color_boton = "orange"  # Color naranja para destacar que asignará el número final
+        
         guardar_button = ctk.CTkButton(
             btn_action_frame, 
             text=guardar_texto, 
-            #fg_color="gray80",        # Fondo del botón: Gris claro
+            fg_color=color_boton,        # Color especial para nuevos expedientes
             #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
             #text_color="black",
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -4626,7 +4677,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     datos_maestro[campo.lower()] = valor
 
         # Campos automáticos/calculados
-        datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        # NOTA: El código_rma se generará al momento del guardado para evitar condiciones de carrera
+        if hasattr(self, 'es_modo_edicion') and self.es_modo_edicion:
+            # En modo edición, conservamos el código existente
+            datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        else:
+            # En modo nuevo, lo generaremos dentro de la transacción
+            # No asignamos código_rma aquí
+            pass
+            
         datos_maestro['fecha_emision'] = self.entry_Fecha_Emision.get()
         datos_maestro['creado_por'] = self.entry_Creado_Por.get()
         
@@ -4675,6 +4734,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         cursor = conn.cursor()
         
         try:
+            # Para nuevos RMA, generar el código final dentro de la transacción
+            if not hasattr(self, 'es_modo_edicion') or not self.es_modo_edicion:
+                codigo_rma_final = self.generar_codigo_rma_final(cursor)
+                datos_maestro['codigo_rma'] = codigo_rma_final
+            
             # 3a. Inserción en rma_maestro
             columnas_maestro = ', '.join(datos_maestro.keys())
             placeholders_maestro = ', '.join('?' * len(datos_maestro))
@@ -4723,20 +4787,44 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Invalidar caché de estados (puede que se haya creado un nuevo estado)
             invalidate_cache('estados_rma')
             
-            messagebox.showinfo("Expediente Guardado", "El expediente se ha guardado correctamente.")
+            # Mostrar mensaje de confirmación con número RMA final
+            if not hasattr(self, 'es_modo_edicion') or not self.es_modo_edicion:
+                # Es un nuevo expediente - mostrar el número final asignado
+                codigo_final = datos_maestro['codigo_rma']
+                messagebox.showinfo("¡Expediente Creado!", 
+                                    f"✅ Expediente creado exitosamente\n\n"
+                                    f"📋 Número final asignado: {codigo_final}\n"
+                                    f"👤 Cliente: {datos_maestro['cliente']}\n"
+                                    f"💰 Total: {precio_total:.2f} €\n\n"
+                                    f"Ya puede adjuntar archivos y gestionar el expediente.")
+                
+                # Actualizar el label con el código final
+                self.lbl_codigo_rma.configure(
+                    text=f"Nº EXPEDIENTE: {codigo_final}",
+                    text_color="green"  # Verde para indicar que ya está guardado
+                )
+                
+                # Ocultar el texto explicativo ya que ahora es definitivo
+                if hasattr(self, 'lbl_explicacion'):
+                    self.lbl_explicacion.configure(text="✅ Número definitivo asignado")
+                    self.lbl_explicacion.configure(text_color="green")
+            else:
+                messagebox.showinfo("Expediente Guardado", "El expediente se ha actualizado correctamente.")
             
             self.current_rma_id = rma_id_generado # Asigna el ID al atributo de instancia
             self.mode = 'editar'                   # Cambia la ventana a modo edición
+            self.es_modo_edicion = True           # Actualizar el indicador
             
             # Eliminamos la llamada a self.mostrar_lista_rma() para mantener la vista abierta.
             
             # Actualizar el título de la pestaña si fuera necesario
             self.tabview.set("📝 General")
             
-            messagebox.showinfo("Éxito", f"RMA {datos_maestro['codigo_rma']} creado y guardado. Ahora puede adjuntar archivos.")
+            # Ya no necesitamos este mensaje duplicado - se maneja arriba
+            # messagebox.showinfo("Éxito", f"RMA {datos_maestro['codigo_rma']} creado y guardado. Ahora puede adjuntar archivos.")
             
-            # Volver al listado
-            self.mostrar_lista_rma()
+            # NO volver al listado - mantener el expediente abierto para que puedan trabajar con él
+            # self.mostrar_lista_rma()
 
         except sqlite3.IntegrityError as e:
             conn.rollback()
