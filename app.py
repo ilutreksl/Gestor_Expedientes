@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.89"
+APP_VERSION = "v0.0.90"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2363,15 +2363,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(filtro_frame, text="Estado:").grid(row=0, column=2, padx=(20, 5), pady=5, sticky="w")
         self.filtro_estado = ctk.CTkOptionMenu(filtro_frame, 
                                                values=estados_posibles, 
-                                               width=200)
+                                               width=120)
         self.filtro_estado.set("Todos")
         self.filtro_estado.grid(row=0, column=3, padx=10, pady=5, sticky="w")
+        
+        # Filtro por Año
+        ctk.CTkLabel(filtro_frame, text="Año:").grid(row=0, column=4, padx=(20, 5), pady=5, sticky="w")
+        # Inicializar con el año actual, se actualizará dinámicamente en cargar_lista_rma
+        año_actual = str(datetime.datetime.now().year)
+        self.filtro_año = ctk.CTkOptionMenu(filtro_frame, 
+                                            values=[año_actual], 
+                                            width=80)
+        self.filtro_año.set(año_actual)
+        self.filtro_año.grid(row=0, column=5, padx=10, pady=5, sticky="w")
         
         # Botón de Aplicar Filtro
         btn_aplicar_filtro = ctk.CTkButton(filtro_frame,
                                            text="🔍 Aplicar Filtros", 
                                            command=self.aplicar_filtros_rma)
-        btn_aplicar_filtro.grid(row=0, column=4, padx=(20, 0), pady=5, sticky="w")
+        btn_aplicar_filtro.grid(row=0, column=6, padx=(20, 0), pady=5, sticky="w")
         
         filtro_frame.grid_columnconfigure(1, weight=1)
 
@@ -2423,16 +2433,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.stats_frame = ctk.CTkFrame(dashboard_column)
         self.stats_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Cargar datos iniciales
-        self.cargar_lista_rma()  # Cargar lista de RMAs
+        # Cargar datos iniciales - con filtro del año actual por defecto para optimizar rendimiento
+        año_actual = str(datetime.datetime.now().year)
+        self.cargar_lista_rma("", "Todos", año_actual)  # Cargar solo expedientes del año actual
         self.actualizar_dashboard()  # Cargar estadísticas del dashboard
 
 
-    def cargar_lista_rma(self, texto_busqueda="", estado_filtro="Todos"):
+    def cargar_lista_rma(self, texto_busqueda="", estado_filtro="Todos", año_filtro=None):
         """
         Carga los estados únicos de la DB para el filtro, y luego carga los RMA 
-        desde la DB aplicando los filtros (texto, estado).
+        desde la DB aplicando los filtros (texto, estado, año).
         """
+        
+        # Si no se especifica año, usar el año actual por defecto
+        if año_filtro is None:
+            año_filtro = str(datetime.datetime.now().year)
         
         # Limpiar el frame (siempre)
         for widget in self.lista_rma_frame.winfo_children():
@@ -2474,6 +2489,60 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     if hasattr(self, 'filtro_estado'):
                         self.filtro_estado.configure(values=["Todos"])
                         self.filtro_estado.set("Todos")
+            
+            # 1.5. OBTENER AÑOS DISPONIBLES PARA EL FILTRO - CON CACHÉ
+            if hasattr(self, 'filtro_año'):
+                try:
+                    # Usar caché para años (se actualiza cada 5 minutos o al invalidar)
+                    def query_años():
+                        cursor.execute("""
+                            SELECT DISTINCT SUBSTR(codigo_rma, 4, 2) as año_corto 
+                            FROM rma_maestro 
+                            WHERE codigo_rma LIKE 'RMA%' 
+                            ORDER BY año_corto DESC
+                        """)
+                        años_cortos = [fila[0] for fila in cursor.fetchall()]
+                        # Convertir años cortos (25, 24, 23...) a años completos (2025, 2024, 2023...)
+                        años_completos = []
+                        for año_corto in años_cortos:
+                            try:
+                                año_int = int(año_corto)
+                                # Asumimos que años 00-30 son 2000-2030, y 31-99 son 1931-1999
+                                if año_int <= 30:
+                                    año_completo = 2000 + año_int
+                                else:
+                                    año_completo = 1900 + año_int
+                                años_completos.append(str(año_completo))
+                            except ValueError:
+                                continue
+                        return años_completos if años_completos else [str(datetime.datetime.now().year)]
+                    
+                    años_db = _get_cached_query('años_rma', query_años)
+                    
+                    # Actualizar el OptionMenu de años (sin cambiar la selección actual si es válida)
+                    seleccion_actual_año = self.filtro_año.get()
+                    self.filtro_año.configure(values=años_db)
+                    
+                    # Mantener la selección actual si todavía existe, si no, poner el año actual
+                    if seleccion_actual_año in años_db:
+                        self.filtro_año.set(seleccion_actual_año)
+                    else:
+                        # Si no existe la selección actual, usar el año actual o el más reciente
+                        año_actual = str(datetime.datetime.now().year)
+                        if año_actual in años_db:
+                            self.filtro_año.set(año_actual)
+                        elif años_db:
+                            self.filtro_año.set(años_db[0])  # El más reciente
+                        else:
+                            self.filtro_año.set(año_actual)
+                            
+                except Exception as e:
+                    print(f"Error al cargar años para filtro: {e}")
+                    # Continuar con valores por defecto
+                    año_actual = str(datetime.datetime.now().year)
+                    if hasattr(self, 'filtro_año'):
+                        self.filtro_año.configure(values=[año_actual])
+                        self.filtro_año.set(año_actual)
                     
             # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
             # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
@@ -2486,6 +2555,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if estado_filtro_actual and estado_filtro_actual != "Todos":
                 sql += " AND estado = ?"
                 params.append(estado_filtro_actual)
+            
+            # Aplicar filtro de AÑO
+            año_filtro_actual = self.filtro_año.get() if hasattr(self, 'filtro_año') else año_filtro
+            if año_filtro_actual:
+                # Extraer los últimos 2 dígitos del año para el formato RMA (ej: 2025 -> "25")
+                try:
+                    año_corto = str(año_filtro_actual)[-2:]
+                    sql += " AND codigo_rma LIKE ?"
+                    params.append(f"RMA{año_corto}%")
+                except Exception as e:
+                    print(f"Error aplicando filtro de año: {e}")
                 
             # Aplicar filtro de BÚSQUEDA por texto
             if texto_busqueda:
@@ -5592,8 +5672,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Lee los valores de los filtros y recarga la lista."""
         texto_busqueda = self.entry_busqueda.get()
         estado_filtro = self.filtro_estado.get()
+        año_filtro = self.filtro_año.get()
         
-        self.cargar_lista_rma(texto_busqueda, estado_filtro)
+        self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
     
     def crear_tabla_adjuntos(self):
         """Crea la tabla rma_adjuntos si no existe."""
