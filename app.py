@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.90"
+APP_VERSION = "v0.0.91"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4677,7 +4677,37 @@ class VentanaPrincipal(ctk.CTkToplevel):
                           command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=0, column=5, padx=5, pady=2, sticky="w")
             
         # --- NUEVO: Calcular y actualizar el Precio Total en la etiqueta de Contabilidad ---
-        precio_total = sum(item.get('cantidad_entregada', 0) * item.get('precio_unitario', 0.0) for item in self.articulos_data)
+        precio_total = 0.0
+        
+        for item in self.articulos_data:
+            try:
+                # Convertir cantidad_entregada a float de forma segura
+                cantidad = item.get('cantidad_entregada', 0)
+                if isinstance(cantidad, str):
+                    # Limpiar el string y convertir a float
+                    cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                elif cantidad is None:
+                    cantidad = 0.0
+                else:
+                    cantidad = float(cantidad)
+                
+                # Convertir precio_unitario a float de forma segura
+                precio = item.get('precio_unitario', 0.0)
+                if isinstance(precio, str):
+                    # Limpiar el string y convertir a float
+                    precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                elif precio is None:
+                    precio = 0.0
+                else:
+                    precio = float(precio)
+                
+                # Multiplicar de forma segura
+                precio_total += cantidad * precio
+                
+            except (ValueError, TypeError) as e:
+                # Si hay un error en la conversión, ignorar este artículo y continuar
+                print(f"Error al calcular precio para artículo {item.get('referencia_articulo', 'N/A')}: {e}")
+                continue
         
         # Esto es seguro porque lbl_precio_total se crea en mostrar_nuevo_rma
         if hasattr(self, 'lbl_precio_total'):
@@ -4774,7 +4804,34 @@ class VentanaPrincipal(ctk.CTkToplevel):
         datos_maestro['estado'] = self.determinar_estado_rma(datos_maestro)
         
         # 2. Calcular Precio Total y validar Artículos
-        precio_total = sum(item['cantidad_entregada'] * item['precio_unitario'] for item in self.articulos_data)
+        precio_total = 0.0
+        
+        for item in self.articulos_data:
+            try:
+                # Convertir cantidad_entregada a float de forma segura
+                cantidad = item.get('cantidad_entregada', 0)
+                if isinstance(cantidad, str):
+                    cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                elif cantidad is None:
+                    cantidad = 0.0
+                else:
+                    cantidad = float(cantidad)
+                
+                # Convertir precio_unitario a float de forma segura
+                precio = item.get('precio_unitario', 0.0)
+                if isinstance(precio, str):
+                    precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                elif precio is None:
+                    precio = 0.0
+                else:
+                    precio = float(precio)
+                
+                precio_total += cantidad * precio
+                
+            except (ValueError, TypeError) as e:
+                print(f"Error al calcular precio para artículo {item.get('referencia_articulo', 'N/A')}: {e}")
+                continue
+        
         datos_maestro['precio_total_expediente'] = precio_total
 
         # 2.5 Validación: Numero de documento del cliente no debe repetirse
@@ -6680,6 +6737,27 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if not codigo_rma or not nombre_cliente:
              messagebox.showerror("Error", "Los datos del RMA no están cargados. Intente recargar el expediente.")
              return
+        
+        # 1.5. Obtener datos de artículos desde rma_detalles
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT referencia_articulo, cantidad_entregada 
+                FROM rma_detalles 
+                WHERE rma_id = ?
+                ORDER BY id
+            """, (self.current_rma_id,))
+            articulos_data = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            conn.close()
+            messagebox.showerror("Error", f"Error al obtener datos de artículos: {e}")
+            return
 
         # 2. Rutas - Plantilla sigue siendo local
         plantilla_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plantillas", "Plantilla_RMA.docx")
@@ -6689,23 +6767,75 @@ class VentanaPrincipal(ctk.CTkToplevel):
         nombre_archivo_final = f"{codigo_rma}_Informe_{fecha_str}.docx"
 
         try:
-            # 3. Cargar la plantilla y definir mapeo de marcadores
+            # 3. Cargar la plantilla y preparar datos para mapeo
             document = docx.Document(plantilla_path)
             
-            # Mapeo: [Marcador en Word]: [Valor a insertar]
+            # 3.1. Preparar lista de artículos para los marcadores en formato estructurado
+            if articulos_data:
+                # Crear formato de lista estructurada para artículos
+                lista_articulos = []
+                for i, (ref_articulo, cantidad) in enumerate(articulos_data, 1):
+                    ref_str = str(ref_articulo) if ref_articulo else 'N/A'
+                    cant_str = str(cantidad) if cantidad else '0'
+                    lista_articulos.append(f"{i}. {ref_str} - Cantidad: {cant_str}")
+                
+                # Unir con saltos de línea para formato de lista
+                articulos_formateados = '\n'.join(lista_articulos)
+                
+                # También crear versiones simples por compatibilidad
+                referencias_articulos = [str(ref) if ref else 'N/A' for ref, _ in articulos_data]
+                cantidades_articulos = [str(cant) if cant else '0' for _, cant in articulos_data]
+            else:
+                # Valores por defecto si no hay artículos
+                articulos_formateados = "No se han registrado artículos para este RMA."
+                referencias_articulos = ['N/A']
+                cantidades_articulos = ['N/A']
+            
+            # 3.2. Mapeo expandido: [Marcador en Word]: [Valor a insertar]
             mapeo = {
+                # Campos existentes
                 '[[CODIGO_RMA]]': codigo_rma,
                 '[[CLIENTE]]': nombre_cliente,
                 '[[FECHA_EMISION]]': datos.get('fecha_emision', 'N/A'),
                 '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'),
-                '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
+                '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username),
+                
+                # Campos nuevos de rma_maestro
+                '[[NUMERO_DOC]]': datos.get('numero_documento_cliente', 'N/A'),
+                '[[MOTIVO]]': datos.get('motivo', 'N/A'),
+                '[[NUMERO_ALBARAN]]': datos.get('numero_albaran', 'N/A'),
+                
+                # Campos de artículos mejorados
+                '[[LISTA_ARTICULOS]]': articulos_formateados,  # Lista estructurada completa
+                '[[REF_ARTICULO]]': ', '.join(referencias_articulos[:3]),  # Mantener compatibilidad
+                '[[CANTIDAD]]': ', '.join(cantidades_articulos[:3]),  # Mantener compatibilidad
+                
+                # Campos adicionales para flexibilidad
+                '[[TOTAL_ARTICULOS]]': str(len(articulos_data)) if articulos_data else '0'
             }
             
-            # 4. Reemplazar marcadores en párrafos
-            for p in document.paragraphs:
-                for clave, valor in mapeo.items():
-                    if clave in p.text:
-                        p.text = p.text.replace(clave, valor)
+            # 4. Función auxiliar para reemplazar texto preservando formato
+            def reemplazar_texto_preservando_formato(document, mapeo):
+                """Reemplaza texto manteniendo el formato original de la plantilla (fuentes, tamaños, etc.)"""
+                for paragraph in document.paragraphs:
+                    for run in paragraph.runs:
+                        for clave, valor in mapeo.items():
+                            if clave in run.text:
+                                # Reemplazar manteniendo el formato del run original
+                                run.text = run.text.replace(clave, str(valor))
+                
+                # También procesar tablas si las hay
+                for table in document.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    for clave, valor in mapeo.items():
+                                        if clave in run.text:
+                                            run.text = run.text.replace(clave, str(valor))
+            
+            # 4.1. Aplicar reemplazos preservando formato
+            reemplazar_texto_preservando_formato(document, mapeo)
             
             # 5. Guardar temporalmente para subirlo a Dropbox
             temp_dir = tempfile.mkdtemp(prefix="informe_rma_")
