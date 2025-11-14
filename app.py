@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.91"
+APP_VERSION = "v0.0.92"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -10408,7 +10408,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         messagebox.showwarning("Advertencia", f"No se pudo descargar el archivo '{nombre_archivo_final}': {e}")
             
             # Definir Asunto y Cuerpo del email
-            asunto_base = f"ENVIO DE INFORME {numero_rma}"
+            asunto_base = f"ILUTREK - Nº {numero_rma} ; DOCUMENTO CLIENTE: {numero_documento_cliente}"
             
             # Texto base del email
             cuerpo_base = (
