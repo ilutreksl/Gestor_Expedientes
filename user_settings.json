@@ -13,7 +13,7 @@
       "compact_mode": true,
       "icon_size": 24,
       "theme": "themes/BH_rime.json",
-      "appearance_mode": "dark",
+      "appearance_mode": "light",
       "historial_busquedas": [
         {
           "termino": "carlos",
