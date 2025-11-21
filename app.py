@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.92"
+APP_VERSION = "v0.0.93"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1354,6 +1354,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.btn_usuarios.grid(row=fila, column=0, padx=12, pady=6)
             Tooltip(self.btn_usuarios, "Gestión de usuarios")
             fila += 1
+            
         sidebar_bg = self.sidebar_frame.cget("fg_color") if hasattr(self.sidebar_frame, 'cget') else None
 
         self.btn_lista = ctk.CTkButton(self.sidebar_frame,
@@ -1492,6 +1493,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
             Tooltip(self.btn_ajustes, "Ajustes")
         except Exception:
             pass
+        
+        # Botón de menú Admin (solo para administradores) - AL FINAL
+        if str(self.rol).strip().lower() in ("admin", "administrador"):
+            fila += 1
+            self.btn_admin_menu = ctk.CTkButton(self.sidebar_frame,
+                                               text="⚙️ Admin",
+                                               width=100,
+                                               height=35,
+                                               font=ctk.CTkFont(size=12, weight="bold"),
+                                               fg_color="#ff6b35",
+                                               hover_color="#e55a2b",
+                                               command=self.mostrar_menu_admin)
+            self.btn_admin_menu.grid(row=fila, column=0, padx=12, pady=8)
+            Tooltip(self.btn_admin_menu, "Funciones de Administración")
         
         # --- Contenido Principal (Columna 1) ---
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent") # 'transparent' para que herede el fondo 'Light' (blanco)
@@ -6501,7 +6516,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                     fg_color="#D32F2F", hover_color="#B71C1C",
                                     command=lambda: self._cancelar_edicion(temp_path, temp_dir, dialogo))
         btn_cancelar.pack(side="right", padx=10, pady=10)
-        
+
         # Variables de estado
         dialogo.tiempo_inicial = tiempo_inicial
         dialogo.temp_path = temp_path
@@ -7169,6 +7184,60 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la plantilla.\nError: {e}")
+    
+    def mostrar_menu_admin(self):
+        """Muestra un menú desplegable con funciones de administración."""
+        if str(self.rol).strip().lower() not in ("admin", "administrador"):
+            messagebox.showerror("Acceso Denegado", "Solo los administradores tienen acceso a estas funciones.")
+            return
+            
+        # Crear ventana de menú
+        menu_window = ctk.CTkToplevel(self)
+        menu_window.title("Menú de Administración")
+        menu_window.geometry("300x200")
+        menu_window.resizable(False, False)
+        
+        # Centrar la ventana
+        menu_window.transient(self)
+        menu_window.grab_set()
+        
+        # Título
+        titulo = ctk.CTkLabel(menu_window, text="🔧 Funciones de Administración", 
+                             font=ctk.CTkFont(size=16, weight="bold"))
+        titulo.pack(pady=20)
+        
+        # Frame para botones
+        buttons_frame = ctk.CTkFrame(menu_window)
+        buttons_frame.pack(pady=10, padx=20, fill="both", expand=True)
+        
+        # Botón Eliminar RMA
+        btn_eliminar = ctk.CTkButton(buttons_frame,
+                                    text="🗑️ Eliminar RMA",
+                                    width=240,
+                                    height=40,
+                                    fg_color="#dc3545",
+                                    hover_color="#c82333",
+                                    command=lambda: [menu_window.destroy(), self.mostrar_eliminar_rma()])
+        btn_eliminar.pack(pady=10)
+        
+        # Botón Generar Número Manual
+        btn_numero_manual = ctk.CTkButton(buttons_frame,
+                                         text="🔢 Generar Número Manual",
+                                         width=240,
+                                         height=40,
+                                         fg_color="#007bff",
+                                         hover_color="#0056b3",
+                                         command=lambda: [menu_window.destroy(), self.mostrar_generar_numero_manual()])
+        btn_numero_manual.pack(pady=10)
+        
+        # Botón Cerrar
+        btn_cerrar = ctk.CTkButton(buttons_frame,
+                                  text="❌ Cerrar",
+                                  width=240,
+                                  height=32,
+                                  fg_color="gray",
+                                  command=menu_window.destroy)
+        btn_cerrar.pack(pady=(20, 10))
     
     def mostrar_gestion_usuarios(self):
         """Muestra la ventana de gestión de usuarios con opciones para añadir/editar usuarios."""
@@ -13147,6 +13216,143 @@ Versión de la App: {APP_VERSION}
         except Exception as e:
             print(f"Error obteniendo estadísticas: {e}")
             return None
+
+    def mostrar_eliminar_rma(self):
+        """Ventana simple para eliminar RMA."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("ELIMINAR RMA")
+        ventana.geometry("400x300")
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        ctk.CTkLabel(ventana, text="ELIMINAR RMA", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
+        
+        # Campo entrada
+        ctk.CTkLabel(ventana, text="Código RMA:", font=ctk.CTkFont(size=14)).pack()
+        entry = ctk.CTkEntry(ventana, width=200, height=30, font=ctk.CTkFont(size=14))
+        entry.pack(pady=10)
+        
+        # Info
+        info = ctk.CTkLabel(ventana, text="", font=ctk.CTkFont(size=12))
+        info.pack(pady=10)
+        
+        # Buscar
+        def buscar():
+            codigo = entry.get().strip()
+            if not codigo:
+                info.configure(text="Escribe un código RMA", text_color="orange")
+                btn_eliminar.configure(state="disabled")
+                return
+            
+            conn, cursor = self.conectar_db()
+            if conn:
+                cursor.execute("SELECT cliente, fecha_emision FROM rma_maestro WHERE codigo_rma = ?", (codigo,))
+                data = cursor.fetchone()
+                conn.close()
+                if data:
+                    info.configure(text=f"Encontrado: {data[0]} - {data[1]}", text_color="green")
+                    btn_eliminar.configure(state="normal")
+                else:
+                    info.configure(text="RMA no encontrado", text_color="red")
+                    btn_eliminar.configure(state="disabled")
+        
+        ctk.CTkButton(ventana, text="BUSCAR", command=buscar, width=100, height=30).pack(pady=5)
+        
+        # Eliminar
+        def eliminar():
+            codigo = entry.get().strip()
+            if messagebox.askyesno("Confirmar", f"¿Eliminar RMA {codigo}?"):
+                try:
+                    conn, cursor = self.conectar_db()
+                    cursor.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo,))
+                    rma_id = cursor.fetchone()[0]
+                    cursor.execute("DELETE FROM rma_historial WHERE rma_id = ?", (rma_id,))
+                    cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                    cursor.execute("DELETE FROM rma_maestro WHERE id = ?", (rma_id,))
+                    conn.commit()
+                    conn.close()
+                    messagebox.showinfo("OK", f"RMA {codigo} eliminado")
+                    ventana.destroy()
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+        
+        btn_eliminar = ctk.CTkButton(ventana, text="ELIMINAR", command=eliminar, 
+                                    fg_color="red", width=150, height=40, state="disabled")
+        btn_eliminar.pack(pady=20)
+        
+        ctk.CTkButton(ventana, text="CANCELAR", command=ventana.destroy, width=100).pack()
+        
+    def mostrar_generar_numero_manual(self):
+        """Ventana simple para crear RMA manual."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("CREAR RMA MANUAL")
+        ventana.geometry("400x250")
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Título
+        ctk.CTkLabel(ventana, text="CREAR RMA MANUAL", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
+        
+        # Campo entrada
+        ctk.CTkLabel(ventana, text="Código RMA:", font=ctk.CTkFont(size=14)).pack()
+        entry = ctk.CTkEntry(ventana, width=200, height=30, font=ctk.CTkFont(size=14))
+        entry.pack(pady=10)
+        
+        # Info
+        info = ctk.CTkLabel(ventana, text="", font=ctk.CTkFont(size=12))
+        info.pack(pady=10)
+        
+        # Validar
+        def validar():
+            codigo = entry.get().strip().upper()
+            if not codigo:
+                info.configure(text="Escribe un código RMA", text_color="orange")
+                btn_crear.configure(state="disabled")
+                return
+            
+            if not codigo.startswith("RMA25"):
+                info.configure(text="Debe empezar con RMA25", text_color="red")
+                btn_crear.configure(state="disabled")
+                return
+            
+            conn, cursor = self.conectar_db()
+            if conn:
+                cursor.execute("SELECT COUNT(*) FROM rma_maestro WHERE codigo_rma = ?", (codigo,))
+                existe = cursor.fetchone()[0] > 0
+                conn.close()
+                if existe:
+                    info.configure(text="Ya existe ese código", text_color="red")
+                    btn_crear.configure(state="disabled")
+                else:
+                    info.configure(text="Código válido", text_color="green")
+                    btn_crear.configure(state="normal")
+        
+        ctk.CTkButton(ventana, text="VALIDAR", command=validar, width=100, height=30).pack(pady=5)
+        
+        # Crear
+        def crear():
+            codigo = entry.get().strip().upper()
+            if messagebox.askyesno("Confirmar", f"¿Crear RMA {codigo}?"):
+                try:
+                    conn, cursor = self.conectar_db()
+                    fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute("""
+                        INSERT INTO rma_maestro (codigo_rma, cliente, fecha_emision, creado_por, estado, precio_total_expediente)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (codigo, "[Manual]", fecha, self.username, "Creado", 0.0))
+                    conn.commit()
+                    conn.close()
+                    messagebox.showinfo("OK", f"RMA {codigo} creado")
+                    ventana.destroy()
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+        
+        btn_crear = ctk.CTkButton(ventana, text="CREAR", command=crear, 
+                                 fg_color="green", width=150, height=40, state="disabled")
+        btn_crear.pack(pady=20)
+        
+        ctk.CTkButton(ventana, text="CANCELAR", command=ventana.destroy, width=100).pack()
 
 # ----------------------------------------------------------------------
 # 7. EJECUCIÓN DEL PROGRAMA
