@@ -147,6 +147,14 @@ class CTkDatePicker(ctk.CTkFrame):
                     btn.grid(row=week, column=day_col)
                     day += 1
 
+        # Botón "Hoy" para seleccionar la fecha actual
+        today_button = ctk.CTkButton(self.calendar_frame, text="📅 HOY", 
+                                   width=100, height=30,
+                                   font=ctk.CTkFont(size=12, weight="bold"),
+                                   fg_color="#4CAF50", hover_color="#45a049",
+                                   command=self.select_today)
+        today_button.grid(row=8, column=0, columnspan=7, pady=10)
+
     def prev_month(self):
         """
         Navigate to the previous month in the calendar.
@@ -192,6 +200,24 @@ class CTkDatePicker(ctk.CTkFrame):
         self.date_entry.configure(state='normal')
         self.date_entry.delete(0, tk.END)
         self.date_entry.insert(0, self.selected_date.strftime(self.date_format))
+        # Restore the disabled state if necessary
+        if not self.allow_manual_input:
+            self.date_entry.configure(state='disabled')
+        self.popup.destroy()
+        self.popup = None
+
+    def select_today(self):
+        """
+        Select today's date and close the calendar.
+        
+        Sets the date entry to today's date and closes the calendar popup.
+        """
+        today = datetime.now()
+        self.selected_date = today
+        # Temporarily enable the entry to set the date
+        self.date_entry.configure(state='normal')
+        self.date_entry.delete(0, tk.END)
+        self.date_entry.insert(0, today.strftime(self.date_format))
         # Restore the disabled state if necessary
         if not self.allow_manual_input:
             self.date_entry.configure(state='disabled')
