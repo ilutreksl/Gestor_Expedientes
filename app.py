@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.96"
+APP_VERSION = "v0.0.97"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2622,7 +2622,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="ACCIONES", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w") # Columna 5
+            # Eliminada columna 'ACCIONES' para usar doble clic en la fila
             if not registros:
                 ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
                 return
@@ -2663,8 +2663,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
                 f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
                 f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
-                # f5 (acciones) usa actions_bg para evitar el efecto cebra
-                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color=actions_bg, height=row_height)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
                 f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
@@ -2672,38 +2670,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
                 f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
                 f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
-                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
 
                 # Contenido de cada columna con padding muy reducido para filas más finas
-                ctk.CTkLabel(f0, text=codigo_rma).pack(anchor="w", padx=4, pady=0)
-                ctk.CTkLabel(f1, text=cliente).pack(anchor="w", padx=4, pady=0)
-                ctk.CTkLabel(f2, text=numero_documento_cliente).pack(anchor="w", padx=4, pady=0)
-                ctk.CTkLabel(f3, text=estado, text_color=color).pack(anchor="w", padx=4, pady=0)
-                ctk.CTkLabel(f4, text=fecha_emision).pack(anchor="w", padx=4, pady=0)
-                # Botón editar: icon-only con apariencia similar a los botones del sidebar
-                try:
-                    if getattr(self, 'icon_edit', None):
-                        # Botón editar más pequeño para encajar en filas compactas
-                        btn = ctk.CTkButton(f5, text="", image=self.icon_edit, width=28, height=28,
-                                           fg_color=(btn_bg if btn_bg is not None else None),
-                                           hover_color=(btn_bg if btn_bg is not None else None),
-                                           command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
-                        btn.pack(anchor="w", padx=4, pady=0)
-                        # Añadir tooltip si la clase Tooltip está disponible
-                        try:
-                            Tooltip(btn, "Editar expediente")
-                        except Exception:
-                            pass
-                    else:
-                        ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=0)
-                except Exception:
-                    # Caer a botón de texto si algo falla en la carga de icono
-                    ctk.CTkButton(f5, text="✏️ Editar", width=80, command=lambda r=rma_id: self.mostrar_nuevo_rma(rma_id=r)).pack(anchor="w", padx=4, pady=0)
+                # Crear labels y mantener referencias para enlazar eventos (doble click)
+                lbl0 = ctk.CTkLabel(f0, text=codigo_rma)
+                lbl0.pack(anchor="w", padx=4, pady=0)
+                lbl1 = ctk.CTkLabel(f1, text=cliente)
+                lbl1.pack(anchor="w", padx=4, pady=0)
+                lbl2 = ctk.CTkLabel(f2, text=numero_documento_cliente)
+                lbl2.pack(anchor="w", padx=4, pady=0)
+                lbl3 = ctk.CTkLabel(f3, text=estado, text_color=color)
+                lbl3.pack(anchor="w", padx=4, pady=0)
+                lbl4 = ctk.CTkLabel(f4, text=fecha_emision)
+                lbl4.pack(anchor="w", padx=4, pady=0)
+                # En lugar de botón de editar, abrimos el editor con doble clic en cualquier columna de la fila
 
                 # Hover efectos para toda la fila: aplicar a cada columna
-                cols = [f0, f1, f2, f3, f4, f5]
+                cols = [f0, f1, f2, f3, f4]
                 # Guardar el color original por columna para restaurarlo correctamente
-                originals = [bg, bg, bg, bg, bg, actions_bg]
+                originals = [bg, bg, bg, bg, bg]
 
                 def _on_enter(e, cols=cols):
                     for rf in cols:
@@ -2719,9 +2704,28 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         except Exception:
                             pass
 
+                # También enlazamos los labels internos para asegurar que capturan el doble click
+                inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4]
+
                 for rf in cols:
                     rf.bind("<Enter>", _on_enter)
                     rf.bind("<Leave>", _on_leave)
+                    # Mostrar cursor 'hand2' para indicar que la fila es clicable
+                    try:
+                        rf.configure(cursor="hand2")
+                    except Exception:
+                        pass
+
+                # Enlazar eventos a labels (algunas platforms capturan el evento en el label)
+                for w in inner_widgets:
+                    try:
+                        w.configure(cursor="hand2")
+                    except Exception:
+                        pass
+                    try:
+                        w.bind("<Double-Button-1>", lambda e, r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
+                    except Exception:
+                        pass
             
         except Exception as e:
             print(f"Error al cargar lista de RMA: {e}")
