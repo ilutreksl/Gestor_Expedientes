@@ -23,6 +23,7 @@ load_dotenv()
 from PIL import Image, ImageTk
 #from tkcalendar import Calendar
 from CTkDatePicker import CTkDatePicker
+from lib.changelog_window import mostrar_ventana_cambios
 
 import tkinter as tk
 from tkinter import ttk
@@ -237,7 +238,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.99"
+APP_VERSION = "v0.1.00"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2155,8 +2156,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             def cancelar():
                 dlg.destroy()
 
-            ctk.CTkButton(btn_frame, text="Guardar", command=guardar).grid(row=0, column=1, padx=6)
             ctk.CTkButton(btn_frame, text="Cancelar", command=cancelar).grid(row=0, column=0, padx=6)
+            ctk.CTkButton(btn_frame, text="Ver cambios", command=lambda: mostrar_ventana_cambios(dlg)).grid(row=0, column=1, padx=6)
+            ctk.CTkButton(btn_frame, text="Guardar", command=guardar).grid(row=0, column=2, padx=6)
 
         except Exception as e:
             print(f"Error abriendo diálogo de ajustes: {e}")
