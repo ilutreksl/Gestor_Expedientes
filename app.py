@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.94"
+APP_VERSION = "v0.0.95"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5592,13 +5592,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
             valores_a_actualizar.append(estado_nuevo)
 
         # 4. Actualizar rma_maestro si hay cambios
+        updated_any = False
         if campos_a_actualizar:
             valores_a_actualizar.append(rma_id)
             set_clause = ", ".join(campos_a_actualizar)
             
             try:
                 cursor.execute(f"UPDATE rma_maestro SET {set_clause} WHERE id = ?", tuple(valores_a_actualizar))
-                messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
+                updated_any = True
             except sqlite3.Error as e:
                 print(f"Error al actualizar maestro: {e}")
                 conn.rollback()
@@ -5636,7 +5637,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             elif not self.articulos_data and cursor.rowcount > 0: # Si borramos y no insertamos nada
                  self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
             
-            messagebox.showinfo("Expediente actualizado", "Expediente se ha actualizado.")
+            updated_any = True
 
         except sqlite3.Error as e:
             print(f"Error al actualizar detalles: {e}")
@@ -5644,13 +5645,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
             conn.close()
             return
             
-        # 6. Commit final, invalidar caché y retorno a la lista
+        # 6. Commit final e invalidar caché
         conn.commit()
         conn.close()
         
         # Invalidar caché de estados (puede que se haya actualizado el estado)
         invalidate_cache('estados_rma')
-        self.mostrar_lista_rma()
+
+        # Mostrar un único mensaje de éxito y mantener la ficha abierta
+        if updated_any:
+            try:
+                messagebox.showinfo("Expediente actualizado", "El expediente se ha actualizado correctamente.")
+            except Exception:
+                pass
     
     def mostrar_historial(self, parent_frame):
         """Muestra la lista de registros de cambios para el RMA actual."""
