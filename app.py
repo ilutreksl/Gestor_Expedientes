@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.97"
+APP_VERSION = "v0.0.98"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2744,13 +2744,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Usamos os.getcwd() para obtener la ruta del directorio de trabajo actual
             # y os.path.join para construir la ruta completa de la base de datos.
             db_path_origen = os.path.join(os.getcwd(), DB_FILENAME)
-            
-            # Opcional: una verificación rápida para ver si el archivo existe
-            if not os.path.exists(db_path_origen):
+
+            # Si se han configurado variables de TURSO, podemos intentar volcar desde Turso
+            turso_url_check = os.getenv("TURSO_DATABASE_URL")
+            turso_token_check = os.getenv("TURSO_AUTH_TOKEN")
+
+            # Opcional: una verificación rápida para ver si el archivo existe.
+            # Pero si hay credenciales de Turso, NO abortamos aquí: intentaremos volcar Turso.
+            if not os.path.exists(db_path_origen) and not (turso_url_check and turso_token_check):
                 messagebox.showerror(
-                    "Error de Archivo", 
-                    f"No se encontró la base de datos en la ruta esperada: {db_path_origen}\n"
-                    "Asegúrate de que el archivo '{DB_FILENAME}' está en la misma carpeta."
+                    "Error de Archivo",
+                    f"No se encontró la base de datos local en la ruta esperada: {db_path_origen}\n"
+                    f"Asegúrate de que el archivo '{DB_FILENAME}' está en la misma carpeta, o configura TURSO_DATABASE_URL/TURSO_AUTH_TOKEN para volcar desde Turso."
                 )
                 return
 
@@ -2818,6 +2823,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if turso_url and turso_token:
             try:
                 operations_log.append(f"Intentando volcar Turso: {turso_url}")
+                # Aviso al usuario: volcando desde Turso
+                try:
+                    messagebox.showinfo("Volcando desde Turso", "Se va a intentar volcar la base de datos desde Turso. Esta operación puede tardar varios minutos dependiendo del tamaño de las tablas.")
+                except Exception:
+                    # No bloquear si messagebox falla
+                    pass
                 # Conectamos a la BD (esto usará la implementación Turso si las env vars están)
                 remote_conn = connect_db(timeout=30)
                 remote_cursor = remote_conn.cursor()
@@ -2915,6 +2926,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     pass
 
                 operations_log.append(f"Copia de Turso completada correctamente en: {path_destino}")
+                # Intentar guardar el log en un archivo junto al .db de destino
+                try:
+                    # Guardar logs en carpeta centralizada: <project>/logs/backups/
+                    logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'backups')
+                    os.makedirs(logs_dir, exist_ok=True)
+                    log_name = os.path.splitext(os.path.basename(path_destino))[0] + '.log'
+                    log_path = os.path.join(logs_dir, log_name)
+                    with open(log_path, 'w', encoding='utf-8') as lf:
+                        lf.write('\n'.join(operations_log))
+                    operations_log.append(f"Registro guardado en: {log_path}")
+                except Exception as e:
+                    operations_log.append(f"No se pudo guardar el registro en disco: {e}")
+
                 # Mostrar log detallado al usuario
                 show_log_window(operations_log, title="Registro de copia (Turso)")
                 return
@@ -2942,6 +2966,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn_origen.backup(conn_destino)
 
             operations_log.append(f"Copia local realizada correctamente en: {path_destino}")
+            # Intentar guardar el log en un archivo junto al .db de destino
+            try:
+                # Guardar logs en carpeta centralizada: <project>/logs/backups/
+                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'backups')
+                os.makedirs(logs_dir, exist_ok=True)
+                log_name = os.path.splitext(os.path.basename(path_destino))[0] + '.log'
+                log_path = os.path.join(logs_dir, log_name)
+                with open(log_path, 'w', encoding='utf-8') as lf:
+                    lf.write('\n'.join(operations_log))
+                operations_log.append(f"Registro guardado en: {log_path}")
+            except Exception as e:
+                operations_log.append(f"No se pudo guardar el registro en disco: {e}")
+
             show_log_window(operations_log, title="Registro de copia (local)")
 
         except sqlite3.Error as e:
