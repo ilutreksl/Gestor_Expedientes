@@ -237,7 +237,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.0.98"
+APP_VERSION = "v0.0.99"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7646,6 +7646,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
         filtro_estado.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         filtro_estado.set("Todos")
 
+        # Filtro por creador de la tarea
+        try:
+            conn_tmp = connect_db()
+            cur_tmp = conn_tmp.cursor()
+            cur_tmp.execute("SELECT DISTINCT creado_por FROM tareas")
+            creadores_rows = cur_tmp.fetchall()
+            try:
+                conn_tmp.close()
+            except Exception:
+                pass
+            creadores = [r[0] for r in creadores_rows if r and r[0]]
+        except Exception:
+            creadores = []
+
+        valores_creador = ["Todos"] + creadores
+        ctk.CTkLabel(controls, text="Filtrar por Usuario:").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        filtro_creador = ctk.CTkOptionMenu(controls, values=valores_creador)
+        filtro_creador.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+        filtro_creador.set("Todos")
+
         list_frame = ctk.CTkFrame(frame)
         list_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -7676,10 +7696,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn = connect_db()
                 cur = conn.cursor()
                 estado = filtro_estado.get()
-                if estado == "Todos":
-                    cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC")
+                creador = filtro_creador.get()
+
+                base_sql = "SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas"
+                where_clauses = []
+                params = []
+                if estado and estado != "Todos":
+                    where_clauses.append("estado = ?")
+                    params.append(estado)
+                if creador and creador != "Todos":
+                    where_clauses.append("creado_por = ?")
+                    params.append(creador)
+
+                order_clause = " ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC"
+
+                if where_clauses:
+                    sql = base_sql + " WHERE " + " AND ".join(where_clauses) + order_clause
+                    cur.execute(sql, tuple(params))
                 else:
-                    cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas WHERE estado = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (estado,))
+                    cur.execute(base_sql + order_clause)
                 filas = cur.fetchall()
                 conn.close()
 
