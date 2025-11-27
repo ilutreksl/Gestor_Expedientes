@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.01"
+APP_VERSION = "v0.1.02"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2726,7 +2726,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     except Exception:
                         pass
                     try:
-                        w.bind("<Double-Button-1>", lambda e, r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
+                        w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
                     except Exception:
                         pass
             

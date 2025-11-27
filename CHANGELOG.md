@@ -1,3 +1,8 @@
+Cambios V.0.1.02
+
+Correccion de errores.
+
+
 Cambios V.0.1.01 - ✨ Últimas mejoras implementadas:
 
 El campo de Numero Documento Cliente se mantiene editable si contiene las palabras: Email, Telefinica o Telefonico.
