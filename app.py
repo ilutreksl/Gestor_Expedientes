@@ -17,6 +17,7 @@ import webbrowser
 import docx
 import requests
 from dotenv import load_dotenv
+import re
 
 # Cargar variables de entorno
 load_dotenv()
@@ -238,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.00"
+APP_VERSION = "v0.1.01"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4899,11 +4900,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         datos_maestro['precio_total_expediente'] = precio_total
 
         # 2.5 Validación: Numero de documento del cliente no debe repetirse
-        # Se permiten repeticiones para los valores 'email' y 'telefonico'
+        # Se permiten repeticiones para valores provisionales que contengan 'email' o 'telefonic'
         numero_doc = str(datos_maestro.get('numero_documento_cliente', '')).strip()
         if numero_doc:
             numero_doc_norm = numero_doc.lower()
-            if numero_doc_norm not in ('email', 'telefonico'):
+            # Si el valor contiene las palabras provisionales, no realizar la comprobación de duplicados
+            if not re.search(r"\b(email|telefonica|telefonico)\b", numero_doc_norm, re.IGNORECASE):
                 # Conectar a la DB para comprobar duplicados
                 conn_check, cursor_check = self.master.conectar_db()
                 if not conn_check:
@@ -4928,6 +4930,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # if not self.articulos_data:
         #     print("Error: Debe añadir al menos un artículo.")
         #     return
+
+        # Aviso: Si el número de documento contiene palabras provisionales, pedir confirmación al usuario
+        try:
+            if numero_doc and re.search(r"\b(email|telefonica|telefonico)\b", numero_doc, re.IGNORECASE):
+                respuesta_prov = messagebox.askyesno("Valor provisional detectado",
+                                                     "El campo 'Núm. Doc. Cliente' contiene un valor provisional (p.ej. 'Email' o 'Telefonica').\n¿Deseas continuar guardando el expediente con este valor?")
+                if not respuesta_prov:
+                    return
+        except Exception:
+            # Si falla mostrar el diálogo, continuar sin bloquear el guardado
+            pass
 
         # 3. Inserción en la Base de Datos
         conn, cursor = self.master.conectar_db()
@@ -5481,8 +5494,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         # CRÍTICO: Borrar el placeholder ANTES de insertar
                         entry.delete(0, ctk.END)
                         entry.insert(0, str(valor) if valor is not None else "")
-                        
-                        entry.configure(state=estado_original)
+
+                        # Si el campo es 'numero_documento_cliente', permitir edición
+                        # cuando el valor contiene 'Email' o 'Telefonica' (case-insensitive).
+                        try:
+                            if columna == 'numero_documento_cliente':
+                                valor_str = str(valor) if valor is not None else ''
+                                if re.search(r"\b(email|telefonica|telefonico)\b", valor_str, re.IGNORECASE):
+                                    # Mantener en editable
+                                    entry.configure(state='normal')
+                                else:
+                                    entry.configure(state=estado_original)
+                            else:
+                                entry.configure(state=estado_original)
+                        except Exception:
+                            entry.configure(state=estado_original)
 
                     # Tratamiento para DatePicker (CTkDatePicker o widgets similares)
                     elif hasattr(entry, 'set_date'):
@@ -5580,6 +5606,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if datos_nuevos is None:
             conn.close()
             return
+
+        # Aviso: si el número de documento nuevo contiene valores provisionales, pedir confirmación
+        try:
+            num_doc_nuevo = str(datos_nuevos.get('numero_documento_cliente', '') or '').strip()
+            if num_doc_nuevo and re.search(r"\b(email|telefonica|telefonico)\b", num_doc_nuevo, re.IGNORECASE):
+                resp = messagebox.askyesno("Valor provisional detectado",
+                                           "El campo 'Núm. Doc. Cliente' contiene un valor provisional (p.ej. 'Email' o 'Telefonica').\n¿Deseas continuar con la actualización?")
+                if not resp:
+                    conn.close()
+                    return
+        except Exception:
+            pass
 
         # 2.1. INTEGRACIÓN DE LA TRAZABILIDAD - Calcular el nuevo estado
         estado_nuevo = self.determinar_estado_rma(datos_nuevos)
