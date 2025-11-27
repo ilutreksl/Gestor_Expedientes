@@ -1,9 +1,15 @@
+Cambios V.0.1.03 - ✨ Últimas mejoras implementadas:
+
+🔄 Añadido boton para editar los articulos ya añadidos al expediente.
+🔄 Pulsa INTRO permite añadir o actualizar articulos.
+
+
 Cambios V.0.1.02
 
 Correccion de errores.
 
 
-Cambios V.0.1.01 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.01 
 
 El campo de Numero Documento Cliente se mantiene editable si contiene las palabras: Email, Telefinica o Telefonico.
 De esta manera se podra añadir mas adelante el numero correcto del cliente.

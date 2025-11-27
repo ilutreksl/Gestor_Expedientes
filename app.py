@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.02"
+APP_VERSION = "v0.1.03"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4478,13 +4478,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_precio.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
 
         # Botones de Acción de Artículos
-        ctk.CTkButton(input_articulo_frame, 
-                      text="➕", 
-                      width=30,
-                      #fg_color="gray70",        # Fondo del botón: Gris claro
-                      #hover_color="gray60",     # Efecto hover: Ligeramente más oscuro
-                      #text_color="black",                      
-                      command=self.anadir_articulo).grid(row=1, column=5, padx=5, pady=2)
+        # Guardar referencia al botón para permitir cambiar su comportamiento durante la edición
+        self.btn_anadir_articulo = ctk.CTkButton(input_articulo_frame,
+                                                 text="➕",
+                                                 width=30,
+                                                 command=self.anadir_articulo)
+        self.btn_anadir_articulo.grid(row=1, column=5, padx=5, pady=2)
+
+        # Permitir pulsar ENTER en los campos para añadir/actualizar artículo
+        try:
+            self.art_ref.bind("<Return>", self._enter_articulo)
+            self.art_cant_doc.bind("<Return>", self._enter_articulo)
+            self.art_cant_entregada.bind("<Return>", self._enter_articulo)
+            self.art_precio.bind("<Return>", self._enter_articulo)
+        except Exception:
+            pass
         
         # 5. Listado de Artículos ya añadidos
         self.articulos_list_frame = ctk.CTkFrame(articulos_frame)
@@ -4698,12 +4706,98 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_cant_entregada.delete(0, ctk.END)
         self.art_precio.delete(0, ctk.END)
         self.art_estado.set(self.OPCIONES["Estado_Producto"][0])
+        # Si estábamos en modo edición, salir de él
+        try:
+            if hasattr(self, 'editing_articulo_index') and self.editing_articulo_index is not None:
+                self.editing_articulo_index = None
+                # Restaurar el botón de añadir a su comportamiento original
+                try:
+                    self.btn_anadir_articulo.configure(text="➕", command=self.anadir_articulo)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def eliminar_articulo(self, index):
         """Elimina un artículo de la lista temporal y actualiza la vista."""
         if 0 <= index < len(self.articulos_data):
             self.articulos_data.pop(index)
             self.actualizar_listado_articulos()
+
+    def editar_articulo(self, index):
+        """Carga un artículo en los campos de entrada para su edición."""
+        if 0 <= index < len(self.articulos_data):
+            art = self.articulos_data[index]
+            try:
+                self.art_ref.delete(0, ctk.END); self.art_ref.insert(0, str(art.get('referencia_articulo', '')))
+                self.art_cant_doc.delete(0, ctk.END); self.art_cant_doc.insert(0, str(art.get('cantidad_segun_documento', '')))
+                self.art_cant_entregada.delete(0, ctk.END); self.art_cant_entregada.insert(0, str(art.get('cantidad_entregada', '')))
+                self.art_precio.delete(0, ctk.END); self.art_precio.insert(0, str(art.get('precio_unitario', '')))
+                try:
+                    self.art_estado.set(art.get('estado_producto', self.OPCIONES['Estado_Producto'][0]))
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Marcar índice en edición y cambiar botón
+            self.editing_articulo_index = index
+            try:
+                self.btn_anadir_articulo.configure(text="✔️", command=self.actualizar_articulo)
+            except Exception:
+                pass
+
+    def actualizar_articulo(self):
+        """Actualiza el artículo seleccionado con los valores actuales de los campos."""
+        if not hasattr(self, 'editing_articulo_index') or self.editing_articulo_index is None:
+            return
+        idx = self.editing_articulo_index
+        try:
+            referencia = self.art_ref.get()
+            cant_doc = float(self.art_cant_doc.get().replace(',', '.') or 0.0)
+            cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
+            estado = self.art_estado.get()
+            precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
+        except ValueError:
+            messagebox.showwarning("Error", "Cantidad y Precio deben ser números válidos.")
+            return
+
+        if not referencia:
+            messagebox.showwarning("Error", "La referencia es obligatoria.")
+            return
+
+        nuevo_articulo = {
+            "referencia_articulo": referencia,
+            "cantidad_segun_documento": cant_doc,
+            "cantidad_entregada": cant_entregada,
+            "estado_producto": estado,
+            "precio_unitario": precio_unitario
+        }
+        # Reemplazar en la lista
+        try:
+            self.articulos_data[idx] = nuevo_articulo
+        except Exception:
+            return
+
+        # Finalizar edición
+        self.editing_articulo_index = None
+        try:
+            self.btn_anadir_articulo.configure(text="➕", command=self.anadir_articulo)
+        except Exception:
+            pass
+
+        self.actualizar_listado_articulos()
+        self.limpiar_articulo()
+
+    def _enter_articulo(self, event=None):
+        """Handler para la tecla ENTER en los campos de artículo: añade o actualiza según el modo."""
+        try:
+            if hasattr(self, 'editing_articulo_index') and self.editing_articulo_index is not None:
+                self.actualizar_articulo()
+            else:
+                self.anadir_articulo()
+        except Exception:
+            # No propagamos excepciones por un ENTER accidental
+            pass
 
     def actualizar_listado_articulos(self):
         """Redibuja la tabla con los artículos de la lista temporal."""
@@ -4740,6 +4834,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             ctk.CTkButton(row_frame, text="X", width=30, fg_color="red", hover_color="darkred", 
                           command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=0, column=5, padx=5, pady=2, sticky="w")
+            # Botón Editar
+            try:
+                ctk.CTkButton(row_frame, text="✏️", width=30, 
+                              command=lambda idx=i: self.editar_articulo(idx)).grid(row=0, column=6, padx=2, pady=2, sticky="w")
+            except Exception:
+                pass
             
         # --- NUEVO: Calcular y actualizar el Precio Total en la etiqueta de Contabilidad ---
         precio_total = 0.0
