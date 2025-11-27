@@ -1,4 +1,10 @@
-Cambios V.0.1.00 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.01 - ✨ Últimas mejoras implementadas:
+
+El campo de Numero Documento Cliente se mantiene editable si contiene las palabras: Email, Telefinica o Telefonico.
+De esta manera se podra añadir mas adelante el numero correcto del cliente.
+
+
+Cambios V.0.1.00
 
 * Changelog Window: changelog_window.py: nueva ventana que muestra el historial de cambios.
 
