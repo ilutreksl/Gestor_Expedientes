@@ -1,9 +1,15 @@
+Cambios V.0.1.05 - ✨ Últimas mejoras implementadas:
+
+- Corregido error que no guardaba los resultados de los expedientes (Euros) en la BD.
+- Corregida la estadistica de Rentabilidad por Cliente. Incluye exportacion a Excel.
+
+
 Cambio V.0.1.04
 
 Ajustado las columnas del listado de articulos.
 
 
-Cambios V.0.1.03 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.03
 
 🔄 Añadido boton para editar los articulos ya añadidos al expediente.
 🔄 Pulsa INTRO permite añadir o actualizar articulos.

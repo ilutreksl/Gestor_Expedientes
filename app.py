@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.04"
+APP_VERSION = "v0.1.05"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4883,6 +4883,56 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if hasattr(self, 'lbl_precio_total'):
             self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
 
+        # Guardar el precio total en la BD si estamos editando un expediente ya existente
+        try:
+            self.guardar_precio_total_expediente()
+        except Exception:
+            # No bloquear la UI si la actualización en BD falla aquí; el guardado final también actualizará
+            pass
+
+    def guardar_precio_total_expediente(self):
+        """Recalcula el precio total desde `self.articulos_data` y lo persiste
+        en `rma_maestro.precio_total_expediente` si el RMA está abierto (tiene id)."""
+        # Calcular total localmente
+        precio_total = 0.0
+        for item in getattr(self, 'articulos_data', []):
+            try:
+                cantidad = item.get('cantidad_entregada', 0) or 0
+                if isinstance(cantidad, str):
+                    cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                else:
+                    cantidad = float(cantidad)
+
+                precio = item.get('precio_unitario', 0.0) or 0.0
+                if isinstance(precio, str):
+                    precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                else:
+                    precio = float(precio)
+
+                precio_total += cantidad * precio
+            except Exception:
+                continue
+
+        # Actualizar etiqueta si existe
+        try:
+            if hasattr(self, 'lbl_precio_total'):
+                self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
+        except Exception:
+            pass
+
+        # Si estamos editando un expediente ya guardado, escribir en BD
+        try:
+            if getattr(self, 'rma_actual_id', None) is not None:
+                conn, cursor = self.master.conectar_db()
+                if conn:
+                    try:
+                        cursor.execute("UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?", (precio_total, self.rma_actual_id))
+                        conn.commit()
+                    finally:
+                        conn.close()
+        except Exception as e:
+            print(f"Error guardando precio_total_expediente: {e}")
+
 
     def guardar_rma_placeholder(self):
         """Punto de entrada para guardar/actualizar."""
@@ -5807,28 +5857,50 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if self.articulos_data:
                 primer_articulo = self.articulos_data[0].copy()
                 primer_articulo['rma_id'] = rma_id
-                
+
                 columnas_detalle = ', '.join(primer_articulo.keys())
                 placeholders_detalle = ', '.join('?' * len(primer_articulo))
-                
+
                 # Preparar lista de valores para executemany
                 valores_batch = []
                 for articulo in self.articulos_data:
                     articulo_copia = articulo.copy()
                     articulo_copia['rma_id'] = rma_id
                     valores_batch.append(tuple(articulo_copia.values()))
-                
+
                 # Insertar todos los artículos en batch (mucho más rápido)
                 cursor.executemany(f"""
                     INSERT INTO rma_detalles ({columnas_detalle}) 
                     VALUES ({placeholders_detalle})
                 """, valores_batch)
-                    
+
                 self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", f"Lista Nueva ({len(self.articulos_data)} items)")
-            
+
+                # Recalcular el precio total a partir de los artículos insertados y actualizar rma_maestro
+                try:
+                    precio_total_recalc = 0.0
+                    for item in self.articulos_data:
+                        cantidad = item.get('cantidad_entregada', 0) or 0
+                        if isinstance(cantidad, str):
+                            cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                        else:
+                            cantidad = float(cantidad)
+
+                        precio = item.get('precio_unitario', 0.0) or 0.0
+                        if isinstance(precio, str):
+                            precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                        else:
+                            precio = float(precio)
+
+                        precio_total_recalc += cantidad * precio
+
+                    cursor.execute("UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?", (precio_total_recalc, rma_id))
+                except Exception as e:
+                    print(f"Error al recalcular/guardar precio_total_expediente en actualizar_rma: {e}")
+
             elif not self.articulos_data and cursor.rowcount > 0: # Si borramos y no insertamos nada
-                 self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
-            
+                self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
+
             updated_any = True
 
         except sqlite3.Error as e:
@@ -9427,9 +9499,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.main_stats_frame.grid_columnconfigure(0, weight=1) # Permite que el contenido se expanda
         
         # 4. Definición de las estadísticas y sus métodos (Aún no creados)
+        # Se elimina la estadística 'Abonos por Cliente y Periodo' (no funcional).
         self.botones_stats = {
-            "Expedientes Completados (Rentabilidad)": self.mostrar_expedientes_completados,
-            "Abonos por Cliente y Periodo": self.mostrar_abonos_cliente,
+            "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia
         }
         
@@ -9473,367 +9545,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return None
     
     def mostrar_expedientes_completados(self):
+        """Wrapper que delega la creación de la estadística de rentabilidad
+        al módulo externo `lib.client_rentability`.
         """
-        Estadística: Muestra los clientes con más expedientes COMPLETADOS, 
-        el total de expedientes y la suma de su rentabilidad, con filtros de fecha y cliente.
-        """
-        from datetime import datetime
-        
-        self.limpiar_marco_stats()
-        if not self.main_stats_frame: return
-        
-        ctk.CTkLabel(self.main_stats_frame, 
-                     text="INFORME DE EXPEDIENTES RMA COMPLETADOS (POR CLIENTE)", 
-                     font=ctk.CTkFont(size=18, weight="bold")
-        ).pack(pady=20)
-
-        # --- 1. Marco de Controles y Total ---
-        controles_frame = ctk.CTkFrame(self.main_stats_frame)
-        controles_frame.pack(padx=20, pady=(0, 10), fill="x")
-        
-        # Configuración de columnas
-        controles_frame.grid_columnconfigure((0, 2, 4), weight=0) # Etiquetas y Botones
-        controles_frame.grid_columnconfigure((1, 3, 5), weight=1) # Entries (expandibles)
-
-        # FILTRO 1: Fecha Inicial (DD/MM/AAAA) - Fila 0
-        ctk.CTkLabel(controles_frame, text="Fecha Inicial:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
-        self.fecha_inicial_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 01/01/2024")
-        self.fecha_inicial_exp_entry.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew")
-
-        # FILTRO 2: Fecha Final (DD/MM/AAAA) - Fila 0
-        ctk.CTkLabel(controles_frame, text="Fecha Final:").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
-        self.fecha_final_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 31/12/2024")
-        self.fecha_final_exp_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="ew")
-        
-        # FILTRO 3: Cliente - Fila 0
-        ctk.CTkLabel(controles_frame, text="Buscar Cliente:").grid(row=0, column=4, padx=(10, 5), pady=5, sticky="w")
-        self.cliente_filtro_exp_entry = ctk.CTkEntry(controles_frame, placeholder_text="Escriba parte del cliente...")
-        self.cliente_filtro_exp_entry.grid(row=0, column=5, padx=(0, 10), pady=5, sticky="ew")
-        
-        # Botón para aplicar filtros - Fila 1
-        ctk.CTkButton(
-            controles_frame, 
-            text="Aplicar Filtros", 
-            command=self._cargar_datos_expedientes_completados
-        ).grid(row=1, column=0, columnspan=2, padx=(0, 5), pady=10, sticky="ew")
-        
-        # Etiqueta para el Total de Rentabilidad - Fila 1
-        ctk.CTkLabel(controles_frame, text="Total de Rentabilidad (€):", font=ctk.CTkFont(weight="bold")).grid(row=1, column=2, padx=10, pady=10, sticky="w")
-        self.lbl_total_rentabilidad = ctk.CTkLabel(controles_frame, text="0.00 €", font=ctk.CTkFont(weight="bold", size=16), text_color="#2ecc71") # Color verde para el dinero
-        self.lbl_total_rentabilidad.grid(row=1, column=3, padx=(0, 10), pady=10, sticky="w")
-        
-        # --- 2. Marco Contenedor de Resultados ---
-        self.tabla_expedientes_frame = ctk.CTkFrame(self.main_stats_frame)
-        self.tabla_expedientes_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        
-        # 3. Cargar los datos iniciales
-        self._cargar_datos_expedientes_completados()
-    
-    def _cargar_datos_expedientes_completados(self):
-        """
-        Consulta la base de datos para obtener expedientes completados, 
-        aplica filtros de fecha y cliente, y calcula el total.
-        """
-        from datetime import datetime
-        
-        # 1. Obtener los valores de los filtros
-        cliente_filtro = self.cliente_filtro_exp_entry.get().strip()
-        fecha_inicial_str = self.fecha_inicial_exp_entry.get().strip()
-        fecha_final_str = self.fecha_final_exp_entry.get().strip()
-        
-        # Función auxiliar de validación de fecha (copiada de 'mostrar_articulos_incidencia')
-        def validar_fecha_entrada(fecha_ddmmyyyy):
-            if not fecha_ddmmyyyy:
-                return None 
-            try:
-                datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
-                return fecha_ddmmyyyy 
-            except ValueError:
-                messagebox.showerror("Error de Formato de Fecha", 
-                                     f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
-                return False 
-            except Exception:
-                return None
-        
-        fecha_inicial_db = validar_fecha_entrada(fecha_inicial_str)
-        fecha_final_db = validar_fecha_entrada(fecha_final_str)
-        
-        if fecha_inicial_db is False or fecha_final_db is False:
-            return
-        
-        # 2. Conexión y Limpieza del Marco
-        conn, cursor = self.master.conectar_db()
-        if not conn: 
-            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
-            return
-
-        for widget in self.tabla_expedientes_frame.winfo_children():
-            widget.destroy()
-
-        # 3. Construcción dinámica de la consulta SQL y los parámetros
-        
-        # Seleccionamos: Cliente, Conteo de Expedientes, Suma de Precios Totales (Rentabilidad)
-        sql_query_base = """
-            SELECT 
-                cliente, 
-                COUNT(id) AS total_expedientes,
-                SUM(precio_total_expediente) AS suma_total_rentabilidad
-            FROM 
-                rma_maestro
-            WHERE 
-                fecha_gestion IS NOT NULL  -- CRÍTICO: Solo expedientes COMPLETADOS
-        """
-        
-        condiciones = []
-        parametros = []
-        
-        # 3.1. Filtro por Cliente
-        if cliente_filtro:
-            condiciones.append("cliente LIKE ?")
-            parametros.append(f"%{cliente_filtro}%")
-            
-        # 3.2. Filtro por Rango de Fechas (usando la conversión a YYYY-MM-DD para SQLite)
-        if fecha_inicial_db:
-            # Reorganiza: fecha_gestion (DD/MM/AAAA) -> YYYY-MM-DD
-            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) >= ?")
-            # El parámetro se convierte a YYYY-MM-DD para la comparación
-            parametros.append(datetime.strptime(fecha_inicial_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
-
-        if fecha_final_db:
-            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) <= ?")
-            parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
-
-        # 4. Ensamblaje y Ejecución
-        
-        if condiciones:
-            sql_query_base += " AND " + " AND ".join(condiciones)
-
-        sql_query_final = sql_query_base + """
-            GROUP BY 
-                cliente
-            ORDER BY 
-                total_expedientes DESC
-            LIMIT 50; 
-        """
-
         try:
-            cursor.execute(sql_query_final, parametros)
-            datos_raw = cursor.fetchall()
-            
-            # 5. Calcular la suma total del listado mostrado
-            # La columna 2 de los datos (índice 2) contiene la suma total_rentabilidad de cada cliente
-            suma_total_global = sum(fila[2] for fila in datos_raw if fila[2] is not None)
-
-            # 6. Actualizar la etiqueta del total
-            self.lbl_total_rentabilidad.configure(text=f"{suma_total_global:,.2f} €") 
-
-            # 7. Dibujar la tabla
-            self.mostrar_tabla_estadistica(
-                datos_raw, 
-                columnas=["CLIENTE", "TOTAL EXPEDIENTES", "RENTABILIDAD TOTAL (€)"],
-                export_filename="Expedientes_Completados_Rentabilidad",
-                frame=self.tabla_expedientes_frame, 
-                formato_moneda=True # La última columna es monetaria
-            )
-
-            if not datos_raw:
-                 ctk.CTkLabel(self.tabla_expedientes_frame, 
-                              text="No se encontraron expedientes completados con los filtros aplicados.",
-                              font=ctk.CTkFont(size=14)
-                 ).pack(pady=40)
-
-        except sqlite3.Error as e:
-            messagebox.showerror("Error de Base de Datos", f"Error SQL: {e}")
+            from lib.client_rentability import mostrar_rentabilidad_clientes
+            mostrar_rentabilidad_clientes(self)
         except Exception as e:
-            messagebox.showerror("Error", f"Error inesperado al cargar expedientes completados: {e}")
-        finally:
-            if conn:
-                conn.close()
-
-    # ==============================================================================
-    # RESTO DE MÉTODOS AUXILIARES Y PLACEHOLDERS (SIN MODIFICAR, exceptuando la nueva llamada)
-    # ==============================================================================
-
-    # El método original 'mostrar_expedientes_cliente' ha sido eliminado/reemplazado.
-    
-    def mostrar_abonos_cliente(self):
-        """
-        Estadística: Muestra la suma del 'precio_total_expediente' por Cliente 
-        y permite filtrar por un 'Periodo' (rango de fecha).
-        """
-        # 1. Preparación de la interfaz
-        self.limpiar_marco_stats()
-        if not self.main_stats_frame: return
-        
-        ctk.CTkLabel(self.main_stats_frame, 
-                     text="ABONOS POR CLIENTE Y PERIODO", 
-                     font=ctk.CTkFont(size=18, weight="bold")
-        ).pack(pady=20)
-        
-        # --- 2. Marco de Controles Principales (Filtros de Fecha) ---
-        controles_frame = ctk.CTkFrame(self.main_stats_frame)
-        controles_frame.pack(padx=20, pady=(0, 10), fill="x")
-        
-        # Configuración de columnas
-        controles_frame.grid_columnconfigure((0, 2), weight=0) # Etiquetas (fijas)
-        controles_frame.grid_columnconfigure((1, 3), weight=1)    # Entries de Fecha (expandible)
-        controles_frame.grid_columnconfigure(4, weight=0) # Botón (fijo)
-
-        # FILTRO 1: Fecha Inicial (DD/MM/AAAA) - Fila 0
-        ctk.CTkLabel(controles_frame, text="Fecha Inicial (DD/MM/AAAA):").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
-        # Almacenamos las entries en la clase para poder acceder a ellas desde el helper
-        self.abono_fecha_inicial_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 01/01/2024")
-        self.abono_fecha_inicial_entry.grid(row=0, column=1, padx=(0, 10), pady=5, sticky="ew")
-
-        # FILTRO 2: Fecha Final (DD/MM/AAAA) - Fila 0
-        ctk.CTkLabel(controles_frame, text="Fecha Final (DD/MM/AAAA):").grid(row=0, column=2, padx=(10, 5), pady=5, sticky="w")
-        self.abono_fecha_final_entry = ctk.CTkEntry(controles_frame, placeholder_text="Ej: 31/12/2024")
-        self.abono_fecha_final_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="ew")
-        
-        # Botón para aplicar filtros - Fila 0
-        ctk.CTkButton(
-            controles_frame, 
-            text="Aplicar Filtros", 
-            command=self._cargar_datos_abonos
-        ).grid(row=0, column=4, padx=(10, 0), pady=5)
-        
-        # FILTRO 3: Resultado Expediente - Fila 1
-        opciones_resultado = ["Todos"] + (self.OPCIONES.get("Resultado_Expediente", []) if hasattr(self, 'OPCIONES') else [])
-        ctk.CTkLabel(controles_frame, text="Resultado Expediente:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky="w")
-        self.abono_resultado_option = ctk.CTkOptionMenu(controles_frame, values=opciones_resultado)
-        self.abono_resultado_option.grid(row=1, column=1, padx=(0, 10), pady=5, sticky="ew")
-        self.abono_resultado_option.set(opciones_resultado[0])
-        
-        # --- 3. Marco donde se dibujará la tabla de resultados ---
-        self.abonos_tabla_resultados_frame = ctk.CTkFrame(self.main_stats_frame)
-        self.abonos_tabla_resultados_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        self.abonos_tabla_resultados_frame.grid_columnconfigure(0, weight=1) # Permite que el contenido se expanda
-
-        # 4. Cargar los datos iniciales (sin filtros)
-        self._cargar_datos_abonos()
-
-    def _cargar_datos_abonos(self, event=None):
-        """
-        Consulta la base de datos, suma 'precio_total_expediente' por cliente y 
-        aplica filtros de rango de fecha.
-        """
-        
-        # 1. Obtener y validar las fechas (DD/MM/AAAA)
-        fecha_inicial_str = self.abono_fecha_inicial_entry.get().strip()
-        fecha_final_str = self.abono_fecha_final_entry.get().strip()
-
-        # Función local para validar fecha
-        def validar_fecha_entrada(fecha_ddmmyyyy):
-            if not fecha_ddmmyyyy:
-                return None 
-            try:
-                datetime.strptime(fecha_ddmmyyyy, '%d/%m/%Y')
-                return fecha_ddmmyyyy 
-            except ValueError:
-                messagebox.showerror("Error de Formato de Fecha", 
-                                     f"El formato de la fecha '{fecha_ddmmyyyy}' es incorrecto. Debe ser DD/MM/AAAA (ej: 01/01/2024).")
-                return False 
-            except Exception:
-                return None
-        
-        fecha_inicial_db = validar_fecha_entrada(fecha_inicial_str)
-        fecha_final_db = validar_fecha_entrada(fecha_final_str)
-        
-        if fecha_inicial_db is False or fecha_final_db is False:
-            return
-
-        # 2. Conexión y Limpieza del Marco de Resultados
-        conn, cursor = self.master.conectar_db()
-        if not conn: 
-            messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
-            return
-
-        for widget in self.abonos_tabla_resultados_frame.winfo_children():
-            widget.destroy()
-
-        # 3. Construcción dinámica de la consulta SQL y los parámetros
-        
-        # IMPORTANTE: Usamos SUM(precio_total_expediente) en lugar del error 'abono'
-        sql_query_base = """
-            SELECT 
-                cliente, 
-                SUM(precio_total_expediente) AS total_abono 
-            FROM 
-                rma_maestro
-            WHERE 1=1
-        """
-        
-        condiciones = []
-        parametros = []
-        
-        # 3.1. Filtro por Rango de Fechas (Convierte la fecha de la DB a YYYY-MM-DD para comparación)
-        if fecha_inicial_db:
-            # Reorganiza: fecha_gestion (DD/MM/AAAA) -> YYYY-MM-DD
-            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) >= ?")
-            # El parámetro se convierte a YYYY-MM-DD para la comparación
-            parametros.append(datetime.strptime(fecha_inicial_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
-
-        if fecha_final_db:
-            condiciones.append("SUBSTR(fecha_gestion, 7, 4) || '-' || SUBSTR(fecha_gestion, 4, 2) || '-' || SUBSTR(fecha_gestion, 1, 2) <= ?")
-            parametros.append(datetime.strptime(fecha_final_db, '%d/%m/%Y').strftime('%Y-%m-%d'))
-
-        # 3.2. Filtro por Resultado de Expediente (si se seleccionó uno distinto de 'Todos')
-        try:
-            if hasattr(self, 'abono_resultado_option'):
-                resultado_seleccionado = self.abono_resultado_option.get()
-            elif hasattr(self, 'abono_resultado_optionmenu'):
-                resultado_seleccionado = self.abono_resultado_optionmenu.get()
-            else:
-                resultado_seleccionado = None
-
-            if resultado_seleccionado and resultado_seleccionado != 'Todos':
-                # Comparación case-insensitive para mayor robustez
-                condiciones.append("lower(resultado_expediente) = ?")
-                parametros.append(resultado_seleccionado.strip().lower())
-        except Exception:
-            # Si algo falla al leer el widget, ignoramos el filtro (la consulta seguirá funcionando)
-            pass
-
-        # 4. Ensamblaje y Ejecución
-        
-        if condiciones:
-            sql_query_base += " AND " + " AND ".join(condiciones)
-
-        sql_query_final = sql_query_base + """
-            GROUP BY 
-                cliente
-            ORDER BY 
-                total_abono DESC; 
-        """
-
-        try:
-            cursor.execute(sql_query_final, parametros)
-            datos_raw = cursor.fetchall()
-            
-            datos_formateados = list(datos_raw)
-
-            # 5. Dibujar la tabla
-            self.mostrar_tabla_estadistica(
-                datos_formateados, 
-                columnas=["CLIENTE", "TOTAL ABONADO (€)"],
-                export_filename="Abonos_Por_Cliente",
-                frame=self.abonos_tabla_resultados_frame, 
-                formato_moneda=True # Activamos el formato de moneda para esta estadística
-            )
-
-            if not datos_formateados:
-                 ctk.CTkLabel(self.abonos_tabla_resultados_frame, 
-                              text="No se encontraron datos con los filtros aplicados.",
-                              font=ctk.CTkFont(size=14)
-                 ).pack(pady=40)
-
-        except sqlite3.Error as e:
-            messagebox.showerror("Error de Base de Datos", f"Error SQL al cargar abonos por cliente: {e}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error inesperado: {e}")
-        finally:
-            if conn:
-                conn.close()
+            messagebox.showerror("Error", f"No se pudo cargar la estadística de rentabilidad: {e}")
 
     def mostrar_articulos_incidencia(self):
         """
