@@ -1,3 +1,8 @@
+Cambio V.0.1.04
+
+Ajustado las columnas del listado de articulos.
+
+
 Cambios V.0.1.03 - ✨ Últimas mejoras implementadas:
 
 🔄 Añadido boton para editar los articulos ya añadidos al expediente.

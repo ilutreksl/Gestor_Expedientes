@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.03"
+APP_VERSION = "v0.1.04"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4808,37 +4808,42 @@ class VentanaPrincipal(ctk.CTkToplevel):
             ctk.CTkLabel(self.articulos_list_frame, text="No hay artículos asociados a este RMA.", text_color="gray").pack(pady=10)
             return
             
-        header_frame = ctk.CTkFrame(self.articulos_list_frame)
-        header_frame.pack(fill="x")
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unitario", "Acción"]
-        weights = [2, 1, 1, 2, 1, 1]
+        # Dibujar encabezados y filas usando grid directamente en el contenedor principal
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unitario", "Acción", ""]
+        weights = [2, 1, 1, 2, 1, 0, 0]
         header_font = ctk.CTkFont(weight="bold", size=12)
-        
-        for i, col in enumerate(cols):
-            ctk.CTkLabel(header_frame, text=col, font=header_font).grid(row=0, column=i, padx=5, pady=5, sticky="w")
-            header_frame.grid_columnconfigure(i, weight=weights[i])
 
-        for i, item in enumerate(self.articulos_data):
-            row_frame = ctk.CTkFrame(self.articulos_list_frame)
-            row_frame.pack(fill="x", padx=5, pady=2)
-            
-            # Configurar los mismos pesos de columna que el header
-            for col_idx in range(len(weights)):
-                row_frame.grid_columnconfigure(col_idx, weight=weights[col_idx])
-
-            ctk.CTkLabel(row_frame, text=item["referencia_articulo"]).grid(row=0, column=0, padx=5, pady=2, sticky="w")
-            ctk.CTkLabel(row_frame, text=item["cantidad_segun_documento"]).grid(row=0, column=1, padx=5, pady=2, sticky="w")
-            ctk.CTkLabel(row_frame, text=item["cantidad_entregada"]).grid(row=0, column=2, padx=5, pady=2, sticky="w")
-            ctk.CTkLabel(row_frame, text=item["estado_producto"]).grid(row=0, column=3, padx=5, pady=2, sticky="w")
-            ctk.CTkLabel(row_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=0, column=4, padx=5, pady=2, sticky="w")
-            
-            ctk.CTkButton(row_frame, text="X", width=30, fg_color="red", hover_color="darkred", 
-                          command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=0, column=5, padx=5, pady=2, sticky="w")
-            # Botón Editar
+        # Configurar columnas del contenedor para que se alineen entre filas
+        for i, w in enumerate(weights):
             try:
-                ctk.CTkButton(row_frame, text="✏️", width=30, 
-                              command=lambda idx=i: self.editar_articulo(idx)).grid(row=0, column=6, padx=2, pady=2, sticky="w")
+                self.articulos_list_frame.grid_columnconfigure(i, weight=w)
             except Exception:
+                pass
+
+        # Encabezados en la fila 0
+        for i, col in enumerate(cols):
+            ctk.CTkLabel(self.articulos_list_frame, text=col, font=header_font).grid(row=0, column=i, padx=5, pady=5, sticky="w")
+
+        # Filas: colocar directamente labels en la grilla del contenedor para mantener columnas alineadas
+        for i, item in enumerate(self.articulos_data):
+            row = i + 1
+            try:
+                ctk.CTkLabel(self.articulos_list_frame, text=item["referencia_articulo"]).grid(row=row, column=0, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=item["cantidad_segun_documento"]).grid(row=row, column=1, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=item["cantidad_entregada"]).grid(row=row, column=2, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=item["estado_producto"]).grid(row=row, column=3, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=row, column=4, padx=5, pady=2, sticky="w")
+
+                # Acciones: Eliminar y Editar
+                ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
+                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                try:
+                    ctk.CTkButton(self.articulos_list_frame, text="✏️", width=30,
+                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=6, padx=2, pady=2, sticky="w")
+                except Exception:
+                    pass
+            except Exception:
+                # Silenciar errores de renderizado individual para no romper toda la lista
                 pass
             
         # --- NUEVO: Calcular y actualizar el Precio Total en la etiqueta de Contabilidad ---
