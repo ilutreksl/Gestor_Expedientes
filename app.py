@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.06"
+APP_VERSION = "v0.1.07"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9273,6 +9273,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(head, text="CANTIDAD TOTAL", font=hf).grid(row=0, column=1, padx=5, sticky="w")
         ctk.CTkLabel(head, text="TOTAL (€)", font=hf).grid(row=0, column=2, padx=5, sticky="w")
 
+        # Intentar importar la función de lib para mostrar expedientes filtrados por estado
+        try:
+            from lib.estados_articulo import mostrar_expedientes_por_articulo_y_estado
+        except Exception:
+            mostrar_expedientes_por_articulo_y_estado = None
+
         colors = ("#FFFFFF", "#F8F9FB")
         suma_cant = 0
         suma_euros = 0.0
@@ -9294,6 +9300,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
             lbl_e = ctk.CTkLabel(rf, text=str(estado) or '-', anchor="w")
             lbl_e.grid(row=0, column=0, padx=5, sticky="w")
+            # Doble clic en el estado -> mostrar expedientes filtrados por estado
+            if mostrar_expedientes_por_articulo_y_estado:
+                try:
+                    lbl_e.configure(cursor="hand2")
+                except Exception:
+                    pass
+                lbl_e.bind("<Double-Button-1>", lambda e, est=estado: mostrar_expedientes_por_articulo_y_estado(self, referencia, est))
+                rf.bind("<Double-Button-1>", lambda e, est=estado: mostrar_expedientes_por_articulo_y_estado(self, referencia, est))
             lbl_q = ctk.CTkLabel(rf, text=str(int(total_cantidad)) if total_cantidad is not None else '0', anchor="w")
             lbl_q.grid(row=0, column=1, padx=5, sticky="w")
             try:
