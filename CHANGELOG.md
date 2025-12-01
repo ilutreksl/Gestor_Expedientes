@@ -1,4 +1,10 @@
-Cambios V.0.1.05 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.07 - ✨ Últimas mejoras implementadas:
+
+- Ahora en la ventana de articulos, al pinchar en la referencia, se abre una nueva ventana donde muestra un listado del articulo con las cantidades por estado.
+- Pinchando en el estado, se abre una nueva ventana mostrando los expdeientes asociados a dicho estado por articulo. Desde dicha ventana se puede editar el expediente.
+
+
+Cambios V.0.1.05
 
 - Corregido error que no guardaba los resultados de los expedientes (Euros) en la BD.
 - Corregida la estadistica de Rentabilidad por Cliente. Incluye exportacion a Excel.
