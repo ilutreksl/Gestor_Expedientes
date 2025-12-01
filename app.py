@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.05"
+APP_VERSION = "v0.1.06"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9100,7 +9100,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 rf.bind("<Enter>", on_enter)
                 rf.bind("<Leave>", on_leave)
-                lbl_ref.bind("<Double-Button-1>", lambda e, r=referencia: self.mostrar_expedientes_por_articulo(r))
+                # Doble clic ahora muestra los estados del artículo con sus totales
+                lbl_ref.bind("<Double-Button-1>", lambda e, r=referencia: self.mostrar_estados_por_articulo(r))
 
             # Ensure numeric types for pagination calculation
             try:
@@ -9179,6 +9180,152 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Cargar inicialmente
         start_load(1)
+
+    def mostrar_estados_por_articulo(self, referencia):
+        """Muestra una ventana con los estados que ha tenido un artículo, con suma de cantidades y total en euros por estado."""
+        if not referencia:
+            messagebox.showinfo("Info", "Referencia vacía.")
+            return
+
+        vent = ctk.CTkToplevel(self)
+        vent.title(f"Estados por Artículo - {referencia}")
+        vent.geometry("700x500")
+        vent.resizable(True, True)
+        vent.attributes('-topmost', False)
+        vent.minsize(500, 350)
+        vent.focus_set()
+        vent.attributes('-topmost', True)
+        vent.lift()
+        vent.focus_force()
+        vent.after(500, lambda: vent.attributes('-topmost', False))
+
+        main = ctk.CTkFrame(vent)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        header = ctk.CTkFrame(main)
+        header.pack(fill="x", pady=(0,8))
+        ctk.CTkLabel(header, text=f"Estados para: {referencia}", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        # Frame lista con scrollbar
+        list_frame = ctk.CTkFrame(main)
+        list_frame.pack(fill="both", expand=True)
+
+        try:
+            from tkinter import Canvas as _Canvas
+            canvas = _Canvas(list_frame, borderwidth=0, highlightthickness=0)
+        except Exception:
+            canvas = ctk.CTkCanvas(list_frame, borderwidth=0, highlightthickness=0)
+
+        sb = ctk.CTkScrollbar(list_frame, orientation="vertical", command=lambda *args: canvas.yview(*args))
+        canvas.configure(yscrollcommand=lambda *args: sb.set(*args))
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        sf = ctk.CTkFrame(canvas)
+        try:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+        except Exception:
+            window_id = canvas.create_window((0,0), window=sf, anchor="nw")
+
+        def on_sf_configure(event):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except Exception:
+                pass
+
+        def on_canvas_config(event):
+            try:
+                canvas.itemconfig(window_id, width=event.width)
+            except Exception:
+                pass
+
+        sf.bind("<Configure>", on_sf_configure)
+        canvas.bind("<Configure>", on_canvas_config)
+
+        # Consultar la BD
+        try:
+            conn = connect_db()
+            cur = conn.cursor()
+            sql = """
+                SELECT COALESCE(estado_producto, 'Sin estado') as estado,
+                       SUM(COALESCE(cantidad_entregada,0)) as total_cantidad,
+                       SUM(COALESCE(cantidad_entregada,0) * COALESCE(precio_unitario,0)) as total_euros
+                FROM rma_detalles
+                WHERE referencia_articulo = ?
+                GROUP BY estado_producto
+                ORDER BY total_cantidad DESC
+            """
+            cur.execute(sql, (referencia,))
+            filas = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"No se pudieron obtener los estados: {e}")
+            return
+
+        # Mostrar resultados
+        head = ctk.CTkFrame(sf)
+        head.pack(fill="x", padx=5, pady=(0,6))
+        head.grid_columnconfigure(0, weight=3, minsize=200)
+        head.grid_columnconfigure(1, weight=1, minsize=120)
+        head.grid_columnconfigure(2, weight=1, minsize=140)
+        hf = ctk.CTkFont(weight="bold")
+        ctk.CTkLabel(head, text="ESTADO", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+        ctk.CTkLabel(head, text="CANTIDAD TOTAL", font=hf).grid(row=0, column=1, padx=5, sticky="w")
+        ctk.CTkLabel(head, text="TOTAL (€)", font=hf).grid(row=0, column=2, padx=5, sticky="w")
+
+        colors = ("#FFFFFF", "#F8F9FB")
+        suma_cant = 0
+        suma_euros = 0.0
+        for idx, fila in enumerate(filas):
+            try:
+                estado, total_cantidad, total_euros = fila
+            except Exception:
+                vals = list(fila)
+                estado = vals[0] if len(vals) > 0 else ''
+                total_cantidad = vals[1] if len(vals) > 1 else 0
+                total_euros = vals[2] if len(vals) > 2 else 0.0
+
+            bg = colors[idx % 2]
+            rf = ctk.CTkFrame(sf, fg_color=bg)
+            rf.pack(fill="x", padx=5, pady=2)
+            rf.grid_columnconfigure(0, weight=3, minsize=200)
+            rf.grid_columnconfigure(1, weight=1, minsize=120)
+            rf.grid_columnconfigure(2, weight=1, minsize=140)
+
+            lbl_e = ctk.CTkLabel(rf, text=str(estado) or '-', anchor="w")
+            lbl_e.grid(row=0, column=0, padx=5, sticky="w")
+            lbl_q = ctk.CTkLabel(rf, text=str(int(total_cantidad)) if total_cantidad is not None else '0', anchor="w")
+            lbl_q.grid(row=0, column=1, padx=5, sticky="w")
+            try:
+                lbl_money = ctk.CTkLabel(rf, text=f"{float(total_euros):.2f} €", anchor="w")
+            except Exception:
+                lbl_money = ctk.CTkLabel(rf, text="0.00 €", anchor="w")
+            lbl_money.grid(row=0, column=2, padx=5, sticky="w")
+
+            try:
+                suma_cant += int(total_cantidad or 0)
+            except Exception:
+                try:
+                    suma_cant += int(float(total_cantidad))
+                except Exception:
+                    pass
+            try:
+                suma_euros += float(total_euros or 0.0)
+            except Exception:
+                try:
+                    suma_euros += float(str(total_euros).replace(',', '.'))
+                except Exception:
+                    pass
+
+        # Fila resumen
+        resumen = ctk.CTkFrame(sf, fg_color="#EFEFEF")
+        resumen.pack(fill="x", padx=5, pady=(8,2))
+        resumen.grid_columnconfigure(0, weight=3, minsize=200)
+        resumen.grid_columnconfigure(1, weight=1, minsize=120)
+        resumen.grid_columnconfigure(2, weight=1, minsize=140)
+        ctk.CTkLabel(resumen, text="TOTAL", font=hf).grid(row=0, column=0, padx=5, sticky="w")
+        ctk.CTkLabel(resumen, text=str(suma_cant), font=hf).grid(row=0, column=1, padx=5, sticky="w")
+        ctk.CTkLabel(resumen, text=f"{suma_euros:.2f} €", font=hf).grid(row=0, column=2, padx=5, sticky="w")
 
     def mostrar_expedientes_por_articulo(self, referencia):
         """Muestra una ventana con los expedientes asociados a una referencia de artículo."""
