@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.07"
+APP_VERSION = "v0.1.08"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2312,6 +2312,62 @@ class VentanaPrincipal(ctk.CTkToplevel):
             widget.grid(row=fila, column=1, padx=10, pady=5, sticky="ew")
             # Guardamos la referencia para acceder a los datos después
             setattr(self, f"entry_{campo_bd}", widget)
+
+    def _prompt_select_autorizado_por(self, opciones):
+        """Muestra un diálogo modal simple para seleccionar quien autoriza.
+        Devuelve la opción seleccionada o None si se cancela.
+        """
+        if not opciones:
+            return None
+
+        dlg = Toplevel(self)
+        dlg.title("Seleccionar Autorizado Por")
+        dlg.transient(self)
+        dlg.grab_set()
+        # Centrar el diálogo respecto a la ventana principal
+        try:
+            width = 360
+            height = 120
+            # Forzar cálculo de medidas
+            dlg.update_idletasks()
+            px = self.winfo_rootx()
+            py = self.winfo_rooty()
+            pw = self.winfo_width() or self.winfo_screenwidth()
+            ph = self.winfo_height() or self.winfo_screenheight()
+            x = px + max(0, (pw - width) // 2)
+            y = py + max(0, (ph - height) // 2)
+            dlg.geometry(f"{width}x{height}+{x}+{y}")
+        except Exception:
+            try:
+                dlg.geometry("360x120")
+            except Exception:
+                pass
+
+        ctk.CTkLabel(dlg, text="Selecciona quien autoriza:", anchor="w").pack(fill='x', padx=12, pady=(12,6))
+        var = tk.StringVar(value=opciones[0])
+        opt = ctk.CTkOptionMenu(dlg, values=opciones)
+        opt.set(opciones[0])
+        opt.pack(fill='x', padx=12, pady=(0,8))
+
+        result = {'value': None}
+
+        def _ok():
+            try:
+                result['value'] = opt.get()
+            except Exception:
+                result['value'] = None
+            dlg.destroy()
+
+        def _cancel():
+            dlg.destroy()
+
+        btnf = ctk.CTkFrame(dlg)
+        btnf.pack(fill='x', pady=(6,10), padx=12)
+        ctk.CTkButton(btnf, text='OK', width=80, command=_ok).pack(side='right', padx=(6,0))
+        ctk.CTkButton(btnf, text='Cancelar', width=80, command=_cancel).pack(side='right')
+
+        self.wait_window(dlg)
+        return result['value']
     
 
     # ----------------------------------------------------------------------
@@ -4423,6 +4479,109 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         
         # C) PESTAÑA INFORMACIÓN TÉCNICA (campos técnicos)
+
+        # --- Sincronización Autorización / Fecha_Autorizacion / Autorizado_Por ---
+        try:
+            auth_widget = getattr(self, 'entry_Autorizacion', None)
+            if auth_widget is not None:
+                def _on_autorizacion_change(choice=None):
+                    try:
+                        sel = choice if choice is not None else None
+                        # CTkOptionMenu may call the function with the selected value
+                        if sel is None:
+                            try:
+                                sel = auth_widget.get()
+                            except Exception:
+                                sel = None
+
+                        if sel == 'SI':
+                            # Poner fecha de autorización hoy
+                            hoy = datetime.datetime.now()
+                            if hasattr(self, 'entry_Fecha_Autorizacion'):
+                                try:
+                                    if hasattr(self.entry_Fecha_Autorizacion, 'set_date'):
+                                        self.entry_Fecha_Autorizacion.set_date(hoy)
+                                    else:
+                                        # Tratar como Entry
+                                        self.entry_Fecha_Autorizacion.configure(state='normal')
+                                        try:
+                                            self.entry_Fecha_Autorizacion.delete(0, ctk.END)
+                                        except Exception:
+                                            pass
+                                        try:
+                                            self.entry_Fecha_Autorizacion.insert(0, hoy.strftime('%Y-%m-%d'))
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+
+                            # Pedir autor (selector)
+                            try:
+                                if hasattr(self, 'entry_Autorizado_Por'):
+                                    opcion = self._prompt_select_autorizado_por(self.OPCIONES.get('Autorizado_Por', []))
+                                    if opcion:
+                                        try:
+                                            self.entry_Autorizado_Por.set(opcion)
+                                        except Exception:
+                                            try:
+                                                self.entry_Autorizado_Por.configure(state='normal')
+                                                self.entry_Autorizado_Por.delete(0, ctk.END)
+                                                self.entry_Autorizado_Por.insert(0, opcion)
+                                            except Exception:
+                                                pass
+                            except Exception:
+                                pass
+
+                        else:
+                            # Si se pone 'NO', borrar fecha y dejar autor por defecto
+                            if hasattr(self, 'entry_Fecha_Autorizacion'):
+                                try:
+                                    if hasattr(self.entry_Fecha_Autorizacion, 'set_date'):
+                                        try:
+                                            self.entry_Fecha_Autorizacion.set_date('')
+                                        except Exception:
+                                            # Intentar borrar texto
+                                            try:
+                                                self.entry_Fecha_Autorizacion.delete(0, ctk.END)
+                                            except Exception:
+                                                pass
+                                    else:
+                                        try:
+                                            self.entry_Fecha_Autorizacion.configure(state='normal')
+                                            self.entry_Fecha_Autorizacion.delete(0, ctk.END)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+
+                            if hasattr(self, 'entry_Autorizado_Por'):
+                                try:
+                                    default = self.OPCIONES.get('Autorizado_Por', [None])[0]
+                                    if default:
+                                        try:
+                                            self.entry_Autorizado_Por.set(default)
+                                        except Exception:
+                                            try:
+                                                self.entry_Autorizado_Por.configure(state='normal')
+                                                self.entry_Autorizado_Por.delete(0, ctk.END)
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        print('Error manejando cambio Autorizacion:', e)
+
+                try:
+                    # Intentar configurar el callback
+                    auth_widget.configure(command=_on_autorizacion_change)
+                except Exception:
+                    # Fallback: si no acepta configure, intentar setear manualmente (no garantizado)
+                    try:
+                        auth_widget.set_callback = _on_autorizacion_change
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         # Fila 0: RMA Proveedor (label cambiado a 'RMA Proveedor')
         self.crear_campo(info_tecnica_frame, 0, "RMA Proveedor:", "Rma_Proveedor")
         # Fila 1: Modelo
@@ -4997,10 +5156,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         messagebox.showerror("Fecha inválida", f"El campo {campo} debe ser una fecha válida. Valor: {valor}")
                         return
             else:
-                # Conversión especial para Autorizacion (SI/NO a 1/0)
+                # Campos no fecha: conversiones especiales
                 if campo == 'Autorizacion':
-                    datos_maestro[campo.lower()] = 1 if valor == "SI" else 0
-                # Conversión especial para Email_de_Contacto (siempre en minúsculas)
+                    try:
+                        v = str(valor).strip().upper() if valor is not None else ''
+                        datos_maestro[campo.lower()] = 1 if v in ('1', 'SI', 'S', 'TRUE', 'T') else 0
+                    except Exception:
+                        datos_maestro[campo.lower()] = 0
                 elif campo == 'Email_de_Contacto':
                     datos_maestro[campo.lower()] = valor.lower() if valor else ''
                 else:
@@ -5260,7 +5422,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 else:
                     # Conversión especial para Autorizacion (SI/NO a 1/0)
                     if campo == 'Autorizacion':
-                        datos_maestro['autorizacion'] = 1 if valor == "SI" else 0
+                        try:
+                            v = str(valor).strip().upper() if valor is not None else ''
+                            datos_maestro['autorizacion'] = 1 if v in ('1', 'SI', 'S', 'TRUE', 'T') else 0
+                        except Exception:
+                            datos_maestro['autorizacion'] = 0
                     # Conversión especial para Email_de_Contacto (siempre en minúsculas)
                     elif campo == 'Email_de_Contacto':
                         datos_maestro[campo.lower()] = valor.lower() if valor else ''
@@ -5635,10 +5801,53 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 if entry_name and hasattr(self, entry_name):
                     entry = getattr(self, entry_name)
                     
+                    # Tratamiento para DatePicker (si el widget expone `set_date`)
+                    if hasattr(entry, 'set_date'):
+                        try:
+                            if valor is None or str(valor).strip() == '':
+                                # Intentar limpiar el control de fecha
+                                try:
+                                    entry.set_date('')
+                                except Exception:
+                                    try:
+                                        entry.configure(state='normal')
+                                        entry.delete(0, ctk.END)
+                                    except Exception:
+                                        pass
+                            else:
+                                # Normalizar la fecha y establecerla
+                                try:
+                                    fecha_iso = parse_date_to_iso(valor)
+                                    from datetime import datetime
+                                    dt = datetime.strptime(fecha_iso, '%Y-%m-%d')
+                                    entry.set_date(dt)
+                                except Exception:
+                                    try:
+                                        entry.configure(state='normal')
+                                        entry.delete(0, ctk.END)
+                                        entry.insert(0, str(valor))
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+                        # continuar con la siguiente columna
+                        continue
+
                     # Tratamiento especial para OptionMenu (Autorizacion)
                     if columna == 'autorizacion' and isinstance(entry, ctk.CTkOptionMenu):
-                        valor_str = "SI" if valor == 1 else "NO"
-                        entry.set(valor_str)
+                        # Interpretar distintos posibles formatos que pueda tener el valor
+                        is_si = False
+                        try:
+                            if isinstance(valor, (int, float)):
+                                is_si = int(valor) == 1
+                            elif isinstance(valor, bool):
+                                is_si = bool(valor)
+                            elif isinstance(valor, str):
+                                vnorm = valor.strip().upper()
+                                is_si = vnorm in ('1', 'SI', 'S', 'TRUE', 'T')
+                        except Exception:
+                            is_si = False
+                        entry.set('SI' if is_si else 'NO')
                         
                     # Tratamiento para Entry
                     elif isinstance(entry, ctk.CTkEntry):

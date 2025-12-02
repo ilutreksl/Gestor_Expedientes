@@ -1,4 +1,11 @@
-Cambios V.0.1.07 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.08 - ✨ Últimas mejoras implementadas:
+
+🤖 En la pestaña General de los expedientes, el campo Autorizacion permite seleccionar SI o NO, teniendo las siguientes condiciones:
+    - Si se selecciona SI, se marca la fecha actual y sale ventana modal para seleccionar la persona que autoriza.
+    - Si se selecciona NO, borra la fecha de Fecha Autorizacion y pone en valor por defecto en Autorizado Por.
+
+
+Cambios V.0.1.07
 
 - Ahora en la ventana de articulos, al pinchar en la referencia, se abre una nueva ventana donde muestra un listado del articulo con las cantidades por estado.
 - Pinchando en el estado, se abre una nueva ventana mostrando los expdeientes asociados a dicho estado por articulo. Desde dicha ventana se puede editar el expediente.
