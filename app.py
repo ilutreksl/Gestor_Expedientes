@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.08"
+APP_VERSION = "v0.1.09"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2686,8 +2686,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
                 return
 
-            # Registros (filas cebra) - filas más finas
-            colors = ("#FFFFFF", "#F3F4F6")
+            # Registros (filas) - usar fondo por defecto del tema (sin cebra)
+            colors = ("#FFFFFF", "#F3F4F6")  # variable no usada para cebra pero mantenida por compatibilidad
             # Determinar color de fondo para botones (para hacer 'transparent-like')
             btn_bg = None
             if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
@@ -2703,7 +2703,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Mapeo de color según estado (coherente con dashboard)
                 color = self.get_color_por_estado(estado)
 
-                bg = colors[i % 2]
+                # Usar fondo por defecto del tema en lugar de cebra
+                bg = "transparent"
                 # Crear un frame por columna para alinear exactamente con los encabezados
                 # Reducimos la altura de cada fila usando height pequeño para que sean más finas.
                 # Height reducido para filas compactas
@@ -2717,11 +2718,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 if actions_bg is None:
                     actions_bg = colors[0]
 
-                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
-                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
-                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
-                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
-                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color=bg, height=row_height)
+                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
                 f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
@@ -2747,12 +2748,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Hover efectos para toda la fila: aplicar a cada columna
                 cols = [f0, f1, f2, f3, f4]
                 # Guardar el color original por columna para restaurarlo correctamente
-                originals = [bg, bg, bg, bg, bg]
+                originals = ["transparent", "transparent", "transparent", "transparent", "transparent"]
 
                 def _on_enter(e, cols=cols):
                     for rf in cols:
                         try:
-                            rf.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                            rf.configure(fg_color="transparent")
                         except Exception:
                             pass
 
@@ -8190,9 +8191,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     
                     # Efectos hover para toda la fila
                     def on_enter(e, r=row):
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                        try:
+                            r.configure(fg_color="transparent")
+                        except Exception:
+                            pass
                     def on_leave(e, r=row):
-                        r.configure(fg_color="transparent")
+                        try:
+                            r.configure(fg_color="transparent")
+                        except Exception:
+                            pass
                     
                     row.bind("<Enter>", on_enter)
                     row.bind("<Leave>", on_leave)
@@ -8412,7 +8419,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Mostrar cada entrada
                 for idx, (fecha, usuario, estado_h, comentario) in enumerate(hist_rows):
-                    rowf = ctk.CTkFrame(sf, fg_color="#FFFFFF" if idx % 2 == 0 else "#F7F7F7")
+                    # Usar fondo por defecto del tema en lugar de cebra
+                    rowf = ctk.CTkFrame(sf, fg_color="transparent")
                     rowf.pack(fill="x", padx=5, pady=3)
                     txt = f"{fecha} - {usuario} - {estado_h or ''}"
                     ctk.CTkLabel(rowf, text=txt, font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=6, pady=(4,0))
@@ -8584,8 +8592,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 for idx, (prov, estado_actual, factura_actual) in enumerate(rows):
                     nombre = prov
-                    bg = colors[idx % 2]
-                    row = ctk.CTkFrame(scroll, fg_color=bg)
+                    # Usar fondo por defecto del tema en lugar de cebra
+                    bg = "transparent"
+                    row = ctk.CTkFrame(scroll, fg_color="transparent")
                     row.pack(fill="x", padx=5, pady=2)
                     # Mantener los minsize solicitados para columnas (consistentes con header)
                     row.grid_columnconfigure(0, weight=1, minsize=180)
@@ -8658,11 +8667,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         # Si falla la creación del botón, ignoramos para no romper el listado
                         pass
 
-                    # Hover
+                    # Hover: usar fondo por defecto (transparent) para no añadir colores propios
                     def on_enter(e, r=row):
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                        try:
+                            r.configure(fg_color="transparent")
+                        except Exception:
+                            pass
                     def on_leave(e, r=row, original_bg=bg):
-                        r.configure(fg_color=original_bg)
+                        try:
+                            r.configure(fg_color="transparent")
+                        except Exception:
+                            pass
 
                     row.bind("<Enter>", on_enter)
                     row.bind("<Leave>", on_leave)
@@ -9053,8 +9068,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     fecha = vals[6] if len(vals) > 6 else ''
                     estado = vals[7] if len(vals) > 7 else ''
 
-                bg = colors[idx % 2]
-                row = ctk.CTkFrame(sf_exp, fg_color=bg)
+                # Usar fondo por defecto del tema en lugar de cebra
+                bg = "transparent"
+                row = ctk.CTkFrame(sf_exp, fg_color="transparent")
                 row.pack(fill="x", padx=5, pady=2)
                 row.grid_columnconfigure(0, weight=1, minsize=150)
                 row.grid_columnconfigure(1, weight=2, minsize=250)
@@ -9075,9 +9091,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 # Hover
                 def on_enter(e, r=row):
-                    r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                    try:
+                        r.configure(fg_color="transparent")
+                    except Exception:
+                        pass
                 def on_leave(e, r=row, original_bg=bg):
-                    r.configure(fg_color=original_bg)
+                    try:
+                        r.configure(fg_color="transparent")
+                    except Exception:
+                        pass
 
                 row.bind("<Enter>", on_enter)
                 row.bind("<Leave>", on_leave)
@@ -9112,7 +9134,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         ctk.CTkLabel(sf_hist, text="No hay historial registrado.", text_color="gray").pack(anchor="w", padx=5, pady=10)
                     else:
                         for idx, (fecha, usuario, estado_h, comentario) in enumerate(hist_rows):
-                            rowf = ctk.CTkFrame(sf_hist, fg_color="#FFFFFF" if idx % 2 == 0 else "#F7F7F7", corner_radius=6)
+                            # Usar fondo por defecto del tema en lugar de filas cebra
+                            rowf = ctk.CTkFrame(sf_hist, fg_color="transparent", corner_radius=6)
                             rowf.pack(fill="x", padx=3, pady=3)
                             txt = f"📅 {fecha} | 👤 {usuario}"
                             if estado_h:
@@ -9283,8 +9306,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     referencia = vals[0] if len(vals) > 0 else ''
                     cnt = vals[1] if len(vals) > 1 else 0
 
-                bg = colors[idx % 2]
-                rf = ctk.CTkFrame(rows_container, fg_color=bg)
+                # Usar fondo por defecto del tema en lugar de cebra
+                bg = "transparent"
+                rf = ctk.CTkFrame(rows_container, fg_color="transparent")
                 rf.pack(fill="x", padx=5, pady=2)
                 rf.grid_columnconfigure(0, weight=3, minsize=300)
                 rf.grid_columnconfigure(1, weight=1, minsize=80)
@@ -9298,12 +9322,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 def on_enter(e, w=rf):
                     try:
-                        w.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                        w.configure(fg_color="transparent")
                     except Exception:
                         pass
                 def on_leave(e, w=rf, original=bg):
                     try:
-                        w.configure(fg_color=original)
+                        w.configure(fg_color="transparent")
                     except Exception:
                         pass
 
@@ -9500,8 +9524,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 total_cantidad = vals[1] if len(vals) > 1 else 0
                 total_euros = vals[2] if len(vals) > 2 else 0.0
 
-            bg = colors[idx % 2]
-            rf = ctk.CTkFrame(sf, fg_color=bg)
+            # Usar fondo por defecto del tema en lugar de cebra
+            bg = "transparent"
+            rf = ctk.CTkFrame(sf, fg_color="transparent")
             rf.pack(fill="x", padx=5, pady=2)
             rf.grid_columnconfigure(0, weight=3, minsize=200)
             rf.grid_columnconfigure(1, weight=1, minsize=120)
@@ -9667,8 +9692,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     num_doc = vals[3] if len(vals) > 3 else ''
                     estado = vals[4] if len(vals) > 4 else ''
 
-                bg = colors[idx % 2]
-                rowf = ctk.CTkFrame(rows_container, fg_color=bg)
+                # Usar fondo por defecto del tema en lugar de cebra
+                bg = "transparent"
+                rowf = ctk.CTkFrame(rows_container, fg_color="transparent")
                 rowf.pack(fill="x", padx=5, pady=2)
                 rowf.grid_columnconfigure(0, weight=1, minsize=160)
                 rowf.grid_columnconfigure(1, weight=2, minsize=300)
@@ -9690,7 +9716,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 def on_ent(e, r=rowf):
                     try:
-                        r.configure(fg_color=("#E9ECEF", "#E9ECEF"))
+                        r.configure(fg_color="transparent")
                     except Exception:
                         pass
                 def on_lve(e, r=rowf, original=bg):

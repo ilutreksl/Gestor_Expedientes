@@ -150,8 +150,9 @@ def mostrar_expedientes_por_articulo_y_estado(parent, referencia, estado):
             cliente = vals[2] if len(vals) > 2 else ''
             fecha = vals[4] if len(vals) > 4 else ''
 
-        bg = colors[idx % 2]
-        rf = ctk.CTkFrame(sf, fg_color=bg)
+        # Usar fondo por defecto del tema (sin cebra)
+        bg = "transparent"
+        rf = ctk.CTkFrame(sf, fg_color="transparent")
         rf.pack(fill="x", padx=5, pady=2)
         rf.grid_columnconfigure(0, weight=1, minsize=120)
         rf.grid_columnconfigure(1, weight=2, minsize=240)

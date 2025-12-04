@@ -1,3 +1,8 @@
+Cambios V.0.1.09
+
+- Se ha eliminado las filas estilo cebra, para dejarlas en defecto por tema.
+
+
 Cambios V.0.1.08 - ✨ Últimas mejoras implementadas:
 
 🤖 En la pestaña General de los expedientes, el campo Autorizacion permite seleccionar SI o NO, teniendo las siguientes condiciones:
