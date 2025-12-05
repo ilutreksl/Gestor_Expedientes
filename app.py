@@ -2493,7 +2493,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # 3. Listado de RMAs
         self.lista_rma_frame = ctk.CTkScrollableFrame(lista_column, 
-                                                     label_text="Haga click en 'Editar' para ver los detalles de un expediente.")
+                                                     label_text="Pinche dos veces sobre el expediente para abrirlo.")
         self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
         self.lista_rma_frame.grid_columnconfigure(0, weight=1)
         
