@@ -1889,29 +1889,27 @@ class VentanaPrincipal(ctk.CTkToplevel):
             archivos_tema = glob.glob("themes/*.json")
             for archivo in archivos_tema:
                 # Normalizar la ruta y extraer solo el nombre del archivo sin la extensión
-                nombre_tema = os.path.basename(archivo).replace(".json", "")
+                nombre_archivo = os.path.basename(archivo)
+                nombre_tema = os.path.splitext(nombre_archivo)[0]
                 # Convertir nombres a formato más amigable
-                if nombre_tema == "BH_rime":
-                    temas.append("BH Rime (Predeterminado)")
-                elif nombre_tema == "rime":
-                    temas.append("Rime")
-                elif nombre_tema == "metal":
-                    temas.append("Metal")
-                elif nombre_tema == "pink":
-                    temas.append("Pink")
-                elif nombre_tema == "red":
-                    temas.append("Red")
+                if nombre_tema.lower() == "bh_rime":
+                    display = "BH Rime (Predeterminado)"
                 else:
-                    # Para temas futuros, capitalizar el nombre
-                    temas.append(nombre_tema.title())
-            
+                    # Reemplazar guiones/underscores por espacios y title case
+                    display = nombre_tema.replace('_', ' ').replace('-', ' ').title()
+                temas.append(display)
+
             # Asegurar que BH Rime esté primero
             temas_ordenados = []
-            if "BH Rime (Predeterminado)" in temas:
-                temas_ordenados.append("BH Rime (Predeterminado)")
-                temas.remove("BH Rime (Predeterminado)")
+            if any(t.startswith("BH Rime") for t in temas):
+                # encontrar la primera que contenga 'BH Rime'
+                for t in temas:
+                    if t.startswith("BH Rime"):
+                        temas_ordenados.append(t)
+                        temas.remove(t)
+                        break
             temas_ordenados.extend(sorted(temas))
-            
+
             return temas_ordenados if temas_ordenados else ["BH Rime (Predeterminado)"]
         except Exception:
             return ["BH Rime (Predeterminado)", "Rime", "Metal", "Pink", "Red"]
@@ -1919,27 +1917,55 @@ class VentanaPrincipal(ctk.CTkToplevel):
     def tema_display_a_archivo(self, tema_display):
         """Convierte el nombre mostrado del tema al nombre del archivo"""
         # Limpiar el nombre de entrada por si tiene rutas o caracteres extraños
-        tema_limpio = tema_display.replace("Themes\\", "").replace("Themes/", "").replace("themes\\", "").replace("themes/", "")
-        
+        tema_limpio = tema_display.replace("Themes\\", "").replace("Themes/", "").replace("themes\\", "").replace("themes/", "").strip()
+
+        # Mapeo rápido para nombres comunes
         mapping = {
             "BH Rime (Predeterminado)": "BH_rime.json",
-            "Rime": "rime.json", 
+            "Rime": "rime.json",
             "Metal": "metal.json",
             "Pink": "pink.json",
             "Red": "red.json"
         }
-        return mapping.get(tema_limpio, "BH_rime.json")
+        if tema_limpio in mapping:
+            return mapping[tema_limpio]
+
+        # Intentar buscar un archivo en themes/ que coincida con el display
+        import glob, os
+        posibles = glob.glob("themes/*.json")
+        # Normalizar display para comparar
+        display_norm = tema_limpio.lower().replace(' ', '').replace('_', '').replace('-', '')
+        for p in posibles:
+            base = os.path.splitext(os.path.basename(p))[0]
+            if base.lower() == tema_limpio.lower().replace(' ', '_') or base.lower() == tema_limpio.lower():
+                return os.path.basename(p)
+            if base.lower().replace('_', '').replace('-', '') == display_norm:
+                return os.path.basename(p)
+
+        # Intentar construir nombres probables
+        cand1 = f"{tema_limpio}.json"
+        cand2 = f"{tema_limpio.replace(' ', '_')}.json"
+        if os.path.exists(os.path.join('themes', cand1)):
+            return cand1
+        if os.path.exists(os.path.join('themes', cand2)):
+            return cand2
+
+        # Fallback: BH_rime
+        return 'BH_rime.json'
 
     def archivo_a_tema_display(self, archivo_tema):
         """Convierte el nombre del archivo al nombre mostrado"""
-        mapping = {
-            "BH_rime.json": "BH Rime (Predeterminado)",
-            "rime.json": "Rime",
-            "metal.json": "Metal", 
-            "pink.json": "Pink",
-            "red.json": "Red"
-        }
-        return mapping.get(archivo_tema, "BH Rime (Predeterminado)")
+        import os
+        if not archivo_tema:
+            return "BH Rime (Predeterminado)"
+        # Si viene con path, extraer basename
+        archivo = os.path.basename(archivo_tema)
+        name = os.path.splitext(archivo)[0]
+        if name.lower() == 'bh_rime':
+            return 'BH Rime (Predeterminado)'
+        # Normalizar: underscore/dash -> space, title case
+        display = name.replace('_', ' ').replace('-', ' ').title()
+        return display
 
     def mostrar_ajustes(self):
         """Abre un diálogo modal para que el usuario modifique sus preferencias."""
