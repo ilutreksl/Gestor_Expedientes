@@ -1,9 +1,14 @@
+Cambios V.0.1.10 - ✨ Últimas mejoras implementadas:
+
+💾 Cuando se guarda un nuevo expediente, si el campo documento cliente contiene las palabras e-mail, email, telefonico o telefonica, permite el guardado.
+
+
 Cambios V.0.1.09
 
 - Se ha eliminado las filas estilo cebra, para dejarlas en defecto por tema.
 
 
-Cambios V.0.1.08 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.08
 
 🤖 En la pestaña General de los expedientes, el campo Autorizacion permite seleccionar SI o NO, teniendo las siguientes condiciones:
     - Si se selecciona SI, se marca la fecha actual y sale ventana modal para seleccionar la persona que autoriza.

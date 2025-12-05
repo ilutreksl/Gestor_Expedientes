@@ -239,7 +239,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.09"
+APP_VERSION = "v0.1.10"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5248,8 +5248,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         numero_doc = str(datos_maestro.get('numero_documento_cliente', '')).strip()
         if numero_doc:
             numero_doc_norm = numero_doc.lower()
-            # Si el valor contiene las palabras provisionales, no realizar la comprobación de duplicados
-            if not re.search(r"\b(email|telefonica|telefonico)\b", numero_doc_norm, re.IGNORECASE):
+            # Si el valor contiene las palabras provisionales (email/e-mail/telefonica/telefonico), no realizar la comprobación de duplicados
+            if not re.search(r"\b(e-?mail|telefonica|telefonico)\b", numero_doc_norm, re.IGNORECASE):
                 # Conectar a la DB para comprobar duplicados
                 conn_check, cursor_check = self.master.conectar_db()
                 if not conn_check:
@@ -5277,7 +5277,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # Aviso: Si el número de documento contiene palabras provisionales, pedir confirmación al usuario
         try:
-            if numero_doc and re.search(r"\b(email|telefonica|telefonico)\b", numero_doc, re.IGNORECASE):
+            if numero_doc and re.search(r"\b(e-?mail|telefonica|telefonico)\b", numero_doc, re.IGNORECASE):
                 respuesta_prov = messagebox.askyesno("Valor provisional detectado",
                                                      "El campo 'Núm. Doc. Cliente' contiene un valor provisional (p.ej. 'Email' o 'Telefonica').\n¿Deseas continuar guardando el expediente con este valor?")
                 if not respuesta_prov:
@@ -5891,7 +5891,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         try:
                             if columna == 'numero_documento_cliente':
                                 valor_str = str(valor) if valor is not None else ''
-                                if re.search(r"\b(email|telefonica|telefonico)\b", valor_str, re.IGNORECASE):
+                                if re.search(r"\b(e-?mail|telefonica|telefonico)\b", valor_str, re.IGNORECASE):
                                     # Mantener en editable
                                     entry.configure(state='normal')
                                 else:
@@ -6001,7 +6001,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Aviso: si el número de documento nuevo contiene valores provisionales, pedir confirmación
         try:
             num_doc_nuevo = str(datos_nuevos.get('numero_documento_cliente', '') or '').strip()
-            if num_doc_nuevo and re.search(r"\b(email|telefonica|telefonico)\b", num_doc_nuevo, re.IGNORECASE):
+            if num_doc_nuevo and re.search(r"\b(e-?mail|telefonica|telefonico)\b", num_doc_nuevo, re.IGNORECASE):
                 resp = messagebox.askyesno("Valor provisional detectado",
                                            "El campo 'Núm. Doc. Cliente' contiene un valor provisional (p.ej. 'Email' o 'Telefonica').\n¿Deseas continuar con la actualización?")
                 if not resp:
