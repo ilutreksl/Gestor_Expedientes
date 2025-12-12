@@ -304,7 +304,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.12"
+APP_VERSION = "v0.1.13"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3834,13 +3834,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.actualizar_historial_ui()
             
             # Realizar búsqueda
-            resultados_expedientes, resultados_productos = self.buscar_en_todos_los_campos(termino)
+            resultados_expedientes, resultados_productos, resultados_historial, resultados_tareas = self.buscar_en_todos_los_campos(termino)
             
             # Limpiar indicador de carga
             loading_label.destroy()
             
             # Mostrar resultados
-            self.mostrar_resultados_busqueda(resultados_expedientes, resultados_productos, termino)
+            self.mostrar_resultados_busqueda(resultados_expedientes, resultados_productos, resultados_historial, resultados_tareas, termino)
             
         except Exception as e:
             loading_label.destroy()
@@ -3911,16 +3911,50 @@ class VentanaPrincipal(ctk.CTkToplevel):
             else:
                 resultados_productos = []
             
+            # Búsqueda en historial (opcional si la tabla existe)
+            resultados_historial = []
+            try:
+                sql_historial = """
+                SELECT DISTINCT h.rma_id, h.fecha_cambio, h.descripcion_cambio, h.usuario, 
+                       m.codigo_rma, m.cliente
+                FROM rma_historial h
+                JOIN rma_maestro m ON h.rma_id = m.id
+                WHERE h.descripcion_cambio LIKE ? OR h.usuario LIKE ?
+                ORDER BY h.fecha_cambio DESC
+                LIMIT 100
+                """
+                cursor.execute(sql_historial, (termino_like, termino_like))
+                resultados_historial = cursor.fetchall()
+            except Exception:
+                pass  # La tabla rma_historial puede no existir
+            
+            # Búsqueda en tareas
+            resultados_tareas = []
+            try:
+                sql_tareas = """
+                SELECT DISTINCT t.id, t.codigo_rma, t.titulo, t.descripcion, t.estado,
+                       t.fecha_vencimiento, t.creado_por, m.id as rma_id, m.cliente
+                FROM tareas t
+                LEFT JOIN rma_maestro m ON t.codigo_rma = m.codigo_rma
+                WHERE t.titulo LIKE ? OR t.descripcion LIKE ? OR t.estado LIKE ? OR t.creado_por LIKE ?
+                ORDER BY t.fecha_vencimiento IS NULL, t.fecha_vencimiento DESC
+                LIMIT 100
+                """
+                cursor.execute(sql_tareas, (termino_like, termino_like, termino_like, termino_like))
+                resultados_tareas = cursor.fetchall()
+            except Exception:
+                pass  # Error en búsqueda de tareas
+            
             conn.close()
-            return resultados_expedientes, resultados_productos
+            return resultados_expedientes, resultados_productos, resultados_historial, resultados_tareas
             
         except Exception as e:
             conn.close()
             raise e
 
-    def mostrar_resultados_busqueda(self, expedientes, productos, termino):
+    def mostrar_resultados_busqueda(self, expedientes, productos, historial, tareas, termino):
         """Muestra los resultados de la búsqueda de forma organizada."""
-        total_resultados = len(expedientes) + len(productos)
+        total_resultados = len(expedientes) + len(productos) + len(historial) + len(tareas)
         
         if total_resultados == 0:
             self.mostrar_mensaje_busqueda(f"🔍 No se encontraron resultados para '{termino}'")
@@ -3939,6 +3973,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Mostrar productos
         if productos:
             self.mostrar_seccion_productos(productos)
+        
+        # Mostrar historial
+        if historial:
+            self.mostrar_seccion_historial(historial)
+        
+        # Mostrar tareas
+        if tareas:
+            self.mostrar_seccion_tareas(tareas)
 
     def mostrar_seccion_expedientes(self, expedientes):
         """Muestra la sección de expedientes encontrados."""
@@ -3983,7 +4025,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             # Botón para abrir expediente
             btn_abrir = ctk.CTkButton(item_frame, text="📖 Abrir Expediente", 
-                                     command=lambda eid=exp_id: self.mostrar_nuevo_rma(rma_id=eid),
+                                     command=lambda eid=exp_id: self._abrir_editor_rma(rma_id=eid),
                                      width=150, height=30)
             btn_abrir.pack(side="right", padx=10, pady=5)
 
@@ -4033,9 +4075,109 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             # Botón para abrir expediente
             btn_abrir = ctk.CTkButton(item_frame, text="📖 Ver en Expediente", 
-                                     command=lambda rid=rma_id: self.mostrar_nuevo_rma(rma_id=rid),
+                                     command=lambda rid=rma_id: self._abrir_editor_rma(rma_id=rid),
                                      width=150, height=30)
             btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def mostrar_seccion_historial(self, historial):
+        """Muestra la sección de historial encontrado."""
+        seccion_frame = ctk.CTkFrame(self.resultados_frame)
+        seccion_frame.pack(fill="x", pady=10)
+        
+        ctk.CTkLabel(seccion_frame, 
+                    text=f"📜 HISTORIAL ENCONTRADO ({len(historial)})",
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        for hist in historial:
+            # Columnas: rma_id, fecha_cambio, descripcion_cambio, usuario, codigo_rma, cliente
+            rma_id, fecha_cambio, descripcion_cambio, usuario, codigo_rma, cliente = hist
+            
+            item_frame = ctk.CTkFrame(seccion_frame)
+            item_frame.pack(fill="x", padx=10, pady=2)
+            
+            # Información principal
+            info_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            info_frame.pack(fill="x", padx=10, pady=5)
+            
+            # Línea 1: Fecha y usuario
+            linea1 = ctk.CTkFrame(info_frame, fg_color="transparent")
+            linea1.pack(fill="x")
+            
+            ctk.CTkLabel(linea1, text=f"📅 {fecha_cambio or 'Sin fecha'}", 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left")
+            ctk.CTkLabel(linea1, text=f"👨 {usuario or 'Sin usuario'}", 
+                        text_color="blue").pack(side="right")
+            
+            # Línea 2: Descripción del cambio
+            desc_text = (descripcion_cambio[:100] + "...") if descripcion_cambio and len(descripcion_cambio) > 100 else (descripcion_cambio or "Sin descripción")
+            ctk.CTkLabel(info_frame, text=desc_text, text_color="gray").pack(anchor="w")
+            
+            # Línea 3: Expediente
+            ctk.CTkLabel(info_frame, 
+                        text=f"📋 {codigo_rma or 'Sin código'} | 👤 Cliente: {cliente or 'Sin cliente'}",
+                        text_color="gray").pack(anchor="w")
+            
+            # Botón para abrir expediente
+            btn_abrir = ctk.CTkButton(item_frame, text="📖 Ver Expediente", 
+                                     command=lambda rid=rma_id: self._abrir_editor_rma(rma_id=rid),
+                                     width=150, height=30)
+            btn_abrir.pack(side="right", padx=10, pady=5)
+
+    def mostrar_seccion_tareas(self, tareas):
+        """Muestra la sección de tareas encontradas."""
+        seccion_frame = ctk.CTkFrame(self.resultados_frame)
+        seccion_frame.pack(fill="x", pady=10)
+        
+        ctk.CTkLabel(seccion_frame, 
+                    text=f"✅ TAREAS ENCONTRADAS ({len(tareas)})",
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=5)
+        
+        for tarea in tareas:
+            # Columnas: id, codigo_rma, titulo, descripcion, estado, fecha_vencimiento, creado_por, rma_id, cliente
+            tarea_id, codigo_rma_tarea, titulo, descripcion, estado, fecha_vencimiento, creado_por, rma_id, cliente = tarea
+            
+            item_frame = ctk.CTkFrame(seccion_frame)
+            item_frame.pack(fill="x", padx=10, pady=2)
+            
+            # Información principal
+            info_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            info_frame.pack(fill="x", padx=10, pady=5)
+            
+            # Línea 1: Título de la tarea
+            linea1 = ctk.CTkFrame(info_frame, fg_color="transparent")
+            linea1.pack(fill="x")
+            
+            ctk.CTkLabel(linea1, text=f"📝 {titulo or 'Sin título'}"[:60] + ("..." if titulo and len(titulo) > 60 else ""),
+                        font=ctk.CTkFont(weight="bold")).pack(side="left")
+            
+            # Línea 2: Descripción
+            if descripcion:
+                desc_text = (descripcion[:80] + "...") if len(descripcion) > 80 else descripcion
+                ctk.CTkLabel(info_frame, text=desc_text, text_color="gray").pack(anchor="w")
+            
+            # Línea 3: Estado y fecha de vencimiento
+            color_estado = {"Pendiente": "orange", "En Progreso": "blue", "Completada": "green", "Cancelada": "red"}.get(estado or "", "gray")
+            estado_text = f"🏷️ Estado: {estado or 'Sin estado'}"
+            if fecha_vencimiento:
+                estado_text += f" | ⏰ Vence: {fecha_vencimiento}"
+            ctk.CTkLabel(info_frame, text=estado_text, text_color=color_estado).pack(anchor="w")
+            
+            # Línea 4: Creado por
+            if creado_por:
+                ctk.CTkLabel(info_frame, text=f"👨 Creado por: {creado_por}", 
+                            text_color="gray").pack(anchor="w")
+            
+            # Línea 5: Expediente asociado
+            if codigo_rma_tarea:
+                ctk.CTkLabel(info_frame, text=f"📋 Expediente: {codigo_rma_tarea} | 👤 {cliente or 'Sin cliente'}", 
+                            text_color="gray").pack(anchor="w")
+            
+            # Botón para abrir expediente
+            if rma_id:
+                btn_abrir = ctk.CTkButton(item_frame, text="📖 Ver Expediente", 
+                                         command=lambda rid=rma_id: self._abrir_editor_rma(rma_id=rid),
+                                         width=150, height=30)
+                btn_abrir.pack(side="right", padx=10, pady=5)
 
     def mostrar_mensaje_busqueda(self, mensaje):
         """Muestra un mensaje en el área de resultados."""
