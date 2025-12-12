@@ -25,6 +25,7 @@ from PIL import Image, ImageTk
 #from tkcalendar import Calendar
 from CTkDatePicker import CTkDatePicker
 from lib.changelog_window import mostrar_ventana_cambios
+from lib.rma_utils import obtener_ultima_actividad
 
 import tkinter as tk
 from tkinter import ttk
@@ -304,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.14"
+APP_VERSION = "v0.1.15"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2725,7 +2726,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
             # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
             
-            sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado FROM rma_maestro WHERE 1=1"
+            sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion FROM rma_maestro WHERE 1=1"
             params = []
             
             # Aplicar filtro de ESTADO
@@ -2772,16 +2773,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             # Encabezados
             header_font = ctk.CTkFont(weight="bold")
-            self.lista_rma_frame.grid_columnconfigure(1, weight=3)
-            self.lista_rma_frame.grid_columnconfigure(2, weight=1) 
+            # Configurar anchos de columnas para mejor distribución
+            self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
+            self.lista_rma_frame.grid_columnconfigure(1, weight=2, minsize=200)  # CLIENTE (reducido)
+            self.lista_rma_frame.grid_columnconfigure(2, weight=1, minsize=150)  # DOCUMENTO
+            self.lista_rma_frame.grid_columnconfigure(3, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
+            self.lista_rma_frame.grid_columnconfigure(4, weight=1, minsize=180)  # ESTADO (ampliado)
+            self.lista_rma_frame.grid_columnconfigure(5, weight=0, minsize=110)  # FECHA EMISIÓN
+            
             ctk.CTkLabel(self.lista_rma_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="ÚLTIMA ACTIVIDAD", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w")
             # Eliminada columna 'ACCIONES' para usar doble clic en la fila
             if not registros:
-                ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
+                ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
                 return
 
             # Registros (filas) - usar fondo por defecto del tema (sin cebra)
@@ -2795,8 +2803,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
             row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
 
             for i, reg in enumerate(registros):
-                rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado = reg
+                rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion = reg
                 row = i + 1
+
+                # Calcular la última actividad usando la función auxiliar
+                ultima_actividad = obtener_ultima_actividad(
+                    fecha_emision, 
+                    fecha_autorizacion, 
+                    fecha_recepcion, 
+                    fecha_proceso, 
+                    fecha_gestion
+                )
 
                 # Mapeo de color según estado (coherente con dashboard)
                 color = self.get_color_por_estado(estado)
@@ -2821,6 +2838,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                 f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                 f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
 
                 # Colocar cada columna en la grilla principal para que se alinee con encabezados
                 f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
@@ -2828,6 +2846,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
                 f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
                 f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
+                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
 
                 # Contenido de cada columna con padding muy reducido para filas más finas
                 # Crear labels y mantener referencias para enlazar eventos (doble click)
@@ -2837,16 +2856,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 lbl1.pack(anchor="w", padx=4, pady=0)
                 lbl2 = ctk.CTkLabel(f2, text=numero_documento_cliente)
                 lbl2.pack(anchor="w", padx=4, pady=0)
-                lbl3 = ctk.CTkLabel(f3, text=estado, text_color=color)
+                lbl3 = ctk.CTkLabel(f3, text=ultima_actividad)
                 lbl3.pack(anchor="w", padx=4, pady=0)
-                lbl4 = ctk.CTkLabel(f4, text=fecha_emision)
+                lbl4 = ctk.CTkLabel(f4, text=estado, text_color=color)
                 lbl4.pack(anchor="w", padx=4, pady=0)
+                lbl5 = ctk.CTkLabel(f5, text=fecha_emision)
+                lbl5.pack(anchor="w", padx=4, pady=0)
                 # En lugar de botón de editar, abrimos el editor con doble clic en cualquier columna de la fila
 
                 # Hover efectos para toda la fila: aplicar a cada columna
-                cols = [f0, f1, f2, f3, f4]
+                cols = [f0, f1, f2, f3, f4, f5]
                 # Guardar el color original por columna para restaurarlo correctamente
-                originals = ["transparent", "transparent", "transparent", "transparent", "transparent"]
+                originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
 
                 def _on_enter(e, cols=cols):
                     for rf in cols:
@@ -2863,7 +2884,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             pass
 
                 # También enlazamos los labels internos para asegurar que capturan el doble click
-                inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4]
+                inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4, lbl5]
 
                 for rf in cols:
                     rf.bind("<Enter>", _on_enter)
@@ -2888,7 +2909,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error al cargar lista de RMA: {e}")
             if conn: conn.close()
-            ctk.CTkLabel(self.lista_rma_frame, text=f"Error al cargar la lista: {e}").grid(row=1, column=0, columnspan=5, padx=10, pady=20)
+            ctk.CTkLabel(self.lista_rma_frame, text=f"Error al cargar la lista: {e}").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
 
     def crear_copia_seguridad_db(self):
         """

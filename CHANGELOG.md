@@ -1,6 +1,8 @@
-Cambios V.0.1.13 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.15 - ✨ Últimas mejoras implementadas:
 
-- El buscardor global incluye busquedas en historial, tareas y resto de campos del expediente.
+- Añadida nueva columna en la ventana principal, mostrando la ultima actualizacion con prefijo para mostrar en que estado esta.
+- Corregido bug del boton de guardar nuevo expediente, no cambiaba de color naranja a verde.
+- El buscador global incluye busquedas en historial, tareas y resto de campos del expediente.
 - La creacion y edicion de los expedientes se realizan en una nueva ventana.
 - Se pueden abrir varios expedientes para poder trabajar simultaneamente.
 
