@@ -69,3 +69,175 @@ def obtener_ultima_actividad(fecha_emision, fecha_autorizacion, fecha_recepcion,
     
     # Devolver con el formato: PREFIJO-FECHA
     return f"{prefijo_max}-{fecha_max_str}"
+
+
+def calcular_tiempos_expediente(fecha_emision, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion):
+    """
+    Calcula los tiempos transcurridos entre cada fase del expediente.
+    
+    Args:
+        fecha_emision (str): Fecha de emisión del expediente
+        fecha_autorizacion (str): Fecha de autorización
+        fecha_recepcion (str): Fecha de recepción
+        fecha_proceso (str): Fecha de proceso
+        fecha_gestion (str): Fecha de gestión (cierre)
+    
+    Returns:
+        dict: Diccionario con los tiempos calculados:
+            - 'dias_total': Días totales desde emisión hasta hoy o hasta cierre
+            - 'dias_e_a': Días entre emisión y autorización
+            - 'dias_a_r': Días entre autorización y recepción
+            - 'dias_r_p': Días entre recepción y proceso
+            - 'dias_p_c': Días entre proceso y cierre
+            - 'cerrado': Boolean indicando si el expediente está cerrado
+    """
+    from datetime import datetime
+    
+    def parsear_fecha(fecha_str):
+        """Intenta parsear una fecha en varios formatos."""
+        if not fecha_str or fecha_str is None:
+            return None
+        
+        fecha_str = str(fecha_str).strip()
+        if not fecha_str or fecha_str.lower() == 'none':
+            return None
+        
+        for formato in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%y', '%d-%m-%y']:
+            try:
+                return datetime.strptime(fecha_str, formato)
+            except ValueError:
+                continue
+        return None
+    
+    # Parsear todas las fechas
+    f_emision = parsear_fecha(fecha_emision)
+    f_autorizacion = parsear_fecha(fecha_autorizacion)
+    f_recepcion = parsear_fecha(fecha_recepcion)
+    f_proceso = parsear_fecha(fecha_proceso)
+    f_gestion = parsear_fecha(fecha_gestion)
+    
+    resultado = {
+        'dias_total': None,
+        'dias_e_a': None,
+        'dias_a_r': None,
+        'dias_r_p': None,
+        'dias_p_c': None,
+        'cerrado': f_gestion is not None
+    }
+    
+    # Calcular días totales
+    if f_emision:
+        fecha_fin = f_gestion if f_gestion else datetime.now()
+        resultado['dias_total'] = (fecha_fin - f_emision).days
+    
+    # Calcular tiempos entre fases
+    if f_emision and f_autorizacion:
+        resultado['dias_e_a'] = (f_autorizacion - f_emision).days
+    
+    if f_autorizacion and f_recepcion:
+        resultado['dias_a_r'] = (f_recepcion - f_autorizacion).days
+    
+    if f_recepcion and f_proceso:
+        resultado['dias_r_p'] = (f_proceso - f_recepcion).days
+    
+    if f_proceso and f_gestion:
+        resultado['dias_p_c'] = (f_gestion - f_proceso).days
+    
+    return resultado
+
+
+def obtener_color_tiempo(dias):
+    """
+    Devuelve un color según los días transcurridos.
+    
+    Args:
+        dias (int): Número de días
+    
+    Returns:
+        str: Color en formato hex o nombre de color
+    """
+    if dias is None:
+        return "gray"
+    elif dias < 10:
+        return "#22c55e"  # Verde
+    elif dias < 20:
+        return "#eab308"  # Amarillo
+    elif dias < 30:
+        return "#f97316"  # Naranja
+    else:
+        return "#ef4444"  # Rojo
+
+
+def obtener_promedio_cliente(cliente, conn):
+    """
+    Calcula el promedio de días de tramitación para un cliente específico.
+    
+    Args:
+        cliente (str): Nombre del cliente
+        conn: Conexión a la base de datos
+    
+    Returns:
+        dict: Diccionario con promedios:
+            - 'promedio_total': Promedio de días totales
+            - 'total_expedientes': Número de expedientes del cliente
+            - 'promedio_e_a': Promedio días emisión a autorización
+            - 'promedio_a_r': Promedio días autorización a recepción
+            - 'promedio_r_p': Promedio días recepción a proceso
+            - 'promedio_p_c': Promedio días proceso a cierre
+    """
+    from datetime import datetime
+    
+    cursor = conn.cursor()
+    
+    # Obtener todos los expedientes cerrados del cliente
+    cursor.execute("""
+        SELECT fecha_emision, fecha_autorizacion, fecha_recepcion, 
+               fecha_proceso, fecha_gestion
+        FROM rma_maestro
+        WHERE cliente = ? AND fecha_gestion IS NOT NULL AND fecha_gestion != ''
+    """, (cliente,))
+    
+    expedientes = cursor.fetchall()
+    
+    if not expedientes:
+        return {
+            'promedio_total': None,
+            'total_expedientes': 0,
+            'promedio_e_a': None,
+            'promedio_a_r': None,
+            'promedio_r_p': None,
+            'promedio_p_c': None
+        }
+    
+    # Calcular tiempos para cada expediente
+    tiempos_totales = []
+    tiempos_e_a = []
+    tiempos_a_r = []
+    tiempos_r_p = []
+    tiempos_p_c = []
+    
+    for exp in expedientes:
+        tiempos = calcular_tiempos_expediente(*exp)
+        
+        if tiempos['dias_total'] is not None:
+            tiempos_totales.append(tiempos['dias_total'])
+        if tiempos['dias_e_a'] is not None:
+            tiempos_e_a.append(tiempos['dias_e_a'])
+        if tiempos['dias_a_r'] is not None:
+            tiempos_a_r.append(tiempos['dias_a_r'])
+        if tiempos['dias_r_p'] is not None:
+            tiempos_r_p.append(tiempos['dias_r_p'])
+        if tiempos['dias_p_c'] is not None:
+            tiempos_p_c.append(tiempos['dias_p_c'])
+    
+    def promedio(lista):
+        return sum(lista) / len(lista) if lista else None
+    
+    return {
+        'promedio_total': promedio(tiempos_totales),
+        'total_expedientes': len(expedientes),
+        'promedio_e_a': promedio(tiempos_e_a),
+        'promedio_a_r': promedio(tiempos_a_r),
+        'promedio_r_p': promedio(tiempos_r_p),
+        'promedio_p_c': promedio(tiempos_p_c)
+    }

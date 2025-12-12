@@ -25,7 +25,7 @@ from PIL import Image, ImageTk
 #from tkcalendar import Calendar
 from CTkDatePicker import CTkDatePicker
 from lib.changelog_window import mostrar_ventana_cambios
-from lib.rma_utils import obtener_ultima_actividad
+from lib.rma_utils import obtener_ultima_actividad, calcular_tiempos_expediente, obtener_color_tiempo, obtener_promedio_cliente
 
 import tkinter as tk
 from tkinter import ttk
@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.15"
+APP_VERSION = "v0.1.16"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4258,6 +4258,116 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 
         except Exception as e:
             messagebox.showerror("Error", f"Error al abrir editor RMA: {str(e)}")
+    
+    def _mostrar_widget_tiempos(self, parent_frame, rma_id):
+        """Muestra el widget de tiempos de tramitación en la ficha del expediente."""
+        try:
+            # Obtener datos del expediente
+            conn = connect_db()
+            if not conn:
+                return
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT fecha_emision, fecha_autorizacion, fecha_recepcion, 
+                       fecha_proceso, fecha_gestion, cliente
+                FROM rma_maestro
+                WHERE id = ?
+            """, (rma_id,))
+            
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return
+            
+            fecha_emision, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, cliente = row
+            
+            # Calcular tiempos del expediente
+            tiempos = calcular_tiempos_expediente(
+                fecha_emision, fecha_autorizacion, fecha_recepcion, 
+                fecha_proceso, fecha_gestion
+            )
+            
+            # Obtener promedio del cliente si está cerrado
+            promedio_cliente = None
+            if tiempos['cerrado'] and cliente:
+                promedio_info = obtener_promedio_cliente(cliente, conn)
+                promedio_cliente = promedio_info['promedio_total']
+            
+            conn.close()
+            
+            # Si no hay datos de tiempo, no mostrar nada
+            if tiempos['dias_total'] is None:
+                return
+            
+            # Frame para el widget de tiempos (row 2 en la columna 0)
+            tiempos_frame = ctk.CTkFrame(parent_frame, fg_color="#f0f0f0", corner_radius=8)
+            tiempos_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="ew")
+            
+            # Título del widget
+            ctk.CTkLabel(tiempos_frame, text="📊 TIEMPOS DE TRAMITACIÓN", 
+                        font=ctk.CTkFont(size=12, weight="bold"),
+                        text_color="#2c3e50").pack(anchor="w", padx=10, pady=(8, 5))
+            
+            # Frame horizontal para los indicadores
+            indicadores_frame = ctk.CTkFrame(tiempos_frame, fg_color="transparent")
+            indicadores_frame.pack(fill="x", padx=10, pady=(0, 8))
+            
+            # Días totales
+            dias_total = tiempos['dias_total']
+            color_total = obtener_color_tiempo(dias_total)
+            estado_texto = " (Cerrado)" if tiempos['cerrado'] else " (En curso)"
+            
+            total_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
+            total_frame.pack(side="left", padx=(0, 8), pady=2, fill="x", expand=True)
+            
+            ctk.CTkLabel(total_frame, text="Total:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
+            ctk.CTkLabel(total_frame, text=f"{dias_total} días{estado_texto}", 
+                        font=ctk.CTkFont(size=13, weight="bold"),
+                        text_color=color_total).pack(anchor="w", padx=8, pady=(0, 4))
+            
+            # Promedio del cliente (si está disponible)
+            if promedio_cliente is not None:
+                promedio_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
+                promedio_frame.pack(side="left", padx=(0, 8), pady=2, fill="x", expand=True)
+                
+                dias_prom = int(promedio_cliente)
+                color_prom = obtener_color_tiempo(dias_prom)
+                
+                ctk.CTkLabel(promedio_frame, text=f"Promedio {cliente}:", 
+                           font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
+                ctk.CTkLabel(promedio_frame, text=f"{dias_prom} días", 
+                           font=ctk.CTkFont(size=13, weight="bold"),
+                           text_color=color_prom).pack(anchor="w", padx=8, pady=(0, 4))
+            
+            # Tiempos entre fases (en una línea horizontal)
+            fases_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
+            fases_frame.pack(side="left", padx=0, pady=2, fill="x", expand=True)
+            
+            ctk.CTkLabel(fases_frame, text="Fases:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
+            
+            # Frame horizontal para las fases
+            fases_detalle_frame = ctk.CTkFrame(fases_frame, fg_color="transparent")
+            fases_detalle_frame.pack(fill="x", padx=8, pady=(0, 4))
+            
+            fases = [
+                ('E→A', tiempos['dias_e_a']),
+                ('A→R', tiempos['dias_a_r']),
+                ('R→P', tiempos['dias_r_p']),
+                ('P→C', tiempos['dias_p_c'])
+            ]
+            
+            for nombre, dias in fases:
+                if dias is not None:
+                    color = obtener_color_tiempo(dias)
+                    lbl = ctk.CTkLabel(fases_detalle_frame, 
+                                      text=f"{nombre}: {dias}d", 
+                                      font=ctk.CTkFont(size=11),
+                                      text_color=color)
+                    lbl.pack(side="left", padx=4)
+            
+        except Exception as e:
+            print(f"Error al mostrar widget de tiempos: {e}")
 
     def mostrar_nuevo_rma(self, rma_id=None):
         """Muestra el formulario para crear (rma_id=None) o editar (rma_id=ID) un RMA."""
@@ -4352,6 +4462,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                          font=ctk.CTkFont(size=10),
                          text_color="gray50")
             self.lbl_explicacion.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="w")
+        
+        # Widget de tiempos de tramitación (solo en modo edición)
+        if es_edicion:
+            self._mostrar_widget_tiempos(fila1_control_frame, rma_id)
         
         # Guardar si es modo edición para usar en el guardado
         self.es_modo_edicion = es_edicion 
@@ -10351,7 +10465,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Se elimina la estadística 'Abonos por Cliente y Periodo' (no funcional).
         self.botones_stats = {
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
-            "Referencia (Incidencia)": self.mostrar_articulos_incidencia
+            "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
+            "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos
         }
         
         # 5. Creación de los botones del menú interno
@@ -10672,6 +10787,108 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.referencia_entry.delete(0, 'end')
         # Recarga los datos para aplicar el filtro limpio (que es no filtrar)
         self._cargar_datos_articulos_incidencia()
+    
+    def mostrar_estadisticas_tiempos(self):
+        """Muestra estadísticas de tiempos de tramitación por cliente."""
+        self.limpiar_marco_stats()
+        
+        ctk.CTkLabel(self.main_stats_frame, 
+                     text="⏱️ TIEMPOS DE TRAMITACIÓN POR CLIENTE", 
+                     font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=20)
+        
+        # Obtener conexión a la base de datos
+        conn, cursor = self.master.conectar_db()
+        if not conn:
+            ctk.CTkLabel(self.main_stats_frame, text="Error al conectar con la base de datos.", 
+                        text_color="red").pack(pady=20)
+            return
+        
+        try:
+            # Obtener todos los clientes únicos con expedientes cerrados
+            cursor.execute("""
+                SELECT DISTINCT cliente
+                FROM rma_maestro
+                WHERE fecha_gestion IS NOT NULL AND fecha_gestion != ''
+                AND cliente IS NOT NULL AND cliente != ''
+                ORDER BY cliente ASC
+            """)
+            
+            clientes = [fila[0] for fila in cursor.fetchall()]
+            
+            if not clientes:
+                ctk.CTkLabel(self.main_stats_frame, 
+                           text="No se encontraron expedientes cerrados para calcular estadísticas.", 
+                           text_color="gray").pack(pady=20)
+                conn.close()
+                return
+            
+            # Marco scrollable para la tabla
+            scroll_frame = ctk.CTkScrollableFrame(self.main_stats_frame)
+            scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            # Encabezados de la tabla
+            header_font = ctk.CTkFont(weight="bold", size=12)
+            headers = ["CLIENTE", "EXPEDIENTES", "DÍAS PROMEDIO TOTAL", "E→A", "A→R", "R→P", "P→C"]
+            
+            for col, header in enumerate(headers):
+                lbl = ctk.CTkLabel(scroll_frame, text=header, font=header_font)
+                lbl.grid(row=0, column=col, padx=10, pady=10, sticky="w")
+            
+            # Calcular estadísticas para cada cliente
+            for i, cliente in enumerate(clientes):
+                promedio_info = obtener_promedio_cliente(cliente, conn)
+                
+                row = i + 1
+                
+                # Columna: Cliente
+                ctk.CTkLabel(scroll_frame, text=cliente).grid(row=row, column=0, padx=10, pady=5, sticky="w")
+                
+                # Columna: Número de expedientes
+                ctk.CTkLabel(scroll_frame, text=str(promedio_info['total_expedientes'])).grid(
+                    row=row, column=1, padx=10, pady=5, sticky="w")
+                
+                # Columna: Días promedio total
+                if promedio_info['promedio_total'] is not None:
+                    dias_total = int(promedio_info['promedio_total'])
+                    color_total = obtener_color_tiempo(dias_total)
+                    ctk.CTkLabel(scroll_frame, text=f"{dias_total} días", text_color=color_total).grid(
+                        row=row, column=2, padx=10, pady=5, sticky="w")
+                else:
+                    ctk.CTkLabel(scroll_frame, text="-", text_color="gray").grid(
+                        row=row, column=2, padx=10, pady=5, sticky="w")
+                
+                # Columnas: Tiempos entre fases (E→A, A→R, R→P, P→C)
+                fases = ['promedio_e_a', 'promedio_a_r', 'promedio_r_p', 'promedio_p_c']
+                for col_idx, fase in enumerate(fases, start=3):
+                    if promedio_info[fase] is not None:
+                        dias = int(promedio_info[fase])
+                        color = obtener_color_tiempo(dias)
+                        ctk.CTkLabel(scroll_frame, text=f"{dias}d", text_color=color).grid(
+                            row=row, column=col_idx, padx=10, pady=5, sticky="w")
+                    else:
+                        ctk.CTkLabel(scroll_frame, text="-", text_color="gray").grid(
+                            row=row, column=col_idx, padx=10, pady=5, sticky="w")
+            
+            # Leyenda de colores
+            leyenda_frame = ctk.CTkFrame(self.main_stats_frame)
+            leyenda_frame.pack(pady=10)
+            
+            ctk.CTkLabel(leyenda_frame, text="Leyenda: ", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
+            ctk.CTkLabel(leyenda_frame, text="🟢 <10 días", text_color="#22c55e").pack(side="left", padx=5)
+            ctk.CTkLabel(leyenda_frame, text="🟡 10-20 días", text_color="#eab308").pack(side="left", padx=5)
+            ctk.CTkLabel(leyenda_frame, text="🟠 20-30 días", text_color="#f97316").pack(side="left", padx=5)
+            ctk.CTkLabel(leyenda_frame, text="🔴 >30 días", text_color="#ef4444").pack(side="left", padx=5)
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"Error al generar estadísticas de tiempos: {e}")
+            ctk.CTkLabel(self.main_stats_frame, 
+                        text=f"Error al cargar estadísticas: {e}", 
+                        text_color="red").pack(pady=20)
+            if conn:
+                conn.close()
             
 
     def limpiar_marco_stats(self):
