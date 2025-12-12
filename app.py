@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.16"
+APP_VERSION = "v0.1.17"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6419,7 +6419,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
             conn.close()
             
     def guardar_cambio_historial(self, rma_id, campo, valor_antiguo, valor_nuevo):
-        """Registra un cambio de un campo en la tabla de historial."""
+        """Registra un cambio de un campo en la tabla de historial SOLO si hay cambio real."""
+        # Normalizar valores para comparación (convertir None a cadena vacía, strip)
+        def normalizar_valor(val):
+            if val is None:
+                return ""
+            return str(val).strip()
+        
+        val_antiguo_norm = normalizar_valor(valor_antiguo)
+        val_nuevo_norm = normalizar_valor(valor_nuevo)
+        
+        # Si los valores son iguales después de normalizar, no registrar el cambio
+        if val_antiguo_norm == val_nuevo_norm:
+            return
+        
         conn, cursor = self.master.conectar_db()
         if not conn: return
 
@@ -6519,6 +6532,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         campos_a_actualizar = []
         valores_a_actualizar = []
         
+        def valores_son_diferentes(val1, val2):
+            """Compara dos valores normalizando None y cadenas vacías."""
+            # Normalizar None y cadenas vacías
+            v1 = str(val1).strip() if val1 is not None else ""
+            v2 = str(val2).strip() if val2 is not None else ""
+            return v1 != v2
+        
         for columna_db, valor_nuevo in datos_nuevos.items():
             valor_antiguo = datos_antiguos.get(columna_db)
             
@@ -6529,8 +6549,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     campos_a_actualizar.append(f"{columna_db} = ?")
                     valores_a_actualizar.append(valor_nuevo)
             
-            # Comparación de campos normales (no boolean)
-            elif str(valor_nuevo) != str(valor_antiguo):
+            # Comparación de campos normales (no boolean) usando la función de normalización
+            elif valores_son_diferentes(valor_antiguo, valor_nuevo):
                 self.guardar_cambio_historial(rma_id, columna_db.title().replace('_', ' '), str(valor_antiguo), str(valor_nuevo))
                 campos_a_actualizar.append(f"{columna_db} = ?")
                 valores_a_actualizar.append(valor_nuevo)
@@ -6560,58 +6580,84 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # 5. Actualizar rma_detalles (Borrar antiguos e Insertar nuevos) - OPTIMIZADO
         try:
-            # Borrar todos los detalles existentes
-            cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            # Primero obtener los artículos antiguos para comparar
+            cursor.execute("SELECT * FROM rma_detalles WHERE rma_id = ? ORDER BY referencia_articulo", (rma_id,))
+            articulos_antiguos = cursor.fetchall()
             
-            # Insertar los detalles de la lista temporal del formulario - BATCH
-            if self.articulos_data:
-                primer_articulo = self.articulos_data[0].copy()
-                primer_articulo['rma_id'] = rma_id
+            # Comparar si los artículos realmente cambiaron
+            articulos_cambiaron = False
+            if len(articulos_antiguos) != len(self.articulos_data):
+                articulos_cambiaron = True
+            else:
+                # Comparar cada artículo (simplificado: comparar campos clave)
+                for i, art_antiguo in enumerate(articulos_antiguos):
+                    if i < len(self.articulos_data):
+                        art_nuevo = self.articulos_data[i]
+                        # Comparar campos principales (ajustar según estructura de tu tabla)
+                        # Asumiendo que la posición 1 es referencia, 2 es cantidad, etc.
+                        if (str(art_antiguo[1] if len(art_antiguo) > 1 else '') != str(art_nuevo.get('referencia_articulo', '')) or
+                            str(art_antiguo[2] if len(art_antiguo) > 2 else '') != str(art_nuevo.get('cantidad_entregada', '')) or
+                            str(art_antiguo[3] if len(art_antiguo) > 3 else '') != str(art_nuevo.get('precio_unitario', ''))):
+                            articulos_cambiaron = True
+                            break
+            
+            # Solo actualizar y registrar en historial si realmente cambiaron
+            if articulos_cambiaron:
+                # Borrar todos los detalles existentes
+                cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                
+                # Insertar los detalles de la lista temporal del formulario - BATCH
+                if self.articulos_data:
+                    primer_articulo = self.articulos_data[0].copy()
+                    primer_articulo['rma_id'] = rma_id
 
-                columnas_detalle = ', '.join(primer_articulo.keys())
-                placeholders_detalle = ', '.join('?' * len(primer_articulo))
+                    columnas_detalle = ', '.join(primer_articulo.keys())
+                    placeholders_detalle = ', '.join('?' * len(primer_articulo))
 
-                # Preparar lista de valores para executemany
-                valores_batch = []
-                for articulo in self.articulos_data:
-                    articulo_copia = articulo.copy()
-                    articulo_copia['rma_id'] = rma_id
-                    valores_batch.append(tuple(articulo_copia.values()))
+                    # Preparar lista de valores para executemany
+                    valores_batch = []
+                    for articulo in self.articulos_data:
+                        articulo_copia = articulo.copy()
+                        articulo_copia['rma_id'] = rma_id
+                        valores_batch.append(tuple(articulo_copia.values()))
 
-                # Insertar todos los artículos en batch (mucho más rápido)
-                cursor.executemany(f"""
-                    INSERT INTO rma_detalles ({columnas_detalle}) 
-                    VALUES ({placeholders_detalle})
-                """, valores_batch)
+                    # Insertar todos los artículos en batch (mucho más rápido)
+                    cursor.executemany(f"""
+                        INSERT INTO rma_detalles ({columnas_detalle}) 
+                        VALUES ({placeholders_detalle})
+                    """, valores_batch)
 
-                self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", f"Lista Nueva ({len(self.articulos_data)} items)")
+                    # Solo registrar en historial si hubo cambios
+                    self.guardar_cambio_historial(rma_id, "Detalle Artículos", f"{len(articulos_antiguos)} items", f"{len(self.articulos_data)} items")
 
-                # Recalcular el precio total a partir de los artículos insertados y actualizar rma_maestro
-                try:
-                    precio_total_recalc = 0.0
-                    for item in self.articulos_data:
-                        cantidad = item.get('cantidad_entregada', 0) or 0
-                        if isinstance(cantidad, str):
-                            cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
-                        else:
-                            cantidad = float(cantidad)
+                    # Recalcular el precio total a partir de los artículos insertados y actualizar rma_maestro
+                    try:
+                        precio_total_recalc = 0.0
+                        for item in self.articulos_data:
+                            cantidad = item.get('cantidad_entregada', 0) or 0
+                            if isinstance(cantidad, str):
+                                cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                            else:
+                                cantidad = float(cantidad)
 
-                        precio = item.get('precio_unitario', 0.0) or 0.0
-                        if isinstance(precio, str):
-                            precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
-                        else:
-                            precio = float(precio)
+                            precio = item.get('precio_unitario', 0.0) or 0.0
+                            if isinstance(precio, str):
+                                precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                            else:
+                                precio = float(precio)
 
-                        precio_total_recalc += cantidad * precio
+                            precio_total_recalc += cantidad * precio
 
-                    cursor.execute("UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?", (precio_total_recalc, rma_id))
-                except Exception as e:
-                    print(f"Error al recalcular/guardar precio_total_expediente en actualizar_rma: {e}")
+                        cursor.execute("UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?", (precio_total_recalc, rma_id))
+                    except Exception as e:
+                        print(f"Error al recalcular/guardar precio_total_expediente en actualizar_rma: {e}")
 
-            elif not self.articulos_data and cursor.rowcount > 0: # Si borramos y no insertamos nada
-                self.guardar_cambio_historial(rma_id, "Detalle Artículos", "Lista Anterior", "Lista Nueva (0 items - Artículos eliminados)")
+                elif not self.articulos_data and len(articulos_antiguos) > 0: # Si borramos y no insertamos nada
+                    # Borrar artículos
+                    cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                    self.guardar_cambio_historial(rma_id, "Detalle Artículos", f"{len(articulos_antiguos)} items", "0 items - Artículos eliminados")
 
-            updated_any = True
+                updated_any = True
 
         except sqlite3.Error as e:
             print(f"Error al actualizar detalles: {e}")
