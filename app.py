@@ -304,7 +304,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.13"
+APP_VERSION = "v0.1.14"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5094,7 +5094,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             guardar_texto = "💾 GUARDAR Y ASIGNAR NÚMERO"
             color_boton = "orange"  # Color naranja para destacar que asignará el número final
         
-        guardar_button = ctk.CTkButton(
+        self.btn_guardar_rma = ctk.CTkButton(
             btn_action_frame, 
             text=guardar_texto, 
             fg_color=color_boton,        # Color especial para nuevos expedientes
@@ -5103,7 +5103,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self.guardar_rma_placeholder
         )
-        guardar_button.pack(side="left", padx=(0, 5))
+        self.btn_guardar_rma.pack(side="left", padx=(0, 5))
         
         # Lógica de Edición
         if es_edicion:
@@ -5680,6 +5680,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     text=f"Nº EXPEDIENTE: {codigo_final}",
                     text_color="green"  # Verde para indicar que ya está guardado
                 )
+                
+                # Actualizar el botón de guardar a verde para indicar que ya está guardado
+                if hasattr(self, 'btn_guardar_rma'):
+                    self.btn_guardar_rma.configure(
+                        text="💾 ACTUALIZAR",
+                        fg_color="green"  # Verde para indicar que ya está guardado
+                    )
                 
                 # Ocultar el texto explicativo ya que ahora es definitivo
                 if hasattr(self, 'lbl_explicacion'):
