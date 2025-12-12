@@ -304,7 +304,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.11"
+APP_VERSION = "v0.1.12"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2565,7 +2565,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # 3. Listado de RMAs
         self.lista_rma_frame = ctk.CTkScrollableFrame(lista_column, 
-                                                     label_text="Pinche dos veces sobre el expediente para abrirlo.")
+                                                     label_text="Pulse F5 para actualizar el listado ; Pinche dos veces sobre el expediente para abrirlo.")
         self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
         self.lista_rma_frame.grid_columnconfigure(0, weight=1)
         
@@ -4711,6 +4711,81 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         pass
         except Exception:
             pass
+        
+        # --- Sincronización INVERSA: Fecha_Autorizacion -> Autorizacion ---
+        try:
+            fecha_auth_widget = getattr(self, 'entry_Fecha_Autorizacion', None)
+            auth_widget = getattr(self, 'entry_Autorizacion', None)
+            
+            if fecha_auth_widget is not None and auth_widget is not None:
+                # Variable para almacenar el último valor conocido
+                self._last_fecha_autorizacion = None
+                
+                def _verificar_fecha_autorizacion():
+                    """Verifica periódicamente si cambió Fecha_Autorizacion y actualiza Autorizacion"""
+                    try:
+                        # Obtener la fecha del widget
+                        fecha_valor = None
+                        
+                        # Intentar obtener el valor según el tipo de widget
+                        if hasattr(fecha_auth_widget, 'get_date'):
+                            try:
+                                fecha_valor = fecha_auth_widget.get_date()
+                            except:
+                                pass
+                        
+                        if fecha_valor is None and hasattr(fecha_auth_widget, 'get'):
+                            try:
+                                fecha_valor = fecha_auth_widget.get()
+                            except:
+                                pass
+                        
+                        # Convertir a string para comparación
+                        fecha_str = str(fecha_valor).strip() if fecha_valor else ""
+                        
+                        # Solo actualizar si cambió
+                        if fecha_str != self._last_fecha_autorizacion:
+                            self._last_fecha_autorizacion = fecha_str
+                            
+                            # Verificar si hay fecha válida
+                            tiene_fecha = bool(fecha_str) and fecha_str not in ('None', 'null', '')
+                            
+                            # Actualizar el campo Autorizacion
+                            if tiene_fecha:
+                                # Hay fecha -> Autorización debe ser SI
+                                try:
+                                    current_auth = auth_widget.get()
+                                    if current_auth != 'SI':
+                                        auth_widget.set('SI')
+                                except:
+                                    pass
+                            else:
+                                # No hay fecha -> Autorización debe ser NO
+                                try:
+                                    current_auth = auth_widget.get()
+                                    if current_auth != 'NO':
+                                        auth_widget.set('NO')
+                                except:
+                                    pass
+                        
+                        # Programar siguiente verificación (cada 500ms)
+                        if hasattr(self, 'content_frame') and self.content_frame.winfo_exists():
+                            self.content_frame.after(500, _verificar_fecha_autorizacion)
+                    except Exception as e:
+                        # Si hay error, intentar reprogramar de todos modos
+                        try:
+                            if hasattr(self, 'content_frame') and self.content_frame.winfo_exists():
+                                self.content_frame.after(500, _verificar_fecha_autorizacion)
+                        except:
+                            pass
+                
+                # Iniciar la verificación periódica
+                try:
+                    self.content_frame.after(500, _verificar_fecha_autorizacion)
+                except Exception as e:
+                    print(f'Error iniciando verificación periódica: {e}')
+        except Exception as e:
+            print(f'Error configurando sincronización inversa: {e}')
         # Fila 0: RMA Proveedor (label cambiado a 'RMA Proveedor')
         self.crear_campo(info_tecnica_frame, 0, "RMA Proveedor:", "Rma_Proveedor")
         # Fila 1: Modelo
@@ -6037,6 +6112,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # --- NUEVO: Actualizar la etiqueta del total ---
             precio_total = datos_maestro.get('precio_total_expediente', 0.0) # Obtener el valor
             self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
+            
+            # --- SINCRONIZACIÓN: Si hay fecha_autorizacion, marcar Autorización como SI ---
+            try:
+                fecha_aut = datos_maestro.get('fecha_autorizacion')
+                if fecha_aut and str(fecha_aut).strip():
+                    # Hay una fecha de autorización, asegurar que Autorización esté en "SI"
+                    if hasattr(self, 'entry_Autorizacion'):
+                        try:
+                            self.entry_Autorizacion.set('SI')
+                        except Exception as e:
+                            print(f"Error al sincronizar Autorización: {e}")
+            except Exception as e:
+                print(f"Error en sincronización de autorización: {e}")
             
             # 4. Rellenar Artículos (self.articulos_data)
             self.articulos_data = articulos_db
