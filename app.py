@@ -28,6 +28,71 @@ from lib.changelog_window import mostrar_ventana_cambios
 
 import tkinter as tk
 from tkinter import ttk
+
+# Monkey patch para prevenir errores en ventanas destruidas
+# Guardamos referencias a los métodos originales
+_original_tk_after = tk.Misc.after
+_original_toplevel_destroy = Toplevel.destroy
+
+# Diccionario global para rastrear IDs de callbacks por ventana
+_window_after_ids = {}
+
+def _safe_after(self, ms, func=None, *args):
+    """Wrapper seguro para after() que registra los IDs"""
+    # Si func es None, es un sleep, no lo trackeamos
+    if func is None:
+        return _original_tk_after(self, ms)
+    
+    # Función wrapper que verifica si la ventana existe antes de ejecutar
+    def safe_func(*func_args):
+        try:
+            # Verificar si el widget todavía existe
+            if self.winfo_exists():
+                return func(*func_args)
+        except:
+            pass  # Ventana ya destruida, ignorar silenciosamente
+    
+    # Programar el callback con la función segura
+    after_id = _original_tk_after(self, ms, safe_func, *args)
+    
+    # Registrar el ID si es una ventana Toplevel
+    if isinstance(self, (Toplevel, ctk.CTkToplevel)):
+        window_id = id(self)
+        if window_id not in _window_after_ids:
+            _window_after_ids[window_id] = []
+        _window_after_ids[window_id].append(after_id)
+    
+    return after_id
+
+def _safe_destroy(self):
+    """Wrapper seguro para destroy() que cancela todos los callbacks"""
+    window_id = id(self)
+    
+    # Cancelar todos los callbacks programados para esta ventana
+    if window_id in _window_after_ids:
+        for after_id in _window_after_ids[window_id][:]:
+            try:
+                self.after_cancel(after_id)
+            except:
+                pass
+        del _window_after_ids[window_id]
+    
+    # Liberar grab si existe
+    try:
+        self.grab_release()
+    except:
+        pass
+    
+    # Llamar al destroy original
+    try:
+        _original_toplevel_destroy(self)
+    except:
+        pass
+
+# Aplicar los monkey patches
+tk.Misc.after = _safe_after
+Toplevel.destroy = _safe_destroy
+ctk.CTkToplevel.destroy = _safe_destroy
 import threading
 import tempfile
 
@@ -239,7 +304,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.10"
+APP_VERSION = "v0.1.11"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1148,8 +1213,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def limpiar_contenido(self):
         """Limpia todos los widgets del marco de contenido principal."""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
+        try:
+            if self.content_frame and self.content_frame.winfo_exists():
+                for widget in self.content_frame.winfo_children():
+                    try:
+                        widget.destroy()
+                    except:
+                        pass
+        except Exception as e:
+            print(f"Error al limpiar contenido: {e}")
 
     def crear_diseno(self):
         """Define la estructura principal con un panel lateral y un área de contenido."""
@@ -2440,7 +2512,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                           height=36,
                           fg_color=(btn_bg if btn_bg is not None else None),
                           hover_color=(btn_bg if btn_bg is not None else None),
-                          command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
+                          command=lambda: self._abrir_editor_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
             try:
                 Tooltip(title_frame.winfo_children()[-1], "Crear nuevo RMA")
             except Exception:
@@ -2448,7 +2520,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception:
             ctk.CTkButton(title_frame,
                           text="➕ Crear Nuevo RMA",
-                          command=lambda: self.mostrar_nuevo_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
+                          command=lambda: self._abrir_editor_rma(rma_id=None)).grid(row=0, column=1, padx=(20, 0), sticky="e")
 
         # 2. Panel de Búsqueda y Filtros
         filtro_frame = ctk.CTkFrame(lista_column, fg_color="transparent")
@@ -2809,7 +2881,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     except Exception:
                         pass
                     try:
-                        w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self.mostrar_nuevo_rma(rma_id=r))
+                        w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
                     except Exception:
                         pass
             
@@ -4003,6 +4075,27 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # 5. LÓGICA DE FORMULARIO (CREAR/EDITAR)
     # ----------------------------------------------------------------------
 
+    def _abrir_editor_rma(self, rma_id=None):
+        """Abre el editor de RMA en una ventana separada."""
+        from lib.rma_editor_window import RmaEditorWindow
+        
+        try:
+            # Restaurar el content_frame original si fue modificado por una ventana modal
+            if hasattr(self, '_original_content_frame') and self._original_content_frame:
+                try:
+                    if self._original_content_frame.winfo_exists():
+                        self.content_frame = self._original_content_frame
+                except:
+                    pass
+            
+            # Abrir directamente la nueva ventana
+            # Si hay otras ventanas abiertas, no las cerramos automáticamente
+            # El usuario las puede cerrar manualmente si lo desea
+            RmaEditorWindow(self, rma_id)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al abrir editor RMA: {str(e)}")
+
     def mostrar_nuevo_rma(self, rma_id=None):
         """Muestra el formulario para crear (rma_id=None) o editar (rma_id=ID) un RMA."""
         self.limpiar_contenido()
@@ -4039,13 +4132,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         ctk.CTkLabel(header_frame, text=titulo_texto, font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, sticky="w")
         
-        btn_volver = ctk.CTkButton(header_frame, 
-                                   text="⬅️ Volver", 
-                                   command=self.mostrar_lista_rma,
-                                   #fg_color="gray80",        # Fondo del botón: Gris claro
-                                   #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
-                                   #text_color="black"
-                                   )
+        # Detectar si estamos en una ventana modal (RmaEditorWindow)
+        # Si es así, el botón debe cerrar la ventana modal
+        ventana_actual = self.content_frame.winfo_toplevel()
+        es_ventana_modal = ventana_actual != self.master
+        
+        if es_ventana_modal:
+            # Estamos en RmaEditorWindow - cerrar la ventana
+            btn_volver = ctk.CTkButton(header_frame, 
+                                       text="✖️ Cerrar", 
+                                       command=ventana_actual.destroy)
+        else:
+            # Estamos en la ventana principal - volver a la lista
+            btn_volver = ctk.CTkButton(header_frame, 
+                                       text="⬅️ Volver", 
+                                       command=self.mostrar_lista_rma)
+        
         btn_volver.grid(row=0, column=1, padx=(20, 0), sticky="e")
         
         # --------------------------------------------------------------------------
@@ -7763,7 +7865,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ventana.attributes('-topmost', False)
         ventana.minsize(500, 400)
         # No usar grab_set para permitir minimización completa
-        ventana.focus_set()  # Solo dar foco sin modalidad
+        try:
+            ventana.focus_set()  # Solo dar foco sin modalidad
+        except:
+            pass
         
         # Forzar aparición al frente (incluso si la principal está maximizada)
         ventana.attributes('-topmost', True)   # Temporalmente al frente
@@ -8077,11 +8182,27 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ventana.attributes('-topmost', False)
         ventana.minsize(600, 400)
         # No usar transient ni grab_set para permitir minimización completa
-        ventana.focus_set()  # Dar foco sin bloquear
+        try:
+            ventana.focus_set()  # Dar foco sin bloquear
+        except:
+            pass
         
         # Forzar aparición al frente (incluso si la principal está maximizada)
         ventana.attributes('-topmost', True)   # Temporalmente al frente
         ventana.lift()
+        try:
+            ventana.focus_force()
+        except:
+            pass
+        
+        def quitar_topmost_ventana():
+            try:
+                if ventana.winfo_exists():
+                    ventana.attributes('-topmost', False)
+            except:
+                pass
+        
+        ventana.after(500, quitar_topmost_ventana)
         ventana.focus_force()
         ventana.after(500, lambda: ventana.attributes('-topmost', False))  # Quitar topmost después de 500ms
 
@@ -8410,8 +8531,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Forzar aparición al frente (incluso si la principal está maximizada)
                 vent_hist.attributes('-topmost', True)   # Temporalmente al frente
                 vent_hist.lift()
-                vent_hist.focus_force()
-                vent_hist.after(500, lambda: vent_hist.attributes('-topmost', False))  # Quitar topmost después de 500ms
+                try:
+                    vent_hist.focus_force()
+                except:
+                    pass
+                
+                def quitar_topmost_vent_hist():
+                    try:
+                        if vent_hist.winfo_exists():
+                            vent_hist.attributes('-topmost', False)
+                    except:
+                        pass
+                
+                vent_hist.after(500, quitar_topmost_vent_hist)
 
                 cont = ctk.CTkFrame(vent_hist)
                 cont.pack(fill="both", expand=True, padx=10, pady=10)
@@ -8800,8 +8932,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Forzar aparición al frente (incluso si la principal está maximizada)
             vent.attributes('-topmost', True)   # Temporalmente al frente
             vent.lift()
-            vent.focus_force()
-            vent.after(500, lambda: vent.attributes('-topmost', False))  # Quitar topmost después de 500ms
+            try:
+                vent.focus_force()
+            except:
+                pass
+            
+            def quitar_topmost_vent():
+                try:
+                    if vent.winfo_exists():
+                        vent.attributes('-topmost', False)
+                except:
+                    pass
+            
+            vent.after(500, quitar_topmost_vent)
 
             cont = ctk.CTkFrame(vent)
             cont.pack(fill="both", expand=True, padx=12, pady=12)
@@ -9131,8 +9274,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 row.bind("<Leave>", on_leave)
 
                 # Doble clic abre editor
-                row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
-                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+                row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
+                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
 
             # ===== SECCIÓN 3: HISTORIAL DEL PROVEEDOR =====
             hist_frame = ctk.CTkFrame(cont)
@@ -9455,8 +9598,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         vent.focus_set()
         vent.attributes('-topmost', True)
         vent.lift()
-        vent.focus_force()
-        vent.after(500, lambda: vent.attributes('-topmost', False))
+        try:
+            vent.focus_force()
+        except:
+            pass
+        
+        def quitar_topmost_vent2():
+            try:
+                if vent.winfo_exists():
+                    vent.attributes('-topmost', False)
+            except:
+                pass
+        
+        vent.after(500, quitar_topmost_vent2)
 
         main = ctk.CTkFrame(vent)
         main.pack(fill="both", expand=True, padx=12, pady=12)
@@ -9619,13 +9773,28 @@ class VentanaPrincipal(ctk.CTkToplevel):
         vent.attributes('-topmost', False)
         vent.minsize(700, 450)
         # No usar transient para permitir minimización completa
-        vent.focus_set()  # Dar foco sin bloquear
+        try:
+            vent.focus_set()  # Dar foco sin bloquear
+        except:
+            pass
         
         # Forzar aparición al frente (incluso si la principal está maximizada)
         vent.attributes('-topmost', True)   # Temporalmente al frente
         vent.lift()
-        vent.focus_force()
-        vent.after(500, lambda: vent.attributes('-topmost', False))  # Quitar topmost después de 500ms
+        try:
+            vent.focus_force()
+        except:
+            pass
+        
+        # Función segura para quitar topmost
+        def quitar_topmost():
+            try:
+                if vent.winfo_exists():
+                    vent.attributes('-topmost', False)
+            except:
+                pass
+        
+        vent.after(500, quitar_topmost)
 
         main = ctk.CTkFrame(vent)
         main.pack(fill="both", expand=True, padx=12, pady=12)
@@ -9738,7 +9907,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 acciones = ctk.CTkFrame(rowf, fg_color="transparent")
                 acciones.grid(row=0, column=4, padx=5)
-                ctk.CTkButton(acciones, text="Abrir", width=90, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
+                ctk.CTkButton(acciones, text="Abrir", width=90, command=lambda rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy())).pack(side="left", padx=4)
 
                 def on_ent(e, r=rowf):
                     try:
@@ -9753,8 +9922,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                 rowf.bind("<Enter>", on_ent)
                 rowf.bind("<Leave>", on_lve)
-                rowf.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
-                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy()))
+                rowf.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
+                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
 
             # Ensure numeric types for pagination calculation
             try:
@@ -13127,8 +13296,19 @@ Versión de la App: {APP_VERSION}
             # Forzar aparición al frente (incluso si la principal está maximizada)
             ventana_notas.attributes('-topmost', True)   # Temporalmente al frente
             ventana_notas.lift()
-            ventana_notas.focus_force()
-            ventana_notas.after(500, lambda: ventana_notas.attributes('-topmost', False))  # Quitar topmost después de 500ms
+            try:
+                ventana_notas.focus_force()
+            except:
+                pass
+            
+            def quitar_topmost_ventana_notas():
+                try:
+                    if ventana_notas.winfo_exists():
+                        ventana_notas.attributes('-topmost', False)
+                except:
+                    pass
+            
+            ventana_notas.after(500, quitar_topmost_ventana_notas)
             
             # Agregar icono personalizado
             try:

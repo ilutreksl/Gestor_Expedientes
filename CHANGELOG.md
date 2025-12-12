@@ -1,4 +1,10 @@
-Cambios V.0.1.10 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.11 - ✨ Últimas mejoras implementadas:
+
+- La creacion y edicion de los expedientes se realizan en una nueva ventana.
+- Se pueden abrir varios expedientes para poder trabajar simultaneamente.
+
+
+Cambios V.0.1.10
 
 💾 Cuando se guarda un nuevo expediente, si el campo documento cliente contiene las palabras e-mail, email, telefonico o telefonica, permite el guardado.
 
