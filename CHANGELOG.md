@@ -1,5 +1,6 @@
-Cambios V.0.1.16 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.18 - ✨ Últimas mejoras implementadas:
 
+- Añadido campo [[FECHA_RECEPCION]] a la plantilla de Generar Informe.
 - 📊 Añadida estadisticas de calculo de dias por expediente. 
 - 📊 Añadido dashboard dentro de la ventana de estadisticas para el calculo promedio por cliente. Se calcula solo, sobre los expedientes cerrados para un calculo seguro.
 - 🤖 Añadida nueva columna en la ventana principal, mostrando la ultima actualizacion con prefijo para mostrar en que estado esta.
