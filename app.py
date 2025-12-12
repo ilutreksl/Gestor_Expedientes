@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.18"
+APP_VERSION = "v0.1.19"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -10513,7 +10513,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.botones_stats = {
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
-            "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos
+            "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos,
+            "📦 Artículos - Estadísticas": self.mostrar_estadisticas_articulos_menu
         }
         
         # 5. Creación de los botones del menú interno
@@ -10936,6 +10937,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         text_color="red").pack(pady=20)
             if conn:
                 conn.close()
+    
+    def mostrar_estadisticas_articulos_menu(self):
+        """Wrapper que delega la creación de la estadística de artículos
+        al módulo externo `lib.articulos_estadisticas`.
+        """
+        try:
+            from lib.articulos_estadisticas import mostrar_estadisticas_articulos
+            mostrar_estadisticas_articulos(self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la estadística de artículos: {e}")
             
 
     def limpiar_marco_stats(self):

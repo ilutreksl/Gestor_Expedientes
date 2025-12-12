@@ -1,5 +1,7 @@
-Cambios V.0.1.18 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.19 - ✨ Últimas mejoras implementadas:
 
+- 📊 Añadida nueva estadistica: Por articulo y estado de articulo. Permite filtrar por estado y por estado de expediente. Ademas se puede exportar a excel los resultados.
+      Permite ademas importar un excel, traido de otro programa para realizar comparativas de productos entre las ventas y los defectuosos.
 - Añadido campo [[FECHA_RECEPCION]] a la plantilla de Generar Informe.
 - 📊 Añadida estadisticas de calculo de dias por expediente. 
 - 📊 Añadido dashboard dentro de la ventana de estadisticas para el calculo promedio por cliente. Se calcula solo, sobre los expedientes cerrados para un calculo seguro.
