@@ -53,6 +53,9 @@ pip install pypdf
 
 # Notificaciones de Windows
 pip install win10toast
+
+# Graficos en excel
+pip install matplotlib
 ```
 
 ### **📋 LIBRERÍAS OPCIONALES (Mejoran funcionalidad)**

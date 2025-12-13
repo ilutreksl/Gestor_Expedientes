@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.19"
+APP_VERSION = "v0.1.20"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2723,188 +2723,188 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         self.filtro_año.configure(values=[año_actual])
                         self.filtro_año.set(año_actual)
                     
-            # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
-            # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
+                # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
+                # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
             
-            sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion FROM rma_maestro WHERE 1=1"
-            params = []
+                sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion FROM rma_maestro WHERE 1=1"
+                params = []
             
-            # Aplicar filtro de ESTADO
-            estado_filtro_actual = self.filtro_estado.get() # Usamos el valor que se ha configurado
-            if estado_filtro_actual and estado_filtro_actual != "Todos":
-                sql += " AND estado = ?"
-                params.append(estado_filtro_actual)
+                # Aplicar filtro de ESTADO
+                estado_filtro_actual = self.filtro_estado.get() # Usamos el valor que se ha configurado
+                if estado_filtro_actual and estado_filtro_actual != "Todos":
+                    sql += " AND estado = ?"
+                    params.append(estado_filtro_actual)
             
-            # Aplicar filtro de AÑO
-            año_filtro_actual = self.filtro_año.get() if hasattr(self, 'filtro_año') else año_filtro
-            if año_filtro_actual:
-                # Extraer los últimos 2 dígitos del año para el formato RMA (ej: 2025 -> "25")
-                try:
-                    año_corto = str(año_filtro_actual)[-2:]
-                    sql += " AND codigo_rma LIKE ?"
-                    params.append(f"RMA{año_corto}%")
-                except Exception as e:
-                    print(f"Error aplicando filtro de año: {e}")
+                # Aplicar filtro de AÑO
+                año_filtro_actual = self.filtro_año.get() if hasattr(self, 'filtro_año') else año_filtro
+                if año_filtro_actual:
+                    # Extraer los últimos 2 dígitos del año para el formato RMA (ej: 2025 -> "25")
+                    try:
+                        año_corto = str(año_filtro_actual)[-2:]
+                        sql += " AND codigo_rma LIKE ?"
+                        params.append(f"RMA{año_corto}%")
+                    except Exception as e:
+                        print(f"Error aplicando filtro de año: {e}")
                 
-            # Aplicar filtro de BÚSQUEDA por texto
-            if texto_busqueda:
-                busqueda_like = f"%{texto_busqueda}%"
-                sql += " AND (codigo_rma LIKE ? OR cliente LIKE ? OR numero_documento_cliente LIKE ?)"
-                params.append(busqueda_like)
-                params.append(busqueda_like)
-                params.append(busqueda_like) 
+                # Aplicar filtro de BÚSQUEDA por texto
+                if texto_busqueda:
+                    busqueda_like = f"%{texto_busqueda}%"
+                    sql += " AND (codigo_rma LIKE ? OR cliente LIKE ? OR numero_documento_cliente LIKE ?)"
+                    params.append(busqueda_like)
+                    params.append(busqueda_like)
+                    params.append(busqueda_like) 
 
-            # Ordenar y Ejecutar
-            sql += " ORDER BY id DESC"
-            try:
-                cursor.execute(sql, tuple(params))
-                registros = cursor.fetchall()
-            except Exception as e:
-                print(f"Error ejecutando query principal: {e}")
-                print(f"SQL: {sql}")
-                print(f"Params: {params}")
-                raise
-            
-            conn.close()
-
-            # 3. Dibujar la tabla de resultados (Encabezados y Registros)
-            
-            # ... (código para dibujar encabezados y la tabla de registros, sigue igual) ...
-            
-            # Encabezados
-            header_font = ctk.CTkFont(weight="bold")
-            # Configurar anchos de columnas para mejor distribución
-            self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
-            self.lista_rma_frame.grid_columnconfigure(1, weight=2, minsize=200)  # CLIENTE (reducido)
-            self.lista_rma_frame.grid_columnconfigure(2, weight=1, minsize=150)  # DOCUMENTO
-            self.lista_rma_frame.grid_columnconfigure(3, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
-            self.lista_rma_frame.grid_columnconfigure(4, weight=1, minsize=180)  # ESTADO (ampliado)
-            self.lista_rma_frame.grid_columnconfigure(5, weight=0, minsize=110)  # FECHA EMISIÓN
-            
-            ctk.CTkLabel(self.lista_rma_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="ÚLTIMA ACTIVIDAD", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w")
-            # Eliminada columna 'ACCIONES' para usar doble clic en la fila
-            if not registros:
-                ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
-                return
-
-            # Registros (filas) - usar fondo por defecto del tema (sin cebra)
-            colors = ("#FFFFFF", "#F3F4F6")  # variable no usada para cebra pero mantenida por compatibilidad
-            # Determinar color de fondo para botones (para hacer 'transparent-like')
-            btn_bg = None
-            if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
-                btn_bg = self.sidebar_frame.cget("fg_color")
-
-            # Altura de fila según compact_mode
-            row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
-
-            for i, reg in enumerate(registros):
-                rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion = reg
-                row = i + 1
-
-                # Calcular la última actividad usando la función auxiliar
-                ultima_actividad = obtener_ultima_actividad(
-                    fecha_emision, 
-                    fecha_autorizacion, 
-                    fecha_recepcion, 
-                    fecha_proceso, 
-                    fecha_gestion
-                )
-
-                # Mapeo de color según estado (coherente con dashboard)
-                color = self.get_color_por_estado(estado)
-
-                # Usar fondo por defecto del tema en lugar de cebra
-                bg = "transparent"
-                # Crear un frame por columna para alinear exactamente con los encabezados
-                # Reducimos la altura de cada fila usando height pequeño para que sean más finas.
-                # Height reducido para filas compactas
-                # Hacer que la columna de 'ACCIONES' tenga un fondo fijo (sin cebra)
-                actions_bg = None
+                # Ordenar y Ejecutar
+                sql += " ORDER BY id DESC"
                 try:
-                    if hasattr(self, 'lista_rma_frame') and hasattr(self.lista_rma_frame, 'cget'):
-                        actions_bg = self.lista_rma_frame.cget('fg_color')
-                except Exception:
+                    cursor.execute(sql, tuple(params))
+                    registros = cursor.fetchall()
+                except Exception as e:
+                    print(f"Error ejecutando query principal: {e}")
+                    print(f"SQL: {sql}")
+                    print(f"Params: {params}")
+                    raise
+            
+                conn.close()
+
+                # 3. Dibujar la tabla de resultados (Encabezados y Registros)
+            
+                # ... (código para dibujar encabezados y la tabla de registros, sigue igual) ...
+            
+                # Encabezados
+                header_font = ctk.CTkFont(weight="bold")
+                # Configurar anchos de columnas para mejor distribución
+                self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
+                self.lista_rma_frame.grid_columnconfigure(1, weight=2, minsize=200)  # CLIENTE (reducido)
+                self.lista_rma_frame.grid_columnconfigure(2, weight=1, minsize=150)  # DOCUMENTO
+                self.lista_rma_frame.grid_columnconfigure(3, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
+                self.lista_rma_frame.grid_columnconfigure(4, weight=1, minsize=180)  # ESTADO (ampliado)
+                self.lista_rma_frame.grid_columnconfigure(5, weight=0, minsize=110)  # FECHA EMISIÓN
+            
+                ctk.CTkLabel(self.lista_rma_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="ÚLTIMA ACTIVIDAD", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w")
+                # Eliminada columna 'ACCIONES' para usar doble clic en la fila
+                if not registros:
+                    ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
+                    return
+
+                # Registros (filas) - usar fondo por defecto del tema (sin cebra)
+                colors = ("#FFFFFF", "#F3F4F6")  # variable no usada para cebra pero mantenida por compatibilidad
+                # Determinar color de fondo para botones (para hacer 'transparent-like')
+                btn_bg = None
+                if hasattr(self, 'sidebar_frame') and hasattr(self.sidebar_frame, 'cget'):
+                    btn_bg = self.sidebar_frame.cget("fg_color")
+
+                # Altura de fila según compact_mode
+                row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
+
+                for i, reg in enumerate(registros):
+                    rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion = reg
+                    row = i + 1
+
+                    # Calcular la última actividad usando la función auxiliar
+                    ultima_actividad = obtener_ultima_actividad(
+                        fecha_emision, 
+                        fecha_autorizacion, 
+                        fecha_recepcion, 
+                        fecha_proceso, 
+                        fecha_gestion
+                    )
+
+                    # Mapeo de color según estado (coherente con dashboard)
+                    color = self.get_color_por_estado(estado)
+
+                    # Usar fondo por defecto del tema en lugar de cebra
+                    bg = "transparent"
+                    # Crear un frame por columna para alinear exactamente con los encabezados
+                    # Reducimos la altura de cada fila usando height pequeño para que sean más finas.
+                    # Height reducido para filas compactas
+                    # Hacer que la columna de 'ACCIONES' tenga un fondo fijo (sin cebra)
                     actions_bg = None
-                if actions_bg is None:
-                    actions_bg = colors[0]
+                    try:
+                        if hasattr(self, 'lista_rma_frame') and hasattr(self.lista_rma_frame, 'cget'):
+                            actions_bg = self.lista_rma_frame.cget('fg_color')
+                    except Exception:
+                        actions_bg = None
+                    if actions_bg is None:
+                        actions_bg = colors[0]
 
-                f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
 
-                # Colocar cada columna en la grilla principal para que se alinee con encabezados
-                f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
-                f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=0)
-                f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
-                f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
-                f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
-                f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
+                    # Colocar cada columna en la grilla principal para que se alinee con encabezados
+                    f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
+                    f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=0)
+                    f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
+                    f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
+                    f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
+                    f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
 
-                # Contenido de cada columna con padding muy reducido para filas más finas
-                # Crear labels y mantener referencias para enlazar eventos (doble click)
-                lbl0 = ctk.CTkLabel(f0, text=codigo_rma)
-                lbl0.pack(anchor="w", padx=4, pady=0)
-                lbl1 = ctk.CTkLabel(f1, text=cliente)
-                lbl1.pack(anchor="w", padx=4, pady=0)
-                lbl2 = ctk.CTkLabel(f2, text=numero_documento_cliente)
-                lbl2.pack(anchor="w", padx=4, pady=0)
-                lbl3 = ctk.CTkLabel(f3, text=ultima_actividad)
-                lbl3.pack(anchor="w", padx=4, pady=0)
-                lbl4 = ctk.CTkLabel(f4, text=estado, text_color=color)
-                lbl4.pack(anchor="w", padx=4, pady=0)
-                lbl5 = ctk.CTkLabel(f5, text=fecha_emision)
-                lbl5.pack(anchor="w", padx=4, pady=0)
-                # En lugar de botón de editar, abrimos el editor con doble clic en cualquier columna de la fila
+                    # Contenido de cada columna con padding muy reducido para filas más finas
+                    # Crear labels y mantener referencias para enlazar eventos (doble click)
+                    lbl0 = ctk.CTkLabel(f0, text=codigo_rma)
+                    lbl0.pack(anchor="w", padx=4, pady=0)
+                    lbl1 = ctk.CTkLabel(f1, text=cliente)
+                    lbl1.pack(anchor="w", padx=4, pady=0)
+                    lbl2 = ctk.CTkLabel(f2, text=numero_documento_cliente)
+                    lbl2.pack(anchor="w", padx=4, pady=0)
+                    lbl3 = ctk.CTkLabel(f3, text=ultima_actividad)
+                    lbl3.pack(anchor="w", padx=4, pady=0)
+                    lbl4 = ctk.CTkLabel(f4, text=estado, text_color=color)
+                    lbl4.pack(anchor="w", padx=4, pady=0)
+                    lbl5 = ctk.CTkLabel(f5, text=fecha_emision)
+                    lbl5.pack(anchor="w", padx=4, pady=0)
+                    # En lugar de botón de editar, abrimos el editor con doble clic en cualquier columna de la fila
 
-                # Hover efectos para toda la fila: aplicar a cada columna
-                cols = [f0, f1, f2, f3, f4, f5]
-                # Guardar el color original por columna para restaurarlo correctamente
-                originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
+                    # Hover efectos para toda la fila: aplicar a cada columna
+                    cols = [f0, f1, f2, f3, f4, f5]
+                    # Guardar el color original por columna para restaurarlo correctamente
+                    originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
 
-                def _on_enter(e, cols=cols):
+                    def _on_enter(e, cols=cols):
+                        for rf in cols:
+                            try:
+                                rf.configure(fg_color="transparent")
+                            except Exception:
+                                pass
+
+                    def _on_leave(e, cols=cols, originals=originals):
+                        for idx, rf in enumerate(cols):
+                            try:
+                                rf.configure(fg_color=originals[idx])
+                            except Exception:
+                                pass
+
+                    # También enlazamos los labels internos para asegurar que capturan el doble click
+                    inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4, lbl5]
+
                     for rf in cols:
+                        rf.bind("<Enter>", _on_enter)
+                        rf.bind("<Leave>", _on_leave)
+                        # Mostrar cursor 'hand2' para indicar que la fila es clicable
                         try:
-                            rf.configure(fg_color="transparent")
+                            rf.configure(cursor="hand2")
                         except Exception:
                             pass
 
-                def _on_leave(e, cols=cols, originals=originals):
-                    for idx, rf in enumerate(cols):
+                    # Enlazar eventos a labels (algunas platforms capturan el evento en el label)
+                    for w in inner_widgets:
                         try:
-                            rf.configure(fg_color=originals[idx])
+                            w.configure(cursor="hand2")
                         except Exception:
                             pass
-
-                # También enlazamos los labels internos para asegurar que capturan el doble click
-                inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4, lbl5]
-
-                for rf in cols:
-                    rf.bind("<Enter>", _on_enter)
-                    rf.bind("<Leave>", _on_leave)
-                    # Mostrar cursor 'hand2' para indicar que la fila es clicable
-                    try:
-                        rf.configure(cursor="hand2")
-                    except Exception:
-                        pass
-
-                # Enlazar eventos a labels (algunas platforms capturan el evento en el label)
-                for w in inner_widgets:
-                    try:
-                        w.configure(cursor="hand2")
-                    except Exception:
-                        pass
-                    try:
-                        w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
-                    except Exception:
-                        pass
+                        try:
+                            w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
+                        except Exception:
+                            pass
             
         except Exception as e:
             print(f"Error al cargar lista de RMA: {e}")
@@ -10514,7 +10514,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
             "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos,
-            "📦 Artículos - Estadísticas": self.mostrar_estadisticas_articulos_menu
+            "📦 Artículos - Estadísticas": self.mostrar_estadisticas_articulos_menu,
+            "📋 Resolución de Expedientes": self.mostrar_estadisticas_resolucion_menu
         }
         
         # 5. Creación de los botones del menú interno
@@ -10947,6 +10948,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
             mostrar_estadisticas_articulos(self)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la estadística de artículos: {e}")
+    
+    def mostrar_estadisticas_resolucion_menu(self):
+        """Wrapper que delega la creación de la estadística de resolución de expedientes
+        al módulo externo `lib.resolucion_estadisticas`.
+        """
+        try:
+            from lib.resolucion_estadisticas import mostrar_estadisticas_resolucion
+            mostrar_estadisticas_resolucion(self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la estadística de resolución: {e}")
             
 
     def limpiar_marco_stats(self):

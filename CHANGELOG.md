@@ -1,5 +1,6 @@
-Cambios V.0.1.19 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.20 - ✨ Últimas mejoras implementadas:
 
+- 📊 Añadida nueva estadistica: Por estado de expediente, rentabilidad y exportacion a excel.
 - 📊 Añadida nueva estadistica: Por articulo y estado de articulo. Permite filtrar por estado y por estado de expediente. Ademas se puede exportar a excel los resultados.
       Permite ademas importar un excel, traido de otro programa para realizar comparativas de productos entre las ventas y los defectuosos.
 - Añadido campo [[FECHA_RECEPCION]] a la plantilla de Generar Informe.
