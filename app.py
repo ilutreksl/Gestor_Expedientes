@@ -8563,7 +8563,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     messagebox.showerror("Error", f"No se pudo actualizar usuario: {e}")
 
             btn_frame = ctk.CTkFrame(f)
-            btn_frame.grid(row=4, column=0, columnspan=2, pady=(12,0))
+            btn_frame.grid(row=6, column=0, columnspan=2, pady=(12,0))
             ctk.CTkButton(btn_frame, text="Guardar", command=guardar_cambios).pack(side="left", padx=6)
             ctk.CTkButton(btn_frame, text="Cancelar", command=ed.destroy).pack(side="left", padx=6)
 
@@ -11923,7 +11923,6 @@ Versión de la App: {APP_VERSION}
             print(f"Error al abrir el cliente de correo: {e}")
             messagebox.showerror("Error de Email", "No se pudo abrir el cliente de correo por defecto. Por favor, envía un email manualmente a " + email_destino)
     
-
     # ==================================================================
     # 🧑‍💼 GESTIÓN INDEPENDIENTE DE CLIENTES
     # ==================================================================
