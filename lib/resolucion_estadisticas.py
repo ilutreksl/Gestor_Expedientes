@@ -167,18 +167,45 @@ def mostrar_estadisticas_resolucion(ventana_principal):
         fecha_desde = entry_fecha_desde.get().strip()
         fecha_hasta = entry_fecha_hasta.get().strip()
         
-        # Construir query
+        # Estados de artículos que indican fallo de producto
+        ESTADOS_FALLO = [
+            'NO FUNCIONA, ABONAR',
+            'NO FUNCIONA ; NO ABONAR',
+            'REPOSICION FALLO PRODUCTO',
+            'REPOSICION ; ABONAR',
+            'FALLO SOLDADURA ; ABONAR',
+            'FALLO SOLDADURA ; NO ABONAR',
+            'FALLO MODULO ; ABONAR'
+        ]
+        
+        # Construir query con detección de fallos
+        # Primero detectamos por expediente si tiene fallos, luego agrupamos
         query = """
             SELECT 
-                m.resultado_expediente,
-                COUNT(DISTINCT m.id) as num_expedientes,
-                COUNT(d.id) as num_articulos,
-                SUM(d.cantidad_entregada * d.precio_unitario) as coste_total
-            FROM rma_maestro m
-            LEFT JOIN rma_detalles d ON m.id = d.rma_id
-            WHERE (m.estado = 'Completado' OR m.fecha_gestion IS NOT NULL)
-            AND m.resultado_expediente IS NOT NULL
-            AND m.resultado_expediente != ''
+                exp.resultado_expediente,
+                COUNT(*) as num_expedientes,
+                SUM(exp.num_articulos) as num_articulos,
+                SUM(exp.coste_total) as coste_total,
+                exp.tiene_fallo
+            FROM (
+                SELECT 
+                    m.resultado_expediente,
+                    m.id,
+                    COUNT(d.id) as num_articulos,
+                    SUM(d.cantidad_entregada * d.precio_unitario) as coste_total,
+                    MAX(CASE 
+                        WHEN d.estado_producto IN ('NO FUNCIONA, ABONAR', 'NO FUNCIONA ; NO ABONAR', 
+                                          'REPOSICION FALLO PRODUCTO', 'REPOSICION ; ABONAR',
+                                          'FALLO SOLDADURA ; ABONAR', 'FALLO SOLDADURA ; NO ABONAR',
+                                          'FALLO MODULO ; ABONAR')
+                        THEN 1 
+                        ELSE 0 
+                    END) as tiene_fallo
+                FROM rma_maestro m
+                LEFT JOIN rma_detalles d ON m.id = d.rma_id
+                WHERE (m.estado = 'Completado' OR m.fecha_gestion IS NOT NULL)
+                AND m.resultado_expediente IS NOT NULL
+                AND m.resultado_expediente != ''
         """
         
         params = []
@@ -210,8 +237,13 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 messagebox.showwarning("Fecha inválida", "El formato de 'Fecha Hasta' debe ser DD/MM/AAAA")
                 return
         
-        query += " GROUP BY m.resultado_expediente"
-        query += " ORDER BY num_expedientes DESC"
+        # Cerrar subconsulta y agrupar por resultado y tiene_fallo
+        query += """
+                GROUP BY m.id, m.resultado_expediente
+            ) exp
+            GROUP BY exp.resultado_expediente, exp.tiene_fallo
+            ORDER BY num_expedientes DESC
+        """
         
         # Ejecutar query
         try:
@@ -235,15 +267,22 @@ def mostrar_estadisticas_resolucion(ventana_principal):
             total_coste = sum(float(reg[3]) if reg[3] else 0.0 for reg in registros)
             
             # Calcular subtotales por categoría
-            subtotales = {'abonos': 0, 'no_abonos': 0, 'reposiciones': 0, 'otros': 0}
-            subtotales_coste = {'abonos': 0.0, 'no_abonos': 0.0, 'reposiciones': 0.0, 'otros': 0.0}
+            subtotales = {'abonos_fallo': 0, 'abonos': 0, 'no_abonos': 0, 'reposiciones': 0, 'otros': 0}
+            subtotales_coste = {'abonos_fallo': 0.0, 'abonos': 0.0, 'no_abonos': 0.0, 'reposiciones': 0.0, 'otros': 0.0}
             
             for reg in registros:
                 resultado = str(reg[0]).upper() if reg[0] else ""
-                coste = float(reg[3]) if reg[3] else 0.0
                 num_exp = int(reg[1]) if reg[1] else 0
+                num_art = int(reg[2]) if reg[2] else 0
+                coste = float(reg[3]) if reg[3] else 0.0
+                tiene_fallo = int(reg[4]) if len(reg) > 4 and reg[4] else 0
                 
-                if "ABONAR" in resultado and "NO ABONAR" not in resultado:
+                # Clasificar según resultado y si tiene artículos con fallo
+                # Si tiene fallo Y es un abono, va a "abonos_fallo"
+                if tiene_fallo and "ABONAR" in resultado and "NO ABONAR" not in resultado:
+                    subtotales['abonos_fallo'] += num_exp
+                    subtotales_coste['abonos_fallo'] += coste
+                elif "ABONAR" in resultado and "NO ABONAR" not in resultado:
                     subtotales['abonos'] += num_exp
                     subtotales_coste['abonos'] += coste
                 elif "NO ABONAR" in resultado:
@@ -258,7 +297,9 @@ def mostrar_estadisticas_resolucion(ventana_principal):
             
             # Calcular KPIs
             ticket_promedio = total_coste / total_expedientes if total_expedientes > 0 else 0
-            porcentaje_abonos = (subtotales['abonos'] / total_expedientes * 100) if total_expedientes > 0 else 0
+            # Porcentaje de abonos incluye ambos tipos: por fallo y en buen estado
+            total_abonos = subtotales['abonos_fallo'] + subtotales['abonos']
+            porcentaje_abonos = (total_abonos / total_expedientes * 100) if total_expedientes > 0 else 0
             coste_por_articulo = total_coste / total_articulos if total_articulos > 0 else 0
             
             # Obtener cliente con más incidencias
@@ -334,7 +375,11 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 # Datos individuales
                 row_idx = 1
                 for reg in registros_a_mostrar:
-                    resultado, num_exp, num_art, coste = reg
+                    resultado = reg[0]
+                    num_exp = reg[1]
+                    num_art = reg[2]
+                    coste = reg[3]
+                    tiene_fallo = int(reg[4]) if len(reg) > 4 and reg[4] else 0
                     
                     # Normalizar valores
                     try:
@@ -349,20 +394,34 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                     # Calcular porcentaje
                     porcentaje = (num_exp_int / total_expedientes * 100) if total_expedientes > 0 else 0
                     
-                    # Determinar color según resultado
-                    if "ABONAR" in str(resultado).upper() and "NO ABONAR" not in str(resultado).upper():
-                        color_resultado = "#ef4444"
-                    elif "NO ABONAR" in str(resultado).upper():
+                    # Determinar color y texto según resultado
+                    resultado_upper = str(resultado).upper() if resultado else ""
+                    
+                    # Modificar el texto según si tiene fallo o no
+                    texto_resultado = str(resultado) if resultado else "SIN ESPECIFICAR"
+                    
+                    # Primero verificar si tiene artículos con fallo Y es un abono (rojo oscuro)
+                    if tiene_fallo and "ABONAR" in resultado_upper and "NO ABONAR" not in resultado_upper:
+                        color_resultado = "#dc2626"  # Rojo oscuro para abonos con fallo
+                        texto_resultado = f"{resultado} (FALLO)"
+                    elif "ABONAR" in resultado_upper and "NO ABONAR" not in resultado_upper:
+                        color_resultado = "#f87171"  # Rojo claro para abonos OK
+                        texto_resultado = f"{resultado} (OK)"
+                    elif "NO ABONAR" in resultado_upper:
                         color_resultado = "#22c55e"
-                    elif "REPOSICION" in str(resultado).upper() or "REPUESTO" in str(resultado).upper():
+                    elif "REPOSICION" in resultado_upper or "REPUESTO" in resultado_upper:
                         color_resultado = "#f97316"
+                        if tiene_fallo:
+                            texto_resultado = f"{resultado} (FALLO)"
+                        else:
+                            texto_resultado = f"{resultado} (OK)"
                     else:
                         color_resultado = "#6b7280"
                     
                     # Columnas
                     ctk.CTkLabel(
                         scroll_frame,
-                        text=str(resultado) if resultado else "SIN ESPECIFICAR",
+                        text=texto_resultado,
                         text_color=color_resultado,
                         font=ctk.CTkFont(weight="bold", size=10)
                     ).grid(row=row_idx, column=0, padx=15, pady=3, sticky="w")
@@ -410,20 +469,43 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 sizes = []
                 colors = []
                 
+                if subtotales['abonos_fallo'] > 0:
+                    labels.append(f"Abonos Fallo\n{subtotales['abonos_fallo']} exp.")
+                    sizes.append(subtotales['abonos_fallo'])
+                    colors.append('#dc2626')  # Rojo más oscuro
+                
                 if subtotales['abonos'] > 0:
-                    labels.append(f"Abonos\n{subtotales['abonos']} exp.")
+                    labels.append(f"Abonos OK\n{subtotales['abonos']} exp.")
                     sizes.append(subtotales['abonos'])
-                    colors.append('#ef4444')
+                    colors.append('#f87171')  # Rojo más claro
                 
                 if subtotales['no_abonos'] > 0:
                     labels.append(f"No Abonos\n{subtotales['no_abonos']} exp.")
                     sizes.append(subtotales['no_abonos'])
                     colors.append('#22c55e')
                 
-                if subtotales['reposiciones'] > 0:
-                    labels.append(f"Reposiciones\n{subtotales['reposiciones']} exp.")
-                    sizes.append(subtotales['reposiciones'])
+                # Separar reposiciones por fallo y OK
+                reposiciones_fallo = 0
+                reposiciones_ok = 0
+                for reg in registros:
+                    resultado_upper = str(reg[0]).upper() if reg[0] else ""
+                    tiene_fallo = int(reg[4]) if len(reg) > 4 and reg[4] else 0
+                    num_exp = int(reg[1]) if reg[1] else 0
+                    if "REPOSICION" in resultado_upper or "REPUESTO" in resultado_upper:
+                        if tiene_fallo:
+                            reposiciones_fallo += num_exp
+                        else:
+                            reposiciones_ok += num_exp
+                
+                if reposiciones_fallo > 0:
+                    labels.append(f"Reposiciones Fallo\n{reposiciones_fallo} exp.")
+                    sizes.append(reposiciones_fallo)
                     colors.append('#f97316')
+                
+                if reposiciones_ok > 0:
+                    labels.append(f"Reposiciones OK\n{reposiciones_ok} exp.")
+                    sizes.append(reposiciones_ok)
+                    colors.append('#fb923c')
                 
                 if subtotales['otros'] > 0:
                     labels.append(f"Otros\n{subtotales['otros']} exp.")
@@ -513,15 +595,20 @@ def mostrar_estadisticas_resolucion(ventana_principal):
             total_coste = sum(float(reg[3]) if reg[3] else 0.0 for reg in registros)
             
             # Calcular subtotales por categoría
-            subtotales = {'abonos': 0, 'no_abonos': 0, 'reposiciones': 0, 'otros': 0}
-            subtotales_coste = {'abonos': 0.0, 'no_abonos': 0.0, 'reposiciones': 0.0, 'otros': 0.0}
+            subtotales = {'abonos_fallo': 0, 'abonos': 0, 'no_abonos': 0, 'reposiciones': 0, 'otros': 0}
+            subtotales_coste = {'abonos_fallo': 0.0, 'abonos': 0.0, 'no_abonos': 0.0, 'reposiciones': 0.0, 'otros': 0.0}
             
             for reg in registros:
                 resultado = str(reg[0]).upper() if reg[0] else ""
-                coste = float(reg[3]) if reg[3] else 0.0
                 num_exp = int(reg[1]) if reg[1] else 0
+                coste = float(reg[3]) if reg[3] else 0.0
+                tiene_fallo = int(reg[4]) if len(reg) > 4 and reg[4] else 0
                 
-                if "ABONAR" in resultado and "NO ABONAR" not in resultado:
+                # Clasificar según resultado y si tiene artículos con fallo
+                if tiene_fallo and "ABONAR" in resultado and "NO ABONAR" not in resultado:
+                    subtotales['abonos_fallo'] += num_exp
+                    subtotales_coste['abonos_fallo'] += coste
+                elif "ABONAR" in resultado and "NO ABONAR" not in resultado:
                     subtotales['abonos'] += num_exp
                     subtotales_coste['abonos'] += coste
                 elif "NO ABONAR" in resultado:
@@ -537,7 +624,11 @@ def mostrar_estadisticas_resolucion(ventana_principal):
             # Preparar datos para DataFrame
             datos_export = []
             for reg in registros:
-                resultado, num_exp, num_art, coste = reg
+                resultado = reg[0]
+                num_exp = reg[1]
+                num_art = reg[2]
+                coste = reg[3]
+                tiene_fallo = int(reg[4]) if len(reg) > 4 and reg[4] else 0
                 
                 try:
                     num_exp_int = int(num_exp) if num_exp else 0
@@ -550,8 +641,22 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 
                 porcentaje = (num_exp_int / total_expedientes * 100) if total_expedientes > 0 else 0
                 
+                # Determinar texto del resultado
+                resultado_texto = str(resultado) if resultado else "SIN ESPECIFICAR"
+                resultado_upper = resultado_texto.upper()
+                
+                if tiene_fallo and "ABONAR" in resultado_upper and "NO ABONAR" not in resultado_upper:
+                    resultado_texto = f"{resultado} (FALLO)"
+                elif "ABONAR" in resultado_upper and "NO ABONAR" not in resultado_upper:
+                    resultado_texto = f"{resultado} (OK)"
+                elif ("REPOSICION" in resultado_upper or "REPUESTO" in resultado_upper):
+                    if tiene_fallo:
+                        resultado_texto = f"{resultado} (FALLO)"
+                    else:
+                        resultado_texto = f"{resultado} (OK)"
+                
                 datos_export.append({
-                    'Resultado': str(resultado) if resultado else "SIN ESPECIFICAR",
+                    'Resultado': resultado_texto,
                     'Nº Expedientes': num_exp_int,
                     'Nº Artículos': num_art_int,
                     'Coste Total (€)': coste_float,
@@ -559,9 +664,18 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 })
             
             # Añadir subtotales
+            if subtotales['abonos_fallo'] > 0:
+                datos_export.append({
+                    'Resultado': '--- SUBTOTAL ABONOS FALLO ---',
+                    'Nº Expedientes': subtotales['abonos_fallo'],
+                    'Nº Artículos': '',
+                    'Coste Total (€)': subtotales_coste['abonos_fallo'],
+                    '% Total': round((subtotales['abonos_fallo'] / total_expedientes * 100), 2) if total_expedientes > 0 else 0
+                })
+            
             if subtotales['abonos'] > 0:
                 datos_export.append({
-                    'Resultado': '--- SUBTOTAL ABONOS ---',
+                    'Resultado': '--- SUBTOTAL ABONOS OK ---',
                     'Nº Expedientes': subtotales['abonos'],
                     'Nº Artículos': '',
                     'Coste Total (€)': subtotales_coste['abonos'],
@@ -618,7 +732,9 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                 
                 # Calcular KPIs
                 ticket_promedio = total_coste / total_expedientes if total_expedientes > 0 else 0
-                porcentaje_abonos = (subtotales['abonos'] / total_expedientes * 100) if total_expedientes > 0 else 0
+                # Porcentaje de abonos incluye ambos tipos: por fallo y en buen estado
+                total_abonos_excel = subtotales['abonos_fallo'] + subtotales['abonos']
+                porcentaje_abonos = (total_abonos_excel / total_expedientes * 100) if total_expedientes > 0 else 0
                 coste_por_articulo = total_coste / total_articulos if total_articulos > 0 else 0
                 
                 # Obtener cliente con más incidencias para Excel
