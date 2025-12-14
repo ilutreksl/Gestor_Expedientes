@@ -89,16 +89,16 @@ def comprimir_video_inteligente(filepath_original, callback_progreso=None):
         callback_progreso: Función callback(mensaje: str) para reportar progreso
     
     Returns: 
-        ffmpeg_path = obtener_ruta_ffmpeg()
-        if not ffmpeg_pathaño_original_mb, tamaño_final_mb) 
-        o (None, 0, 0) si hay error
+        (filepath_comprimido, tamaño_original_mb, tamaño_final_mb) 
+        o (filepath_original, tamaño_original_mb, tamaño_original_mb) si no se comprime/hay error
     """
     try:
         if callback_progreso:
             callback_progreso("🔍 Analizando video...")
         
         # Verificar que FFmpeg esté disponible
-        if not verificar_ffmpeg():
+        ffmpeg_path = obtener_ruta_ffmpeg()
+        if not ffmpeg_path:
             if callback_progreso:
                 callback_progreso("⚠️ FFmpeg no disponible - el video se subirá sin comprimir")
             tamaño_original = os.path.getsize(filepath_original)
@@ -118,8 +118,8 @@ def comprimir_video_inteligente(filepath_original, callback_progreso=None):
         if callback_progreso:
             callback_progreso(f"📏 Video {tamaño_original_mb:.1f}MB - iniciando compresión...")
         
-        # Obtener duración para calcular progreso, ffmpeg_path
-        duracion = obtener_duracion_video(filepath_original)
+        # Obtener duración para calcular progreso
+        duracion = obtener_duracion_video(filepath_original, ffmpeg_path)
         
         # Determinar parámetros de compresión según tamaño
         if tamaño_original > 50 * 1024 * 1024:  # > 50MB
@@ -196,14 +196,15 @@ def comprimir_video_inteligente(filepath_original, callback_progreso=None):
         proceso.wait()
         
         if proceso.returncode != 0:
-            # Error en FFmpeg
+            # Error en FFmpeg - usar archivo original
             if callback_progreso:
-                callback_progreso("❌ Error al comprimir video")
+                callback_progreso("⚠️ Error al comprimir - usando video original")
             try:
                 os.unlink(temp_path)
             except:
                 pass
-            return None, 0, 0
+            # Devolver el archivo original
+            return filepath_original, tamaño_original_mb, tamaño_original_mb
         
         # Verificar resultado
         tamaño_final = os.path.getsize(temp_path)
@@ -228,5 +229,11 @@ def comprimir_video_inteligente(filepath_original, callback_progreso=None):
         
     except Exception as e:
         if callback_progreso:
-            callback_progreso(f"❌ Error en compresión: {e}")
-        return None, 0, 0
+            callback_progreso(f"⚠️ Error en compresión - usando video original")
+        # En caso de error, devolver el archivo original
+        try:
+            tamaño_original = os.path.getsize(filepath_original)
+            tamaño_original_mb = tamaño_original / (1024 * 1024)
+            return filepath_original, tamaño_original_mb, tamaño_original_mb
+        except:
+            return filepath_original, 0, 0

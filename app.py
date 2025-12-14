@@ -7330,23 +7330,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 
                 # Comprimir video
                 resultado = comprimir_video_inteligente(filepath, callback_progreso=actualizar_progreso_video)
-                archivo_comprimido, tamaño_original, tamaño_final = resultado
                 
-                if archivo_comprimido and archivo_comprimido != filepath:
-                    archivo_a_subir = archivo_comprimido
-                    archivo_temporal = archivo_comprimido
+                # Verificar que el resultado sea válido
+                if resultado and len(resultado) == 3:
+                    archivo_comprimido, tamaño_original, tamaño_final = resultado
                     
-                    # Cambiar extensión a .mp4 si se comprimió
-                    nombre_base = os.path.splitext(nombre_archivo)[0]
-                    nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
-                    
-                    # Mostrar resultado final
-                    if ventana_progreso:
-                        barra_progreso.set(1.0)
-                        if tamaño_original > tamaño_final:
-                            actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
-                        else:
-                            actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
+                    if archivo_comprimido and archivo_comprimido != filepath:
+                        archivo_a_subir = archivo_comprimido
+                        archivo_temporal = archivo_comprimido
+                        
+                        # Cambiar extensión a .mp4 si se comprimió
+                        nombre_base = os.path.splitext(nombre_archivo)[0]
+                        nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
+                        
+                        # Mostrar resultado final
+                        if ventana_progreso:
+                            barra_progreso.set(1.0)
+                            if tamaño_original > tamaño_final:
+                                actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                            else:
+                                actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
                 
                 # Cerrar ventana individual después de un tiempo
                 if ventana_progreso:
@@ -7355,8 +7358,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
             except Exception as e:
                 # Si falla la compresión, usar archivo original
                 print(f"Error en compresión de video: {e}")
-                if ventana_progreso:
-                    ventana_progreso.destroy()
+                if 'ventana_progreso' in locals() and ventana_progreso:
+                    try:
+                        ventana_progreso.destroy()
+                    except:
+                        pass
         
         # ===== SUBIDA A DROPBOX =====
         # Crear la carpeta si no existe
@@ -7503,30 +7509,36 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 
                 # Comprimir video
                 resultado = comprimir_video_inteligente(filepath, callback_progreso=actualizar_progreso_video)
-                archivo_comprimido, tamaño_original, tamaño_final = resultado
                 
-                if archivo_comprimido and archivo_comprimido != filepath:
-                    archivo_a_subir = archivo_comprimido
-                    archivo_temporal = archivo_comprimido
+                # Verificar que el resultado sea válido
+                if resultado and len(resultado) == 3:
+                    archivo_comprimido, tamaño_original, tamaño_final = resultado
                     
-                    # Cambiar extensión a .mp4 si se comprimió
-                    nombre_base = os.path.splitext(nombre_archivo)[0]
-                    nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
-                    
-                    # Mostrar resultado final
-                    barra_progreso.set(1.0)
-                    if tamaño_original > tamaño_final:
-                        actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
-                    else:
-                        actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
+                    if archivo_comprimido and archivo_comprimido != filepath:
+                        archivo_a_subir = archivo_comprimido
+                        archivo_temporal = archivo_comprimido
+                        
+                        # Cambiar extensión a .mp4 si se comprimió
+                        nombre_base = os.path.splitext(nombre_archivo)[0]
+                        nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
+                        
+                        # Mostrar resultado final
+                        barra_progreso.set(1.0)
+                        if tamaño_original > tamaño_final:
+                            actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                        else:
+                            actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
                 
                 # Cerrar ventana después de un tiempo
                 ventana_progreso.after(2000, lambda: ventana_progreso.destroy())
                 
             except Exception as e:
                 print(f"Error en compresión de video: {e}")
-                if 'ventana_progreso' in locals():
-                    ventana_progreso.destroy()
+                if 'ventana_progreso' in locals() and ventana_progreso:
+                    try:
+                        ventana_progreso.destroy()
+                    except:
+                        pass
         
         # ===== COPIA AL ALMACENAMIENTO LOCAL =====
         try:
