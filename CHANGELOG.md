@@ -1,5 +1,6 @@
 Cambios V.0.1.23 - ✨ Últimas mejoras implementadas:
 
+- Visualizacion en los slash sobre que BD se usa y si se conecta a Dropbox.
 - 📦 Mejorada la ficha de estado de producto. Permite filtrar por estado y por periodo de fecha. Añadido boton de imprimir.   Crea un HTML para la previsualizacion.
 - 📦 Añadido boton de articulo dentro de la ficha de expedientes. Abre la ventana de los estados del articulo.
 - 👤 Añadido boton en la ficha de expedientes, para acceder a la ficha de cliente.

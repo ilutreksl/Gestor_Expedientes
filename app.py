@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.23"
+APP_VERSION = "v0.1.24"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -14669,7 +14669,7 @@ if __name__ == "__main__":
         label = tk.Label(frame, text="Iniciando Gestor RMA - Expedientes", font=("Segoe UI", 12, "bold"), bg="white")
         label.pack(pady=(20, 6))
 
-        sub = tk.Label(frame, text="Preparando la aplicación...", font=("Segoe UI", 10), bg="white")
+        sub = tk.Label(frame, text="Preparando la aplicación...", font=("Segoe UI", 10), bg="white", wraplength=380, justify="left")
         sub.pack(pady=(0, 10))
 
         try:
@@ -14679,17 +14679,73 @@ if __name__ == "__main__":
         except Exception:
             pb = None
 
+        # Verificar tipo de BD
+        import time
+        if turso_url and turso_token:
+            try:
+                sub.config(text="🌩️ Usando base de datos Turso cloud")
+                splash.update()
+            except Exception:
+                pass
+            time.sleep(0.3)
+        else:
+            try:
+                sub.config(text="💾 Usando base de datos local SQLite")
+                splash.update()
+            except Exception:
+                pass
+            time.sleep(0.3)
+        
+        # Verificar conexión a Dropbox
+        try:
+            sub.config(text="Verificando conexión a Dropbox...")
+            splash.update()
+        except Exception:
+            pass
+        
+        dropbox_connected = False
+        try:
+            if DROPBOX_APP_KEY and DROPBOX_APP_SECRET:
+                if DROPBOX_REFRESH_TOKEN:
+                    dbx_test = dropbox.Dropbox(
+                        oauth2_refresh_token=DROPBOX_REFRESH_TOKEN,
+                        app_key=DROPBOX_APP_KEY,
+                        app_secret=DROPBOX_APP_SECRET
+                    )
+                    dbx_test.users_get_current_account()
+                    dropbox_connected = True
+                elif DROPBOX_ACCESS_TOKEN and DROPBOX_ACCESS_TOKEN != "tu_access_token_aqui":
+                    dbx_test = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+                    dbx_test.users_get_current_account()
+                    dropbox_connected = True
+        except Exception:
+            pass
+        
+        if dropbox_connected:
+            try:
+                sub.config(text="☁️ Dropbox conectado correctamente")
+                splash.update()
+            except Exception:
+                pass
+            time.sleep(0.3)
+        else:
+            try:
+                sub.config(text="📁 Dropbox no disponible - Usando almacenamiento local")
+                splash.update()
+            except Exception:
+                pass
+            time.sleep(0.3)
+        
         # Iniciar optimización en un hilo daemon
         t = threading.Thread(target=optimize_database, daemon=True)
         t.start()
 
         # Mostrar mensajes por etapas mientras la optimización corre
-        import time
         try:
             while t.is_alive():
                 # Mostrar etapa de optimización
                 try:
-                    sub.config(text="Optimizando la base de datos...")
+                    sub.config(text="🔧 Optimizando la base de datos...")
                 except Exception:
                     pass
                 try:
@@ -14700,7 +14756,7 @@ if __name__ == "__main__":
 
             # Una vez terminado, indicar carga de la interfaz
             try:
-                sub.config(text="Cargando interfaz...")
+                sub.config(text="✨ Cargando interfaz...")
                 splash.update()
             except Exception:
                 pass

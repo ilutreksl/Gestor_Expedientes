@@ -347,8 +347,6 @@ def generar_vista_previa_impresion(parent, referencia, datos, suma_cant, suma_to
         import os
         from datetime import datetime
         
-        print(f"Generando vista previa para {referencia} con {len(datos)} filas")
-        
         # Generar HTML profesional
         html_content = f"""
     <!DOCTYPE html>
@@ -542,8 +540,6 @@ def generar_vista_previa_impresion(parent, referencia, datos, suma_cant, suma_to
             f.write(html_content)
             temp_file = f.name
         
-        print(f"Archivo temporal creado: {temp_file}")
-        
         # Abrir en navegador por defecto (no en editor de código)
         import sys
         if sys.platform == 'win32':
@@ -552,7 +548,6 @@ def generar_vista_previa_impresion(parent, referencia, datos, suma_cant, suma_to
         else:
             # En otros sistemas, usar webbrowser
             webbrowser.open('file://' + os.path.realpath(temp_file))
-        print("Vista previa abierta en navegador")
         
     except Exception as e:
         print(f"Error generando vista previa: {e}")
