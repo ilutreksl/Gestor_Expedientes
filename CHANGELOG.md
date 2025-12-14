@@ -1,5 +1,7 @@
-Cambios V.0.1.20 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.21 - ✨ Últimas mejoras implementadas:
 
+- Añadido boton en la ficha de expedientes, para acceder a la ficha de cliente.
+- Mejorada la ficha de cliente.
 - 📊 Añadida nueva estadistica: Por estado de expediente, rentabilidad y exportacion a excel.
 - 📊 Añadida nueva estadistica: Por articulo y estado de articulo. Permite filtrar por estado y por estado de expediente. Ademas se puede exportar a excel los resultados.
       Permite ademas importar un excel, traido de otro programa para realizar comparativas de productos entre las ventas y los defectuosos.

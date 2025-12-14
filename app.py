@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.20"
+APP_VERSION = "v0.1.21"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5188,7 +5188,44 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         # 💡 CREAR UN FRAME PARA AGRUPAR LOS BOTONES DE ACCIÓN (Fila 3)
         btn_action_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        btn_action_frame.grid(row=3, column=0, padx=20, pady=20, sticky="w")
+        btn_action_frame.grid(row=3, column=0, padx=20, pady=20, sticky="ew")
+        
+        # Botón de cliente (lado derecho, siempre visible)
+        def abrir_ficha_cliente_desde_expediente():
+            # Obtener nombre del cliente desde el campo
+            if hasattr(self, 'entry_Cliente'):
+                nombre_cliente = self.entry_Cliente.get().strip()
+                if nombre_cliente:
+                    # Buscar cliente_id por nombre
+                    try:
+                        conn, cursor = self.master.conectar_db()
+                        if conn:
+                            cursor.execute("SELECT cliente_id FROM clientes WHERE nombre = ?", (nombre_cliente,))
+                            resultado = cursor.fetchone()
+                            conn.close()
+                            
+                            if resultado:
+                                self.abrir_ficha_cliente(resultado[0])
+                            else:
+                                messagebox.showinfo("Cliente no encontrado", 
+                                                  f"El cliente '{nombre_cliente}' no está registrado en el sistema.\n\n"
+                                                  "Puede usar el botón 'Migrar desde RMAs' en la ventana de clientes.")
+                    except Exception as e:
+                        print(f"Error buscando cliente: {e}")
+                        messagebox.showerror("Error", "No se pudo buscar el cliente")
+                else:
+                    messagebox.showwarning("Sin cliente", "Primero debe especificar un cliente en el expediente")
+        
+        self.btn_ver_cliente = ctk.CTkButton(
+            btn_action_frame,
+            text="👤",
+            command=abrir_ficha_cliente_desde_expediente,
+            width=35,
+            height=35,
+            font=ctk.CTkFont(size=16)
+        )
+        self.btn_ver_cliente.pack(side="right", padx=(10, 0))
+        Tooltip(self.btn_ver_cliente, "Ver ficha del cliente")
         
         # 1. Botón de Generar Informe (Solo en modo edición)
         if es_edicion:
@@ -12020,14 +12057,14 @@ Versión de la App: {APP_VERSION}
             # Consulta con estadísticas reales
             query = """
                 SELECT c.cliente_id, c.nombre, c.tipo_cliente, c.activo, c.fecha_registro,
-                       COALESCE(COUNT(r.cliente), 0) as total_rmas,
+                       COALESCE(COUNT(DISTINCT r.id), 0) as total_rmas,
                        CASE 
-                           WHEN COUNT(r.cliente) > 0 THEN 
-                               ROUND(CAST(SUM(CASE WHEN r.resultado_expediente = 'ABONAR' THEN 1 ELSE 0 END) AS FLOAT) * 100.0 / COUNT(r.cliente), 1)
+                           WHEN COUNT(DISTINCT r.id) > 0 THEN 
+                               ROUND(CAST(SUM(CASE WHEN r.resultado_expediente = 'ABONAR' THEN 1 ELSE 0 END) AS FLOAT) * 100.0 / COUNT(DISTINCT r.id), 1)
                            ELSE 0 
                        END as tasa_exito,
                        MAX(r.fecha_emision) as ultimo_rma,
-                       COALESCE(COUNT(con.contacto_id), 0) as total_contactos
+                       COALESCE(COUNT(DISTINCT con.contacto_id), 0) as total_contactos
                 FROM clientes c
                 LEFT JOIN rma_maestro r ON c.nombre = r.cliente
                 LEFT JOIN contactos_cliente con ON c.cliente_id = con.cliente_id
@@ -12082,9 +12119,8 @@ Versión de la App: {APP_VERSION}
         
         # Configurar grid para el layout horizontal
         cliente_frame.grid_columnconfigure(0, weight=1)  # Info del cliente (expandible)
-        cliente_frame.grid_columnconfigure(1, weight=0)  # Botones (tamaño fijo)
         
-        # Frame izquierdo: Información del cliente
+        # Información del cliente
         info_frame = ctk.CTkFrame(cliente_frame, fg_color="transparent")
         info_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
         info_frame.grid_columnconfigure(0, weight=1)
@@ -12093,21 +12129,20 @@ Versión de la App: {APP_VERSION}
         header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
         header_frame.grid(row=0, column=0, sticky="ew")
         
-        # Nombre del cliente
+        # Nombre del cliente (con doble clic para abrir)
         nombre_label = ctk.CTkLabel(header_frame, text=f"🧑‍💼 {nombre}", 
-                                  font=ctk.CTkFont(size=13, weight="bold"))
+                                  font=ctk.CTkFont(size=13, weight="bold"),
+                                  cursor="hand2")
         nombre_label.pack(side="left")
+        nombre_label.bind("<Double-Button-1>", lambda e: self.abrir_ficha_cliente(cliente_id))
+        Tooltip(nombre_label, "Doble clic para abrir la ficha del cliente")
         
-        # Estado y tipo a la derecha
+        # Estado a la derecha
         estado_color = "green" if activo else "red"
         estado_texto = "🟢" if activo else "🔴"
         estado_label = ctk.CTkLabel(header_frame, text=estado_texto, 
                                   font=ctk.CTkFont(size=10))
         estado_label.pack(side="right", padx=(5,0))
-        
-        tipo_label = ctk.CTkLabel(header_frame, text=f"🏷️ {tipo}", 
-                                font=ctk.CTkFont(size=10), text_color="blue")
-        tipo_label.pack(side="right", padx=(10,5))
         
         # Línea inferior: Estadísticas compactas
         stats_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
@@ -12130,31 +12165,6 @@ Versión de la App: {APP_VERSION}
         stats_label = ctk.CTkLabel(stats_frame, text=stats_text, 
                                  font=ctk.CTkFont(size=9), text_color="gray")
         stats_label.pack(side="left")
-        
-        # Frame derecho: Botones de acción horizontales
-        botones_frame = ctk.CTkFrame(cliente_frame, fg_color="transparent")
-        botones_frame.grid(row=0, column=1, sticky="e", padx=(5,10), pady=5)
-        
-        # Botones más pequeños y compactos con tooltips
-        btn_ver = ctk.CTkButton(botones_frame, text="👁️", 
-                              command=lambda: self.abrir_ficha_cliente(cliente_id),
-                              width=30, height=25, font=ctk.CTkFont(size=12))
-        btn_ver.pack(side="left", padx=2)
-        Tooltip(btn_ver, "Ver ficha completa del cliente")
-        
-        btn_editar = ctk.CTkButton(botones_frame, text="✏️", 
-                                 command=lambda: self.editar_cliente(cliente_id),
-                                 width=30, height=25, font=ctk.CTkFont(size=12))
-        btn_editar.pack(side="left", padx=2)
-        Tooltip(btn_editar, "Editar datos del cliente")
-        
-        btn_notas = ctk.CTkButton(botones_frame, text="📝", 
-                                command=lambda: self.gestionar_notas_cliente(cliente_id),
-                                width=30, height=25, font=ctk.CTkFont(size=12))
-        btn_notas.pack(side="left", padx=2)
-        Tooltip(btn_notas, "Gestionar notas del cliente")
-        
-        # Los tooltips proporcionan información clara sobre cada acción
     
     def filtrar_clientes(self, event=None):
         """Filtra la lista de clientes según los criterios de búsqueda."""
@@ -12271,35 +12281,49 @@ Versión de la App: {APP_VERSION}
             if not conn: 
                 return
             
-            # Ejecutar migración
+            # Contar clientes únicos en RMAs antes de migrar
             cursor.execute("""
-                INSERT OR IGNORE INTO clientes (nombre, fecha_registro, direccion, telefono_principal, email_principal)
-                SELECT DISTINCT 
-                    cliente,
-                    MIN(fecha_creacion) as fecha_registro,
-                    direccion_cliente,
-                    telefono_contacto,
-                    email_contacto
+                SELECT COUNT(DISTINCT cliente) 
                 FROM rma_maestro 
                 WHERE cliente IS NOT NULL AND cliente != ''
-                GROUP BY cliente
+            """)
+            total_clientes_en_rmas = cursor.fetchone()[0]
+            
+            # Contar clientes ya existentes en la tabla
+            cursor.execute("SELECT COUNT(*) FROM clientes")
+            clientes_antes = cursor.fetchone()[0]
+            
+            # Ejecutar migración
+            cursor.execute("""
+                INSERT OR IGNORE INTO clientes (nombre, fecha_registro, email_principal)
+                SELECT DISTINCT 
+                    Cliente,
+                    MIN(fecha_emision) as fecha_registro,
+                    Email_de_Contacto
+                FROM rma_maestro 
+                WHERE Cliente IS NOT NULL AND Cliente != ''
+                GROUP BY Cliente
             """)
             
-            clientes_migrados = cursor.rowcount
+            # Contar después de migrar
+            cursor.execute("SELECT COUNT(*) FROM clientes")
+            clientes_despues = cursor.fetchone()[0]
+            
+            clientes_nuevos = int(clientes_despues) - int(clientes_antes)
+            clientes_ya_existian = int(total_clientes_en_rmas) - clientes_nuevos
             
             # Migrar contactos
             cursor.execute("""
-                INSERT OR IGNORE INTO contactos_cliente (cliente_id, nombre, email, telefono, es_principal)
+                INSERT OR IGNORE INTO contactos_cliente (cliente_id, nombre, email, es_principal)
                 SELECT DISTINCT
                     c.cliente_id,
-                    COALESCE(rm.nombre_contacto, rm.cliente) as nombre,
-                    rm.email_contacto,
-                    rm.telefono_contacto,
+                    COALESCE(rm.Persona_de_Contacto, rm.Cliente) as nombre,
+                    rm.Email_de_Contacto,
                     1 as es_principal
                 FROM clientes c
-                JOIN rma_maestro rm ON c.nombre = rm.cliente
-                WHERE rm.nombre_contacto IS NOT NULL AND rm.nombre_contacto != ''
-                GROUP BY c.cliente_id, rm.nombre_contacto
+                JOIN rma_maestro rm ON c.nombre = rm.Cliente
+                WHERE rm.Persona_de_Contacto IS NOT NULL AND rm.Persona_de_Contacto != ''
+                GROUP BY c.cliente_id, rm.Persona_de_Contacto
             """)
             
             contactos_migrados = cursor.rowcount
@@ -12307,7 +12331,21 @@ Versión de la App: {APP_VERSION}
             conn.commit()
             conn.close()
             
-            mensaje = f"Migración completada:\n• {clientes_migrados} clientes migrados\n• {contactos_migrados} contactos migrados"
+            # Mensaje mejorado
+            if clientes_nuevos > 0:
+                mensaje = f"✅ Migración completada:\n\n"
+                mensaje += f"• {clientes_nuevos} cliente(s) NUEVO(S) migrado(s)\n"
+                if clientes_ya_existian > 0:
+                    mensaje += f"• {clientes_ya_existian} cliente(s) ya existían (no duplicados)\n"
+                mensaje += f"• {contactos_migrados} contacto(s) migrado(s)\n\n"
+                mensaje += f"📊 Total de clientes en sistema: {clientes_despues}"
+            else:
+                mensaje = f"ℹ️ Migración completada:\n\n"
+                mensaje += f"• Todos los clientes ({total_clientes_en_rmas}) ya estaban migrados\n"
+                mensaje += f"• No se encontraron duplicados\n"
+                mensaje += f"• {contactos_migrados} contacto(s) nuevos añadidos\n\n"
+                mensaje += f"📊 Total de clientes en sistema: {clientes_despues}"
+            
             messagebox.showinfo("Migración Completada", mensaje)
             
             self.cargar_lista_clientes()
@@ -12326,12 +12364,12 @@ Versión de la App: {APP_VERSION}
         # Crear ventana principal
         ventana = ctk.CTkToplevel(self)
         ventana.title(f"Ficha Cliente: {cliente[1]}")  # cliente[1] es el nombre
-        ventana.geometry("900x700")
+        ventana.geometry("900x900")
         ventana.resizable(True, True)
         
         # Configurar para permitir minimización
         ventana.attributes('-topmost', False)
-        ventana.minsize(700, 500)
+        ventana.minsize(700, 650)
         # No usar transient para permitir minimización completa
         ventana.focus_set()  # Dar foco sin bloquear
         
@@ -12343,36 +12381,37 @@ Versión de la App: {APP_VERSION}
         
         # Header con información básica
         header_frame = ctk.CTkFrame(ventana)
-        header_frame.pack(fill="x", padx=10, pady=10)
+        header_frame.pack(fill="x", padx=10, pady=(10, 5))
         
         info_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        info_frame.pack(fill="x", padx=10, pady=10)
+        info_frame.pack(fill="x", padx=10, pady=5)
         
-        # Nombre y tipo
+        # Nombre del cliente
         nombre_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
         nombre_frame.pack(fill="x")
         
         ctk.CTkLabel(nombre_frame, text=f"🧑‍💼 {cliente[1]}", 
                     font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
         
-        tipo_color = {"Regular": "blue", "Premium": "orange", "VIP": "purple"}.get(cliente[2], "gray")
-        ctk.CTkLabel(nombre_frame, text=f"🏷️ {cliente[2]}", 
-                    font=ctk.CTkFont(size=12, weight="bold"), 
-                    text_color=tipo_color).pack(side="right")
+        # Widget de estadísticas básicas
+        from lib.cliente_estadisticas import calcular_estadisticas_basicas_cliente, crear_widget_estadisticas_basicas
         
-        estado_color = "green" if cliente[7] else "red"  # cliente[7] es activo
-        estado_texto = "🟢 Activo" if cliente[7] else "🔴 Inactivo"
-        ctk.CTkLabel(nombre_frame, text=estado_texto, 
-                    font=ctk.CTkFont(size=12), 
-                    text_color=estado_color).pack(side="right", padx=(0,10))
+        try:
+            conn, cursor = self.master.conectar_db()
+            if conn:
+                stats = calcular_estadisticas_basicas_cliente(cliente[1], conn)
+                crear_widget_estadisticas_basicas(info_frame, stats)
+                conn.close()
+        except Exception as e:
+            print(f"Error cargando estadísticas: {e}")
         
-        # Crear pestañas
-        tabview = ctk.CTkTabview(ventana, width=880, height=600)
-        tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        # Crear pestañas (sin expand para dejar espacio a los botones)
+        tabview = ctk.CTkTabview(ventana, width=880, height=350)
+        tabview.pack(fill="x", expand=False, padx=10, pady=5)
         
-        # Pestaña 1: Información General
+        # Pestaña 1: Información General (en modo edición)
         tab_info = tabview.add("📋 Información")
-        self.crear_tab_informacion_cliente(tab_info, cliente)
+        widgets_info = self.crear_tab_informacion_cliente_editable(tab_info, cliente)
         
         # Pestaña 2: Contactos
         tab_contactos = tabview.add("👥 Contactos")
@@ -12388,16 +12427,49 @@ Versión de la App: {APP_VERSION}
         
         # Pestaña 5: Estadísticas
         tab_stats = tabview.add("📊 Estadísticas")
-        self.crear_tab_estadisticas_cliente(tab_stats, cliente_id)
+        self.crear_tab_estadisticas_cliente_completa(tab_stats, cliente_id, cliente[1])
         
-        # Botones de acción en la ventana principal
+        # Botones de acción ANTES de definir funciones
         botones_frame = ctk.CTkFrame(ventana)
-        botones_frame.pack(fill="x", padx=10, pady=10)
+        botones_frame.pack(fill="x", padx=10, pady=(5, 10))
         
-        btn_editar = ctk.CTkButton(botones_frame, text="✏️ Editar Cliente", 
-                                 command=lambda: self.editar_cliente_directo(cliente_id, ventana),
-                                 width=120)
-        btn_editar.pack(side="left", padx=(0,10))
+        # Función para guardar cambios
+        def guardar_cambios_cliente():
+            datos = {
+                'nombre': widgets_info['entry_nombre'].get().strip(),
+                'direccion': widgets_info['entry_direccion'].get().strip(),
+                'telefono_principal': widgets_info['entry_telefono'].get().strip(),
+                'email_principal': widgets_info['entry_email'].get().strip(),
+                'notas_generales': widgets_info['text_notas'].get("1.0", "end-1c").strip()
+            }
+            
+            if not datos['nombre']:
+                messagebox.showerror("Error", "El nombre del cliente es obligatorio")
+                return
+            
+            if self.actualizar_cliente(cliente_id, datos):
+                messagebox.showinfo("Éxito", f"Cliente '{datos['nombre']}' actualizado correctamente")
+                # Recargar estadísticas
+                try:
+                    conn, cursor = self.master.conectar_db()
+                    if conn:
+                        stats = calcular_estadisticas_basicas_cliente(datos['nombre'], conn)
+                        # Actualizar widget de estadísticas
+                        for widget in info_frame.winfo_children():
+                            if isinstance(widget, ctk.CTkFrame) and widget != nombre_frame:
+                                widget.destroy()
+                        crear_widget_estadisticas_basicas(info_frame, stats)
+                        conn.close()
+                except Exception as e:
+                    print(f"Error recargando estadísticas: {e}")
+            else:
+                messagebox.showerror("Error", "Error al actualizar el cliente")
+        
+        # Configurar botones (frame ya creado arriba)
+        btn_guardar = ctk.CTkButton(botones_frame, text="💾 Guardar Cambios", 
+                                 command=guardar_cambios_cliente,
+                                 width=140)
+        btn_guardar.pack(side="left", padx=(0,10))
         
         btn_cerrar = ctk.CTkButton(botones_frame, text="❌ Cerrar", 
                                  command=ventana.destroy,
@@ -12451,6 +12523,92 @@ Versión de la App: {APP_VERSION}
             text_notas.insert("1.0", cliente[6])
             text_notas.configure(state="disabled")
     
+    def crear_tab_informacion_cliente_editable(self, tab_frame, cliente):
+        """Crea la pestaña de información general del cliente en modo edición."""
+        # Frame scrollable para el formulario
+        scroll_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Información básica
+        ctk.CTkLabel(scroll_frame, text="📋 Información Básica (Editable)", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0,10))
+        
+        info_frame = ctk.CTkFrame(scroll_frame)
+        info_frame.pack(fill="x", pady=(0,20))
+        info_frame.grid_columnconfigure(1, weight=1)
+        
+        # Widgets editables
+        widgets = {}
+        
+        # ID Cliente (solo lectura)
+        ctk.CTkLabel(info_frame, text="ID Cliente:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=0, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(info_frame, text=str(cliente[0]), 
+                    font=ctk.CTkFont(size=12)).grid(
+                    row=0, column=1, sticky="w", padx=10, pady=5)
+        
+        # Nombre (editable)
+        ctk.CTkLabel(info_frame, text="Nombre: *", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=1, column=0, sticky="w", padx=10, pady=5)
+        widgets['entry_nombre'] = ctk.CTkEntry(info_frame)
+        widgets['entry_nombre'].grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_nombre'].insert(0, cliente[1])
+        
+        # Dirección (editable)
+        ctk.CTkLabel(info_frame, text="Dirección:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=2, column=0, sticky="w", padx=10, pady=5)
+        widgets['entry_direccion'] = ctk.CTkEntry(info_frame)
+        widgets['entry_direccion'].grid(row=2, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_direccion'].insert(0, cliente[3] or "")
+        
+        # Teléfono (editable)
+        ctk.CTkLabel(info_frame, text="Teléfono Principal:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=3, column=0, sticky="w", padx=10, pady=5)
+        widgets['entry_telefono'] = ctk.CTkEntry(info_frame)
+        widgets['entry_telefono'].grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_telefono'].insert(0, cliente[4] or "")
+        
+        # Email (editable)
+        ctk.CTkLabel(info_frame, text="Email Principal:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=4, column=0, sticky="w", padx=10, pady=5)
+        widgets['entry_email'] = ctk.CTkEntry(info_frame)
+        widgets['entry_email'].grid(row=4, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_email'].insert(0, cliente[5] or "")
+        
+        # Fechas (solo lectura)
+        ctk.CTkLabel(info_frame, text="Fecha Registro:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=5, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(info_frame, text=cliente[8].split()[0] if cliente[8] else "No disponible", 
+                    font=ctk.CTkFont(size=12)).grid(
+                    row=5, column=1, sticky="w", padx=10, pady=5)
+        
+        ctk.CTkLabel(info_frame, text="Última Actualización:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=6, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(info_frame, text=cliente[9].split()[0] if cliente[9] else "No disponible", 
+                    font=ctk.CTkFont(size=12)).grid(
+                    row=6, column=1, sticky="w", padx=10, pady=5)
+        
+        # Notas generales (editable)
+        ctk.CTkLabel(scroll_frame, text="📝 Notas Generales", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(20,10))
+        
+        notas_frame = ctk.CTkFrame(scroll_frame)
+        notas_frame.pack(fill="x", pady=(0,10))
+        
+        widgets['text_notas'] = ctk.CTkTextbox(notas_frame, height=100)
+        widgets['text_notas'].pack(fill="x", padx=10, pady=10)
+        if cliente[6]:
+            widgets['text_notas'].insert("1.0", cliente[6])
+        
+        return widgets
+    
     def crear_tab_contactos_cliente(self, tab_frame, cliente_id):
         """Crea la pestaña de contactos del cliente."""
         # Header con botón para agregar
@@ -12482,33 +12640,67 @@ Versión de la App: {APP_VERSION}
     
     def crear_tab_historial_rmas(self, tab_frame, cliente_id):
         """Crea la pestaña de historial de RMAs."""
+        from lib.cliente_utils import obtener_años_rmas_cliente, obtener_historial_rmas_cliente
+        
         # Header
         header_frame = ctk.CTkFrame(tab_frame)
         header_frame.pack(fill="x", padx=10, pady=10)
         
         ctk.CTkLabel(header_frame, text="📦 Historial de RMAs", 
-                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=10, pady=(10,5))
+        
+        # Frame de filtros
+        filtros_frame = ctk.CTkFrame(header_frame)
+        filtros_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Búsqueda por número de RMA
+        ctk.CTkLabel(filtros_frame, text="Buscar RMA:", font=ctk.CTkFont(size=11)).pack(side="left", padx=5)
+        entry_buscar = ctk.CTkEntry(filtros_frame, placeholder_text="Número de RMA...", width=150)
+        entry_buscar.pack(side="left", padx=5)
+        
+        # Filtro por año
+        ctk.CTkLabel(filtros_frame, text="Año:", font=ctk.CTkFont(size=11)).pack(side="left", padx=(20,5))
+        
+        # Obtener años disponibles
+        años_disponibles = obtener_años_rmas_cliente(cliente_id, self.master.conectar_db)
+        option_año = ctk.CTkOptionMenu(filtros_frame, values=["Todos"] + años_disponibles, width=100)
+        option_año.set("Todos")
+        option_año.pack(side="left", padx=5)
         
         # Lista de RMAs
-        rmas_frame = ctk.CTkScrollableFrame(tab_frame, height=500)
+        rmas_frame = ctk.CTkScrollableFrame(tab_frame, height=450)
         rmas_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Cargar historial
-        rmas = self.obtener_historial_rmas_cliente(cliente_id)
+        # Función para filtrar y mostrar RMAs
+        def actualizar_lista():
+            for widget in rmas_frame.winfo_children():
+                widget.destroy()
+            
+            busqueda = entry_buscar.get().strip().upper()
+            año_filtro = option_año.get()
+            
+            rmas = obtener_historial_rmas_cliente(cliente_id, self.master.conectar_db, año_filtro if año_filtro != "Todos" else None, busqueda)
+            
+            if not rmas:
+                ctk.CTkLabel(rmas_frame, 
+                           text="📭 No se encontraron RMAs con los filtros especificados.",
+                           font=ctk.CTkFont(size=13)).pack(pady=50)
+            else:
+                # Mostrar RMAs
+                for rma in rmas:
+                    numero_rma, fecha_emision, estado, motivo = rma
+                    datos_rma = {
+                        'info': rma,
+                        'productos': []
+                    }
+                    self.crear_item_rma_historial(rmas_frame, numero_rma, datos_rma, cliente_id)
         
-        if not rmas:
-            ctk.CTkLabel(rmas_frame, 
-                       text="📭 No hay RMAs registradas para este cliente.",
-                       font=ctk.CTkFont(size=13)).pack(pady=50)
-        else:
-            # Mostrar RMAs
-            for rma in rmas:
-                numero_rma, fecha_emision, estado, motivo = rma
-                datos_rma = {
-                    'info': rma,  # Pasa la tupla completa (numero_rma, fecha_emision, estado, motivo)
-                    'productos': []  # Sin productos por ahora
-                }
-                self.crear_item_rma_historial(rmas_frame, numero_rma, datos_rma)
+        # Botón filtrar
+        btn_filtrar = ctk.CTkButton(filtros_frame, text="🔍 Filtrar", command=actualizar_lista, width=80)
+        btn_filtrar.pack(side="left", padx=10)
+        
+        # Cargar lista inicial
+        actualizar_lista()
     
     def crear_tab_notas_cliente(self, tab_frame, cliente_id):
         """Crea la pestaña de notas del cliente."""
@@ -12539,54 +12731,185 @@ Versión de la App: {APP_VERSION}
             for nota in notas:
                 self.crear_item_nota(notas_frame, nota)
     
-    def crear_tab_estadisticas_cliente(self, tab_frame, cliente_id):
-        """Crea la pestaña de estadísticas del cliente con filtros y exportación."""
+    def crear_tab_estadisticas_cliente_completa(self, tab_frame, cliente_id, nombre_cliente):
+        """Crea la pestaña de estadísticas del cliente con filtros completos y exportación."""
+        from lib.cliente_estadisticas import obtener_estadisticas_detalladas_cliente, exportar_estadisticas_cliente_excel
+        from tkinter import filedialog
+        from datetime import datetime
+        
         # Header con controles
         header_frame = ctk.CTkFrame(tab_frame)
         header_frame.pack(fill="x", padx=10, pady=10)
         
         # Título
-        ctk.CTkLabel(header_frame, text="📊 Estadísticas del Cliente", 
-                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=10, pady=10)
+        ctk.CTkLabel(header_frame, text="📊 Estadísticas Detalladas del Cliente", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=10, pady=(10,5))
         
-        # Controles de filtro
-        filtros_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        filtros_frame.pack(side="right", padx=10, pady=10)
+        # Frame de filtros
+        filtros_frame = ctk.CTkFrame(header_frame)
+        filtros_frame.pack(fill="x", padx=10, pady=5)
+        filtros_frame.grid_columnconfigure(1, weight=1)
+        filtros_frame.grid_columnconfigure(3, weight=1)
         
-        # Filtro por año
-        ctk.CTkLabel(filtros_frame, text="Año:", font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=5, pady=5)
-        self.filtro_año_stats = ctk.CTkOptionMenu(filtros_frame, 
-                                                 values=["Todos"] + [str(y) for y in range(2020, 2026)],
-                                                 width=80)
-        self.filtro_año_stats.set("Todos")
-        self.filtro_año_stats.grid(row=0, column=1, padx=5, pady=5)
+        # Filtro de fecha desde
+        ctk.CTkLabel(filtros_frame, text="Desde:", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        entry_fecha_desde = ctk.CTkEntry(filtros_frame, placeholder_text="YYYY-MM-DD", width=120)
+        entry_fecha_desde.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         
-        # Filtro por mes
-        ctk.CTkLabel(filtros_frame, text="Mes:", font=ctk.CTkFont(size=12)).grid(row=0, column=2, padx=5, pady=5)
-        meses = ["Todos", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-        self.filtro_mes_stats = ctk.CTkOptionMenu(filtros_frame, values=meses, width=100)
-        self.filtro_mes_stats.set("Todos")
-        self.filtro_mes_stats.grid(row=0, column=3, padx=5, pady=5)
+        # Filtro de fecha hasta
+        ctk.CTkLabel(filtros_frame, text="Hasta:", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=5, pady=5, sticky="e")
+        entry_fecha_hasta = ctk.CTkEntry(filtros_frame, placeholder_text="YYYY-MM-DD", width=120)
+        entry_fecha_hasta.grid(row=0, column=3, padx=5, pady=5, sticky="w")
         
-        # Botón actualizar
-        self.btn_actualizar_stats = ctk.CTkButton(filtros_frame, text="🔄 Actualizar",
-                                                 command=lambda: self.cargar_estadisticas_cliente(cliente_id),
-                                                 width=100)
-        self.btn_actualizar_stats.grid(row=0, column=4, padx=10, pady=5)
+        # Filtro de resultado de expediente
+        ctk.CTkLabel(filtros_frame, text="Resultado:", font=ctk.CTkFont(size=11)).grid(row=0, column=4, padx=5, pady=5, sticky="e")
+        filtro_estado = ctk.CTkOptionMenu(filtros_frame, 
+                                         values=["Todos", "NO ABONAR", "ABONAR", "ABONAR OK", "ABONAR FALLO", "REPOSICION"],
+                                         width=140)
+        filtro_estado.set("Todos")
+        filtro_estado.grid(row=0, column=5, padx=5, pady=5, sticky="w")
         
-        # Botón exportar Excel
-        self.btn_exportar_excel = ctk.CTkButton(filtros_frame, text="📊 Exportar Excel",
-                                               command=lambda: self.exportar_estadisticas_excel(cliente_id),
-                                               width=120, fg_color="green", hover_color="dark green")
-        self.btn_exportar_excel.grid(row=0, column=5, padx=5, pady=5)
+        # Contenedor de resultados
+        resultados_frame = ctk.CTkScrollableFrame(tab_frame, height=400)
+        resultados_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Contenido scrollable
-        self.stats_container = ctk.CTkScrollableFrame(tab_frame, height=500)
-        self.stats_container.pack(fill="both", expand=True, padx=10, pady=10)
+        # Función para cargar datos
+        def cargar_datos_estadisticas():
+            # Limpiar resultados anteriores
+            for widget in resultados_frame.winfo_children():
+                widget.destroy()
+            
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn:
+                    return
+                
+                # Obtener filtros
+                fecha_desde = entry_fecha_desde.get().strip() or None
+                fecha_hasta = entry_fecha_hasta.get().strip() or None
+                estado = filtro_estado.get()
+                estado_filtro = None if estado == "Todos" else estado
+                
+                # Obtener datos
+                datos = obtener_estadisticas_detalladas_cliente(
+                    nombre_cliente, conn, fecha_desde, fecha_hasta, estado_filtro
+                )
+                
+                if not datos:
+                    ctk.CTkLabel(resultados_frame, 
+                               text="📊 No hay datos para los filtros seleccionados.",
+                               font=ctk.CTkFont(size=14)).pack(pady=50)
+                    conn.close()
+                    return
+                
+                # Calcular totales
+                total_exp = len(datos)
+                total_art = sum(row[4] for row in datos)
+                total_coste = sum(row[5] for row in datos)
+                
+                # Mostrar resumen
+                resumen_frame = ctk.CTkFrame(resultados_frame)
+                resumen_frame.pack(fill="x", pady=(0,10))
+                
+                ctk.CTkLabel(resumen_frame, 
+                           text=f"📦 Total: {total_exp} expedientes | 📦 {total_art} artículos | 💰 {total_coste:.2f} €",
+                           font=ctk.CTkFont(size=13, weight="bold")).pack(pady=10)
+                
+                # Tabla de resultados
+                tabla_frame = ctk.CTkFrame(resultados_frame)
+                tabla_frame.pack(fill="both", expand=True)
+                
+                # Encabezados
+                headers = ["Código RMA", "Fecha", "Estado", "Resultado", "Nº Art.", "Coste (€)"]
+                header_row = ctk.CTkFrame(tabla_frame, fg_color=("#3B8ED0", "#1F6AA5"))
+                header_row.pack(fill="x", padx=2, pady=2)
+                
+                for i, header in enumerate(headers):
+                    ctk.CTkLabel(header_row, text=header, 
+                               font=ctk.CTkFont(size=11, weight="bold"),
+                               text_color="white").grid(row=0, column=i, padx=10, pady=5, sticky="w")
+                
+                # Datos
+                for idx, row in enumerate(datos):
+                    codigo, fecha, estado_exp, resultado, num_art, coste = row
+                    
+                    color_bg = ("#E8E8E8", "#2B2B2B") if idx % 2 == 0 else "transparent"
+                    data_row = ctk.CTkFrame(tabla_frame, fg_color=color_bg)
+                    data_row.pack(fill="x", padx=2, pady=1)
+                    
+                    ctk.CTkLabel(data_row, text=codigo, font=ctk.CTkFont(size=10)).grid(row=0, column=0, padx=10, pady=3, sticky="w")
+                    ctk.CTkLabel(data_row, text=fecha or "", font=ctk.CTkFont(size=10)).grid(row=0, column=1, padx=10, pady=3, sticky="w")
+                    ctk.CTkLabel(data_row, text=estado_exp or "", font=ctk.CTkFont(size=10)).grid(row=0, column=2, padx=10, pady=3, sticky="w")
+                    ctk.CTkLabel(data_row, text=resultado or "", font=ctk.CTkFont(size=10)).grid(row=0, column=3, padx=10, pady=3, sticky="w")
+                    ctk.CTkLabel(data_row, text=str(num_art), font=ctk.CTkFont(size=10)).grid(row=0, column=4, padx=10, pady=3, sticky="w")
+                    ctk.CTkLabel(data_row, text=f"{coste:.2f} €", font=ctk.CTkFont(size=10)).grid(row=0, column=5, padx=10, pady=3, sticky="w")
+                
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error cargando estadísticas: {e}")
+                messagebox.showerror("Error", f"Error al cargar estadísticas: {str(e)}")
         
-        # Cargar estadísticas iniciales
-        self.cargar_estadisticas_cliente(cliente_id)
+        # Función para exportar a Excel
+        def exportar_a_excel():
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn:
+                    return
+                
+                # Obtener filtros
+                fecha_desde = entry_fecha_desde.get().strip() or None
+                fecha_hasta = entry_fecha_hasta.get().strip() or None
+                estado = filtro_estado.get()
+                estado_filtro = None if estado == "Todos" else estado
+                
+                # Obtener datos
+                datos = obtener_estadisticas_detalladas_cliente(
+                    nombre_cliente, conn, fecha_desde, fecha_hasta, estado_filtro
+                )
+                
+                conn.close()
+                
+                if not datos:
+                    messagebox.showinfo("Info", "No hay datos para exportar")
+                    return
+                
+                # Solicitar ubicación de archivo
+                fecha_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                nombre_archivo = f"Estadisticas_{nombre_cliente.replace(' ', '_')}_{fecha_str}.xlsx"
+                
+                ruta = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel files", "*.xlsx")],
+                    initialfile=nombre_archivo
+                )
+                
+                if ruta:
+                    if exportar_estadisticas_cliente_excel(nombre_cliente, datos, ruta):
+                        messagebox.showinfo("Éxito", f"Estadísticas exportadas correctamente a:\n{ruta}")
+                    else:
+                        messagebox.showerror("Error", "Error al exportar estadísticas")
+                        
+            except Exception as e:
+                print(f"Error exportando: {e}")
+                messagebox.showerror("Error", f"Error al exportar: {str(e)}")
+        
+        # Botones de acción
+        botones_frame = ctk.CTkFrame(header_frame)
+        botones_frame.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkButton(botones_frame, text="🔍 Buscar", 
+                     command=cargar_datos_estadisticas,
+                     width=120).pack(side="left", padx=5)
+        
+        ctk.CTkButton(botones_frame, text="📊 Exportar Excel", 
+                     command=exportar_a_excel,
+                     width=140, 
+                     fg_color="green", 
+                     hover_color="dark green").pack(side="left", padx=5)
+        
+        # Cargar datos iniciales
+        cargar_datos_estadisticas()
     
     def cargar_estadisticas_cliente(self, cliente_id):
         """Carga las estadísticas del cliente con filtros aplicados."""
@@ -13006,8 +13329,10 @@ Versión de la App: {APP_VERSION}
                                         width=120, height=25)
             btn_principal.pack(side="left", padx=(0,5))
     
-    def crear_item_rma_historial(self, parent_frame, numero_rma, datos):
+    def crear_item_rma_historial(self, parent_frame, numero_rma, datos, cliente_id=None):
         """Crea un elemento visual para un RMA en el historial."""
+        from lib.cliente_utils import abrir_rma_por_codigo
+        
         info = datos['info']  # número, fecha, estado, motivo
         productos = datos['productos']
         
@@ -13021,8 +13346,16 @@ Versión de la App: {APP_VERSION}
         info_principal = ctk.CTkFrame(header_frame, fg_color="transparent")
         info_principal.pack(fill="x")
         
-        ctk.CTkLabel(info_principal, text=f"📦 RMA #{numero_rma}", 
-                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        label_rma = ctk.CTkLabel(info_principal, text=f"📦 RMA #{numero_rma}", 
+                    font=ctk.CTkFont(size=14, weight="bold"), cursor="hand2")
+        label_rma.pack(side="left")
+        
+        # Doble clic para abrir expediente
+        def abrir_expediente(e):
+            abrir_rma_por_codigo(numero_rma, self.master.conectar_db, self)
+        
+        label_rma.bind("<Double-Button-1>", abrir_expediente)
+        Tooltip(label_rma, "Doble clic para abrir el expediente")
         
         # Estado del RMA
         estado_color = {"Abierto": "orange", "En Proceso": "blue", "Cerrado": "green", "Cancelado": "red"}.get(info[2], "gray")
@@ -14047,37 +14380,6 @@ Versión de la App: {APP_VERSION}
         except Exception as e:
             print(f"Error creando contacto: {e}")
             return False
-    
-    def obtener_historial_rmas_cliente(self, cliente_id):
-        """Obtiene el historial de RMAs de un cliente."""
-        try:
-            conn, cursor = self.master.conectar_db()
-            if not conn: 
-                return []
-            
-            # Primero obtener el nombre del cliente
-            cursor.execute("SELECT nombre FROM clientes WHERE cliente_id = ?", (cliente_id,))
-            cliente_info = cursor.fetchone()
-            if not cliente_info:
-                return []
-            
-            nombre_cliente = cliente_info[0]
-            
-            # Obtener RMAs del cliente
-            cursor.execute("""
-                SELECT codigo_rma, fecha_emision, estado, motivo
-                FROM rma_maestro 
-                WHERE cliente = ?
-                ORDER BY fecha_emision DESC
-            """, (nombre_cliente,))
-            
-            rmas = cursor.fetchall()
-            conn.close()
-            return rmas
-            
-        except Exception as e:
-            print(f"Error obteniendo historial RMAs: {e}")
-            return []
     
     def obtener_notas_cliente(self, cliente_id, tipo_filtro=None):
         """Obtiene todas las notas de un cliente."""
