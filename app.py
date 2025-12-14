@@ -305,7 +305,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.21"
+APP_VERSION = "v0.1.22"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5226,6 +5226,41 @@ class VentanaPrincipal(ctk.CTkToplevel):
         )
         self.btn_ver_cliente.pack(side="right", padx=(10, 0))
         Tooltip(self.btn_ver_cliente, "Ver ficha del cliente")
+        
+        # Botón de artículos (lado derecho, junto al de cliente)
+        def abrir_ficha_articulo_desde_expediente():
+            # Si no hay artículos en memoria, mostrar mensaje
+            if not self.articulos_data:
+                messagebox.showinfo("Sin artículos", 
+                                  "Este expediente no tiene artículos asociados aún.\n\n"
+                                  "Agregue artículos en la sección 'ARTÍCULOS' de este formulario.")
+                return
+            
+            # Si solo hay un artículo, abrir su ficha directamente
+            if len(self.articulos_data) == 1:
+                referencia = self.articulos_data[0].get('referencia_articulo', '')
+                if referencia:
+                    self.mostrar_estados_por_articulo(referencia)
+                return
+            
+            # Si hay múltiples artículos, mostrar selector
+            from lib.articulo_utils import mostrar_selector_referencias
+            
+            def callback_seleccion(referencia):
+                self.mostrar_estados_por_articulo(referencia)
+            
+            mostrar_selector_referencias(self.articulos_data, self.content_frame.winfo_toplevel(), callback_seleccion)
+        
+        self.btn_ver_articulo = ctk.CTkButton(
+            btn_action_frame,
+            text="📦",
+            command=abrir_ficha_articulo_desde_expediente,
+            width=35,
+            height=35,
+            font=ctk.CTkFont(size=16)
+        )
+        self.btn_ver_articulo.pack(side="right", padx=(5, 0))
+        Tooltip(self.btn_ver_articulo, "Ver ficha de artículo")
         
         # 1. Botón de Generar Informe (Solo en modo edición)
         if es_edicion:
