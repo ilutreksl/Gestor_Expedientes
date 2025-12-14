@@ -1,5 +1,6 @@
-Cambios V.0.1.23 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.25 - ✨ Últimas mejoras implementadas:
 
+- Añadido compresion de videos en los adjuntos de los expedientes.
 - Visualizacion en los slash sobre que BD se usa y si se conecta a Dropbox.
 - 📦 Mejorada la ficha de estado de producto. Permite filtrar por estado y por periodo de fecha. Añadido boton de imprimir.   Crea un HTML para la previsualizacion.
 - 📦 Añadido boton de articulo dentro de la ficha de expedientes. Abre la ventana de los estados del articulo.

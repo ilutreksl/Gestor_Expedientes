@@ -26,6 +26,7 @@ from PIL import Image, ImageTk
 from CTkDatePicker import CTkDatePicker
 from lib.changelog_window import mostrar_ventana_cambios
 from lib.rma_utils import obtener_ultima_actividad, calcular_tiempos_expediente, obtener_color_tiempo, obtener_promedio_cliente
+from lib.video_utils import comprimir_video_inteligente
 
 import tkinter as tk
 from tkinter import ttk
@@ -131,6 +132,12 @@ def es_imagen(filepath):
     extensiones_imagen = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.tif', '.webp', '.heic', '.heif'}
     ext = os.path.splitext(filepath)[1].lower()
     return ext in extensiones_imagen
+
+def es_video(filepath):
+    """Detecta si un archivo es un video basándose en la extensión."""
+    extensiones_video = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp'}
+    ext = os.path.splitext(filepath)[1].lower()
+    return ext in extensiones_video
 
 def comprimir_imagen_inteligente(filepath_original, callback_progreso=None):
     """
@@ -305,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.24"
+APP_VERSION = "v0.1.25"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7136,6 +7143,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 mensaje = f"✅ Archivo adjuntado correctamente"
                 if es_imagen(filepaths[0]):
                     mensaje += " (imagen optimizada automáticamente)"
+                elif es_video(filepaths[0]):
+                    mensaje += " (video optimizado automáticamente)"
                 messagebox.showinfo("Éxito", mensaje)
             # Si falla, el error ya se mostró arriba
         else:
@@ -7143,8 +7152,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if archivos_exitosos == total_archivos:
                 mensaje = f"✅ Todos los archivos ({total_archivos}) adjuntados correctamente"
                 imagenes_count = sum(1 for fp in filepaths if es_imagen(fp))
+                videos_count = sum(1 for fp in filepaths if es_video(fp))
                 if imagenes_count > 0:
                     mensaje += f"\n🖼️ {imagenes_count} imagen(es) optimizada(s) automáticamente"
+                if videos_count > 0:
+                    mensaje += f"\n🎬 {videos_count} video(s) optimizado(s) automáticamente"
                 messagebox.showinfo("Éxito", mensaje)
             elif archivos_exitosos > 0:
                 messagebox.showwarning("Parcialmente exitoso", 
@@ -7266,6 +7278,86 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 if ventana_progreso:
                     ventana_progreso.destroy()
         
+        # ===== COMPRESIÓN DE VIDEOS =====
+        if es_video(filepath):
+            try:
+                ventana_progreso = None
+                label_progreso = None
+                barra_progreso = None
+                
+                # Solo crear ventana de progreso si no hay una externa (archivo único)
+                if not ventana_progreso_externa:
+                    ventana_progreso = ctk.CTkToplevel(self)
+                    ventana_progreso.title("🎬 Optimizando video")
+                    ventana_progreso.geometry("450x120")
+                    ventana_progreso.transient(self)
+                    ventana_progreso.grab_set()
+                    
+                    # Centrar ventana
+                    ventana_progreso.update_idletasks()
+                    x = (ventana_progreso.winfo_screenwidth() // 2) - (450 // 2)
+                    y = (ventana_progreso.winfo_screenheight() // 2) - (120 // 2)
+                    ventana_progreso.geometry(f"450x120+{x}+{y}")
+                    
+                    label_progreso = ctk.CTkLabel(ventana_progreso, text="Preparando compresión...", wraplength=430)
+                    label_progreso.pack(pady=(20, 10))
+                    
+                    barra_progreso = ctk.CTkProgressBar(ventana_progreso, width=400)
+                    barra_progreso.pack(pady=10)
+                    barra_progreso.set(0.1)
+                
+                # Función callback para actualizar progreso
+                def actualizar_progreso_video(mensaje):
+                    if ventana_progreso:
+                        # Ventana individual
+                        label_progreso.configure(text=mensaje)
+                        ventana_progreso.update()
+                        # Incrementar barra basándose en el mensaje
+                        if "%" in mensaje:
+                            try:
+                                porcentaje = int(mensaje.split("%")[0].split()[-1])
+                                barra_progreso.set(porcentaje / 100)
+                            except:
+                                pass
+                        elif barra_progreso.get() < 0.9:
+                            barra_progreso.set(barra_progreso.get() + 0.1)
+                    else:
+                        # Solo log para ventana externa
+                        print(f"  🎬 {mensaje}")
+                
+                if ventana_progreso:
+                    ventana_progreso.update()
+                
+                # Comprimir video
+                resultado = comprimir_video_inteligente(filepath, callback_progreso=actualizar_progreso_video)
+                archivo_comprimido, tamaño_original, tamaño_final = resultado
+                
+                if archivo_comprimido and archivo_comprimido != filepath:
+                    archivo_a_subir = archivo_comprimido
+                    archivo_temporal = archivo_comprimido
+                    
+                    # Cambiar extensión a .mp4 si se comprimió
+                    nombre_base = os.path.splitext(nombre_archivo)[0]
+                    nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
+                    
+                    # Mostrar resultado final
+                    if ventana_progreso:
+                        barra_progreso.set(1.0)
+                        if tamaño_original > tamaño_final:
+                            actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                        else:
+                            actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
+                
+                # Cerrar ventana individual después de un tiempo
+                if ventana_progreso:
+                    ventana_progreso.after(2000, lambda: ventana_progreso.destroy())
+                
+            except Exception as e:
+                # Si falla la compresión, usar archivo original
+                print(f"Error en compresión de video: {e}")
+                if ventana_progreso:
+                    ventana_progreso.destroy()
+        
         # ===== SUBIDA A DROPBOX =====
         # Crear la carpeta si no existe
         ruta_carpeta = self.crear_carpeta_adjuntos_rma(codigo_rma)
@@ -7306,21 +7398,162 @@ class VentanaPrincipal(ctk.CTkToplevel):
     
     def _subir_archivo_local(self, filepath, codigo_rma, nombre_archivo):
         """
-        Sube un archivo al almacenamiento local (implementación original).
+        Sube un archivo al almacenamiento local con compresión inteligente para imágenes y videos.
         Retorna: (éxito: bool, ruta_relativa: str)
         """
+        archivo_a_subir = filepath
+        archivo_temporal = None
+        nombre_archivo_final = nombre_archivo
+        
+        # ===== COMPRESIÓN DE IMÁGENES =====
+        if es_imagen(filepath):
+            try:
+                ventana_progreso = ctk.CTkToplevel(self)
+                ventana_progreso.title("🖼️ Optimizando imagen")
+                ventana_progreso.geometry("400x120")
+                ventana_progreso.transient(self)
+                ventana_progreso.grab_set()
+                
+                # Centrar ventana
+                ventana_progreso.update_idletasks()
+                x = (ventana_progreso.winfo_screenwidth() // 2) - (400 // 2)
+                y = (ventana_progreso.winfo_screenheight() // 2) - (120 // 2)
+                ventana_progreso.geometry(f"400x120+{x}+{y}")
+                
+                label_progreso = ctk.CTkLabel(ventana_progreso, text="Preparando compresión...", wraplength=380)
+                label_progreso.pack(pady=(20, 10))
+                
+                barra_progreso = ctk.CTkProgressBar(ventana_progreso, width=350)
+                barra_progreso.pack(pady=10)
+                barra_progreso.set(0.1)
+                
+                # Función callback para actualizar progreso
+                def actualizar_progreso(mensaje):
+                    label_progreso.configure(text=mensaje)
+                    ventana_progreso.update()
+                    if barra_progreso.get() < 0.9:
+                        barra_progreso.set(barra_progreso.get() + 0.15)
+                
+                ventana_progreso.update()
+                
+                # Comprimir imagen
+                resultado = comprimir_imagen_inteligente(filepath, callback_progreso=actualizar_progreso)
+                archivo_comprimido, tamaño_original, tamaño_final = resultado
+                
+                if archivo_comprimido and archivo_comprimido != filepath:
+                    archivo_a_subir = archivo_comprimido
+                    archivo_temporal = archivo_comprimido
+                    
+                    # Cambiar extensión a .jpg si se comprimió
+                    nombre_base = os.path.splitext(nombre_archivo)[0]
+                    nombre_archivo_final = f"{nombre_base}_optimizada.jpg"
+                    
+                    # Mostrar resultado final
+                    barra_progreso.set(1.0)
+                    if tamaño_original > tamaño_final:
+                        actualizar_progreso(f"✅ ¡Imagen optimizada! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                    else:
+                        actualizar_progreso(f"✅ Imagen procesada ({tamaño_original:.1f}MB)")
+                
+                # Cerrar ventana después de un tiempo
+                ventana_progreso.after(1500, lambda: ventana_progreso.destroy())
+                
+            except Exception as e:
+                print(f"Error en compresión de imagen: {e}")
+                if 'ventana_progreso' in locals():
+                    ventana_progreso.destroy()
+        
+        # ===== COMPRESIÓN DE VIDEOS =====
+        if es_video(filepath):
+            try:
+                ventana_progreso = ctk.CTkToplevel(self)
+                ventana_progreso.title("🎬 Optimizando video")
+                ventana_progreso.geometry("450x120")
+                ventana_progreso.transient(self)
+                ventana_progreso.grab_set()
+                
+                # Centrar ventana
+                ventana_progreso.update_idletasks()
+                x = (ventana_progreso.winfo_screenwidth() // 2) - (450 // 2)
+                y = (ventana_progreso.winfo_screenheight() // 2) - (120 // 2)
+                ventana_progreso.geometry(f"450x120+{x}+{y}")
+                
+                label_progreso = ctk.CTkLabel(ventana_progreso, text="Preparando compresión...", wraplength=430)
+                label_progreso.pack(pady=(20, 10))
+                
+                barra_progreso = ctk.CTkProgressBar(ventana_progreso, width=400)
+                barra_progreso.pack(pady=10)
+                barra_progreso.set(0.1)
+                
+                # Función callback para actualizar progreso
+                def actualizar_progreso_video(mensaje):
+                    label_progreso.configure(text=mensaje)
+                    ventana_progreso.update()
+                    # Incrementar barra basándose en el mensaje
+                    if "%" in mensaje:
+                        try:
+                            porcentaje = int(mensaje.split("%")[0].split()[-1])
+                            barra_progreso.set(porcentaje / 100)
+                        except:
+                            pass
+                    elif barra_progreso.get() < 0.9:
+                        barra_progreso.set(barra_progreso.get() + 0.1)
+                
+                ventana_progreso.update()
+                
+                # Comprimir video
+                resultado = comprimir_video_inteligente(filepath, callback_progreso=actualizar_progreso_video)
+                archivo_comprimido, tamaño_original, tamaño_final = resultado
+                
+                if archivo_comprimido and archivo_comprimido != filepath:
+                    archivo_a_subir = archivo_comprimido
+                    archivo_temporal = archivo_comprimido
+                    
+                    # Cambiar extensión a .mp4 si se comprimió
+                    nombre_base = os.path.splitext(nombre_archivo)[0]
+                    nombre_archivo_final = f"{nombre_base}_optimizado.mp4"
+                    
+                    # Mostrar resultado final
+                    barra_progreso.set(1.0)
+                    if tamaño_original > tamaño_final:
+                        actualizar_progreso_video(f"✅ ¡Video optimizado! {tamaño_original:.1f}MB → {tamaño_final:.1f}MB")
+                    else:
+                        actualizar_progreso_video(f"✅ Video procesado ({tamaño_original:.1f}MB)")
+                
+                # Cerrar ventana después de un tiempo
+                ventana_progreso.after(2000, lambda: ventana_progreso.destroy())
+                
+            except Exception as e:
+                print(f"Error en compresión de video: {e}")
+                if 'ventana_progreso' in locals():
+                    ventana_progreso.destroy()
+        
+        # ===== COPIA AL ALMACENAMIENTO LOCAL =====
         try:
             ruta_destino_dir = self.crear_carpeta_adjuntos_rma(codigo_rma)
-            ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo)
+            ruta_destino_completa = os.path.join(ruta_destino_dir, nombre_archivo_final)
             
-            # Copiar archivo
-            shutil.copy2(filepath, ruta_destino_completa)
+            # Copiar archivo (original o comprimido)
+            shutil.copy2(archivo_a_subir, ruta_destino_completa)
+            
+            # Limpiar archivo temporal si existe
+            if archivo_temporal:
+                try:
+                    os.unlink(archivo_temporal)
+                except:
+                    pass
             
             # Ruta relativa para BD
-            ruta_relativa = os.path.join(codigo_rma, nombre_archivo)
+            ruta_relativa = os.path.join(codigo_rma, nombre_archivo_final)
             return True, ruta_relativa
             
         except Exception as e:
+            # Limpiar archivo temporal en caso de error
+            if archivo_temporal:
+                try:
+                    os.unlink(archivo_temporal)
+                except:
+                    pass
             messagebox.showerror("Error de Copia", f"No se pudo copiar el archivo: {e}")
             return False, ""
     
