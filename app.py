@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.26"
+APP_VERSION = "v0.1.27"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9003,9 +9003,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 conn.close()
                 if row:
                     rma_id = row[0]
-                    # Abrir en panel principal
-                    self.mostrar_nuevo_rma(rma_id=rma_id)
-                    ventana.destroy()
+                    # Abrir en ventana independiente
+                    self._abrir_editor_rma(rma_id=rma_id)
+                    # No cerrar la ventana de tareas para poder seguir trabajando
                 else:
                     messagebox.showwarning("No encontrado", f"No se encontró expediente con código {codigo}")
             except sqlite3.Error as e:

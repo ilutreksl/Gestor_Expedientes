@@ -1,4 +1,4 @@
-Cambios V.0.1.26 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.27 - ✨ Últimas mejoras implementadas:
 
 - Añadidos los campos en la pestaña de Contabilidad de la ficha de los expedientes:
     * Numero Albaran Reposicion
