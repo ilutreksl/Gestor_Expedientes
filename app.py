@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.25"
+APP_VERSION = "v0.1.26"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4489,6 +4489,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                      text_color="black",
                      font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, pady=(5, 0), sticky="nw")
         
+        # PRECIO TOTAL EXPEDIENTE (visible siempre)
+        precio_total_frame = ctk.CTkFrame(comentarios_frame, fg_color="#e8f5e9", corner_radius=8)
+        precio_total_frame.grid(row=3, column=0, padx=5, pady=(10, 5), sticky="ew")
+        
+        ctk.CTkLabel(precio_total_frame, text="💰 PRECIO TOTAL EXPEDIENTE:", 
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color="#2e7d32").pack(side="left", padx=10, pady=8)
+        
+        self.lbl_precio_total = ctk.CTkLabel(precio_total_frame, text="0.00 €", 
+                                             font=ctk.CTkFont(size=16, weight="bold"), 
+                                             text_color="#1b5e20")
+        self.lbl_precio_total.pack(side="left", padx=5, pady=8)
+        
         comentario_input_frame = ctk.CTkFrame(comentarios_frame, fg_color="transparent")
         comentario_input_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(5, 5))
         comentario_input_frame.grid_columnconfigure(0, weight=1) # El textbox se expande
@@ -5153,14 +5166,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.crear_campo(contabilidad_frame, fila_cont, "Número Albarán:", "Numero_Albaran"); fila_cont += 1
         self.crear_campo(contabilidad_frame, fila_cont, "Fecha Doc. Cliente:", "Fecha_Doc_Cliente"); fila_cont += 1
         
-        # --- NUEVO CAMPO CALCULADO: PRECIO TOTAL ---
-        ctk.CTkLabel(contabilidad_frame, text="------------------------------").grid(row=fila_cont, column=0, columnspan=2, pady=(10, 5), sticky="ew"); fila_cont += 1
-        
-        ctk.CTkLabel(contabilidad_frame, text="PRECIO TOTAL EXPEDIENTE:", font=ctk.CTkFont(weight="bold")).grid(row=fila_cont, column=0, padx=10, pady=5, sticky="w")
-        
-        # Creamos una etiqueta para mostrar el total y guardamos su referencia
-        self.lbl_precio_total = ctk.CTkLabel(contabilidad_frame, text="0.00 €", font=ctk.CTkFont(size=16, weight="bold"), text_color="green")
-        self.lbl_precio_total.grid(row=fila_cont, column=1, padx=10, pady=5, sticky="w")
+        # Nuevos campos de reposición y abono
+        self.crear_campo(contabilidad_frame, fila_cont, "Nº Albarán Reposición:", "numero_albaran_reposicion"); fila_cont += 1
+        self.crear_campo(contabilidad_frame, fila_cont, "Fecha Albarán Reposición:", "fecha_albaran_reposicion", tipo="date"); fila_cont += 1
+        self.crear_campo(contabilidad_frame, fila_cont, "Nº Factura Abono:", "numero_factura_abono"); fila_cont += 1
+        self.crear_campo(contabilidad_frame, fila_cont, "Fecha Factura Abono:", "fecha_factura_abono", tipo="date"); fila_cont += 1
         
         # E) PESTAÑA ADJUNTOS
         # 1. Botón para Añadir Adjunto
@@ -5670,7 +5680,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
-            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica'
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
         
         for campo in campos_a_insertar:
@@ -5704,7 +5715,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 return
             
             # Para los campos de fecha, validar y normalizar a ISO YYYY-MM-DD
-            DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente'}
+            DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente', 'fecha_albaran_reposicion', 'fecha_factura_abono'}
             if campo in DATE_FIELDS:
                 # Permitir valor vacío
                 if valor is None or str(valor).strip() == "":
@@ -5946,7 +5957,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
-            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica'
+            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
 
         for campo in campos_a_recuperar:
@@ -5975,7 +5987,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         valor = ''
 
                 # Normalizar fechas si corresponde
-                DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente'}
+                DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente', 'fecha_albaran_reposicion', 'fecha_factura_abono'}
                 if campo in DATE_FIELDS:
                     if valor is None or str(valor).strip() == "":
                         datos_maestro[campo.lower()] = ''

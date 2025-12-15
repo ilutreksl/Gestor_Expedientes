@@ -1,5 +1,11 @@
-Cambios V.0.1.25 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.26 - ✨ Últimas mejoras implementadas:
 
+- Añadidos los campos en la pestaña de Contabilidad de la ficha de los expedientes:
+    * Numero Albaran Reposicion
+    * Fecha Albaran Reposicion
+    * Numero Factura Abono
+    * Fecha Factura Abono
+- Cambiada la ubicacion de PRECIO TOTAL EXPEDIENTE a la parte superior, para que este siempre visible.
 - Añadido compresion de videos en los adjuntos de los expedientes.
 - Visualizacion en los slash sobre que BD se usa y si se conecta a Dropbox.
 - 📦 Mejorada la ficha de estado de producto. Permite filtrar por estado y por periodo de fecha. Añadido boton de imprimir.   Crea un HTML para la previsualizacion.
