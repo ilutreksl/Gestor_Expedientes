@@ -32,8 +32,13 @@ class RmaEditorWindow(ctk.CTkToplevel):
         self.title(f"Gestor de Expedientes RMA - {titulo}")
         self.geometry("1400x900")
         
+        # Habilitar botones de maximizar/minimizar/redimensionar
+        self.resizable(True, True)
+        self.attributes('-topmost', False)
+        
         # NO hacer la ventana modal para permitir múltiples ventanas
-        self.transient(parent_window)
+        # NOTA: transient() se quita porque elimina los botones maximizar/minimizar en Windows
+        # self.transient(parent_window)
         # NO usar grab_set() para permitir interacción con otras ventanas
         
         # Frame principal para el contenido de esta ventana
