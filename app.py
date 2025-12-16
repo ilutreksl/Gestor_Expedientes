@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.28"
+APP_VERSION = "v0.1.29"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4869,19 +4869,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
         usuario_actual = self.username
         
         # A) PESTAÑA GENERAL
-        # Campos de Cliente y Contacto - Cliente y Número de Documento son de solo lectura en modo edición
-        self.crear_campo(general_frame, 0, "Cliente:", "Cliente", deshabilitado=es_edicion)
-        self.crear_campo(general_frame, 1, "Núm. Doc. Cliente:", "Numero_Documento_Cliente", deshabilitado=es_edicion)
+        # Campos de Cliente y Contacto - Cliente y Número de Documento son de solo lectura en modo edición (excepto admin)
+        es_admin = self.username.lower() == "admin"
+        deshabilitar_campos = es_edicion and not es_admin
+        
+        self.crear_campo(general_frame, 0, "Cliente:", "Cliente", deshabilitado=deshabilitar_campos)
+        self.crear_campo(general_frame, 1, "Núm. Doc. Cliente:", "Numero_Documento_Cliente", deshabilitado=deshabilitar_campos)
         self.crear_campo(general_frame, 2, "Persona de Contacto:", "Persona_de_Contacto")
         self.crear_campo(general_frame, 3, "Email de Contacto:", "Email_de_Contacto")
         self.crear_campo(general_frame, 4, "Autorización:", "Autorizacion", tipo="optionmenu", opciones=self.OPCIONES["Autorizacion"], valor_defecto="NO")
         self.crear_campo(general_frame, 5, "Motivo Devolucion:", "motivo")
         
-        # Fechas y Creador (Solo lectura)
+        # Fechas y Creador (Solo lectura excepto admin)
         self.crear_campo(general_frame, 6, "Fecha Emisión:", "Fecha_Emision", 
-                         valor_defecto=fecha_emision_valor, deshabilitado=True)
+                         valor_defecto=fecha_emision_valor, deshabilitado=not es_admin)
         self.crear_campo(general_frame, 7, "Creado Por:", "Creado_Por", 
-                         valor_defecto=usuario_actual, deshabilitado=True)
+                         valor_defecto=usuario_actual, deshabilitado=not es_admin)
 
 
         # B) PESTAÑA ESTADOS Y FECHAS
@@ -5329,6 +5332,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
         )
         self.btn_guardar_rma.pack(side="left", padx=(0, 5))
         
+        # Botón de eliminar expediente (solo para admin en modo edición)
+        if es_edicion and self.username.lower() == "admin":
+            self.btn_eliminar_rma = ctk.CTkButton(
+                btn_action_frame,
+                text="🗑️ ELIMINAR EXPEDIENTE",
+                fg_color="red",
+                hover_color="darkred",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                command=lambda: self.eliminar_expediente(rma_id)
+            )
+            self.btn_eliminar_rma.pack(side="left", padx=(5, 0))
+        
         # Lógica de Edición
         if es_edicion:
             # self.lbl_codigo_rma.configure(text="Cargando datos...")
@@ -5669,6 +5684,187 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.guardar_nuevo_rma()
         else:
             self.actualizar_rma()
+
+    def eliminar_expediente(self, rma_id):
+        """
+        Elimina un expediente completo incluyendo todos sus datos relacionados.
+        Solo disponible para usuario admin.
+        """
+        # Verificar permisos de admin
+        if self.username.lower() != "admin":
+            messagebox.showerror("Acceso Denegado", "Solo el administrador puede eliminar expedientes.")
+            return
+        
+        try:
+            conn = self.master.conectar_db()
+            cursor = conn.cursor()
+            
+            # Obtener información del expediente para mostrar en la advertencia
+            cursor.execute("""
+                SELECT codigo_rma, cliente, numero_documento_cliente, resultado_expediente
+                FROM rma_maestro 
+                WHERE id = ?
+            """, (rma_id,))
+            info_exp = cursor.fetchone()
+            
+            if not info_exp:
+                messagebox.showerror("Error", "No se encontró el expediente.")
+                return
+            
+            codigo_rma, cliente, num_doc, resultado = info_exp
+            
+            # Contar datos relacionados
+            cursor.execute("SELECT COUNT(*) FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            num_articulos = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM rma_historial WHERE rma_id = ?", (rma_id,))
+            num_historial = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM tareas WHERE expediente_codigo = ?", (codigo_rma,))
+            num_tareas = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            # Crear ventana de advertencia personalizada
+            ventana_advertencia = ctk.CTkToplevel(self)
+            ventana_advertencia.title("⚠️ ADVERTENCIA - Eliminar Expediente")
+            ventana_advertencia.geometry("600x450")
+            ventana_advertencia.transient(self)
+            ventana_advertencia.grab_set()
+            
+            # Frame principal
+            main_frame = ctk.CTkFrame(ventana_advertencia)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Título de advertencia
+            lbl_titulo = ctk.CTkLabel(
+                main_frame,
+                text="⚠️ ADVERTENCIA: ELIMINACIÓN PERMANENTE",
+                font=ctk.CTkFont(size=18, weight="bold"),
+                text_color="red"
+            )
+            lbl_titulo.pack(pady=(0, 20))
+            
+            # Información del expediente
+            info_frame = ctk.CTkFrame(main_frame)
+            info_frame.pack(fill="x", pady=10)
+            
+            info_texto = f"""
+EXPEDIENTE A ELIMINAR:
+
+• Código RMA: {codigo_rma}
+• Cliente: {cliente}
+• Número Documento: {num_doc}
+• Resultado: {resultado or 'Sin resultado'}
+
+DATOS RELACIONADOS QUE SE ELIMINARÁN:
+
+• Artículos en RMA: {num_articulos}
+• Registros de historial: {num_historial}
+• Tareas asociadas: {num_tareas}
+
+⚠️ ESTA ACCIÓN NO SE PUEDE DESHACER ⚠️
+            """
+            
+            lbl_info = ctk.CTkLabel(
+                info_frame,
+                text=info_texto,
+                font=ctk.CTkFont(size=13),
+                justify="left"
+            )
+            lbl_info.pack(padx=10, pady=10)
+            
+            # Campo de confirmación
+            lbl_confirmar = ctk.CTkLabel(
+                main_frame,
+                text='Para confirmar, escriba "ELIMINAR" en el campo siguiente:',
+                font=ctk.CTkFont(size=12, weight="bold")
+            )
+            lbl_confirmar.pack(pady=(10, 5))
+            
+            entry_confirmar = ctk.CTkEntry(
+                main_frame,
+                width=300,
+                font=ctk.CTkFont(size=14)
+            )
+            entry_confirmar.pack(pady=5)
+            
+            # Frame de botones
+            btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+            btn_frame.pack(pady=20)
+            
+            def ejecutar_eliminacion():
+                """Ejecuta la eliminación si la confirmación es correcta"""
+                confirmacion = entry_confirmar.get().strip().upper()
+                
+                if confirmacion != "ELIMINAR":
+                    messagebox.showwarning("Confirmación Incorrecta", 
+                                         'Debe escribir exactamente "ELIMINAR" para confirmar.')
+                    return
+                
+                try:
+                    conn = self.master.conectar_db()
+                    cursor = conn.cursor()
+                    
+                    # Eliminar en orden de dependencias
+                    # 1. Detalles de artículos
+                    cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+                    
+                    # 2. Historial
+                    cursor.execute("DELETE FROM rma_historial WHERE rma_id = ?", (rma_id,))
+                    
+                    # 3. Tareas asociadas
+                    cursor.execute("DELETE FROM tareas WHERE expediente_codigo = ?", (codigo_rma,))
+                    
+                    # 4. Finalmente el registro maestro
+                    cursor.execute("DELETE FROM rma_maestro WHERE id = ?", (rma_id,))
+                    
+                    conn.commit()
+                    conn.close()
+                    
+                    messagebox.showinfo("Expediente Eliminado", 
+                                      f"El expediente {codigo_rma} y todos sus datos relacionados han sido eliminados correctamente.")
+                    
+                    ventana_advertencia.destroy()
+                    
+                    # Cerrar la ventana del expediente actual
+                    if hasattr(self, 'destroy'):
+                        self.destroy()
+                    
+                    # Refrescar la tabla principal si existe
+                    if hasattr(self.master, 'actualizar_tabla_rmas'):
+                        self.master.actualizar_tabla_rmas()
+                        
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al eliminar el expediente:\n{str(e)}")
+            
+            btn_eliminar = ctk.CTkButton(
+                btn_frame,
+                text="🗑️ ELIMINAR EXPEDIENTE",
+                fg_color="red",
+                hover_color="darkred",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                command=ejecutar_eliminacion,
+                width=200
+            )
+            btn_eliminar.pack(side="left", padx=5)
+            
+            btn_cancelar = ctk.CTkButton(
+                btn_frame,
+                text="✖ Cancelar",
+                fg_color="gray",
+                hover_color="darkgray",
+                font=ctk.CTkFont(size=14),
+                command=ventana_advertencia.destroy,
+                width=150
+            )
+            btn_cancelar.pack(side="left", padx=5)
+            
+            # Focus en el campo de confirmación
+            entry_confirmar.focus()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al procesar la eliminación:\n{str(e)}")
 
     def guardar_nuevo_rma(self):
         """Valida los campos y realiza la inserción en rma_maestro y rma_detalles."""
@@ -6564,17 +6760,55 @@ class VentanaPrincipal(ctk.CTkToplevel):
         datos_antiguos = dict(zip(columnas_maestro_db, cursor.fetchone()))
         
         # 2. Obtener datos nuevos del formulario
-        cursor.execute("SELECT * FROM rma_maestro WHERE id = ?", (rma_id,))
-        columnas_maestro_db = [col[0] for col in cursor.description]
-        datos_antiguos = dict(zip(columnas_maestro_db, cursor.fetchone()))
-        
-        # 2. Obtener datos nuevos del formulario
         datos_nuevos = self.obtener_datos_actuales_maestro()
         
         # Si la recolección devolvió None, significa que había fechas inválidas y ya se mostró un error
         if datos_nuevos is None:
             conn.close()
             return
+
+        # ⚠️ ADVERTENCIA ADMIN: Cambios en campos críticos
+        if self.username.lower() == "admin":
+            campos_criticos_modificados = []
+            
+            # Verificar cambios en Cliente
+            cliente_antiguo = datos_antiguos.get('cliente', '')
+            cliente_nuevo = datos_nuevos.get('cliente', '')
+            if str(cliente_antiguo).strip() != str(cliente_nuevo).strip():
+                campos_criticos_modificados.append(f"• Cliente: '{cliente_antiguo}' → '{cliente_nuevo}'")
+            
+            # Verificar cambios en Número de Documento
+            num_doc_antiguo = datos_antiguos.get('numero_documento_cliente', '')
+            num_doc_nuevo = datos_nuevos.get('numero_documento_cliente', '')
+            if str(num_doc_antiguo).strip() != str(num_doc_nuevo).strip():
+                campos_criticos_modificados.append(f"• Número Documento: '{num_doc_antiguo}' → '{num_doc_nuevo}'")
+            
+            # Verificar cambios en Fecha Emisión
+            fecha_emision_antigua = datos_antiguos.get('fecha_emision', '')
+            fecha_emision_nueva = datos_nuevos.get('fecha_emision', '')
+            if str(fecha_emision_antigua).strip() != str(fecha_emision_nueva).strip():
+                campos_criticos_modificados.append(f"• Fecha Emisión: '{fecha_emision_antigua}' → '{fecha_emision_nueva}'")
+            
+            # Verificar cambios en Creado Por
+            creado_por_antiguo = datos_antiguos.get('creado_por', '')
+            creado_por_nuevo = datos_nuevos.get('creado_por', '')
+            if str(creado_por_antiguo).strip() != str(creado_por_nuevo).strip():
+                campos_criticos_modificados.append(f"• Creado Por: '{creado_por_antiguo}' → '{creado_por_nuevo}'")
+            
+            # Si hay cambios críticos, mostrar advertencia
+            if campos_criticos_modificados:
+                mensaje_cambios = "\n".join(campos_criticos_modificados)
+                respuesta = messagebox.askyesno(
+                    "⚠️ ADVERTENCIA - Modificación de Campos Críticos",
+                    f"ADMIN: Está modificando campos críticos del expediente:\n\n"
+                    f"{mensaje_cambios}\n\n"
+                    f"Estos cambios quedarán registrados en el historial.\n\n"
+                    f"¿Confirmar modificación?"
+                )
+                
+                if not respuesta:
+                    conn.close()
+                    return
 
         # Aviso: si el número de documento nuevo contiene valores provisionales, pedir confirmación
         try:
