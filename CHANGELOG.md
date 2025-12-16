@@ -1,5 +1,6 @@
-Cambios V.0.1.27 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.28 - ✨ Últimas mejoras implementadas:
 
+- 📊 Añadida estadistica para el control de clientes que presentan el material antes de la autorizacion.
 - Añadidos los campos en la pestaña de Contabilidad de la ficha de los expedientes:
     * Numero Albaran Reposicion
     * Fecha Albaran Reposicion
