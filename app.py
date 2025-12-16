@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.29"
+APP_VERSION = "v0.1.30"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6116,9 +6116,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             else:
                 messagebox.showinfo("Expediente Guardado", "El expediente se ha actualizado correctamente.")
             
-            self.current_rma_id = rma_id_generado # Asigna el ID al atributo de instancia
-            self.mode = 'editar'                   # Cambia la ventana a modo edición
-            self.es_modo_edicion = True           # Actualizar el indicador
+            # IMPORTANTE: Actualizar ambos IDs para que el siguiente guardado use actualizar_rma()
+            self.current_rma_id = rma_id_generado  # Asigna el ID al atributo de instancia
+            self.rma_actual_id = rma_id_generado   # CRÍTICO: Actualizar para que guardar_rma_placeholder() use actualizar_rma()
+            self.mode = 'editar'                    # Cambia la ventana a modo edición
+            self.es_modo_edicion = True            # Actualizar el indicador
             
             # Eliminamos la llamada a self.mostrar_lista_rma() para mantener la vista abierta.
             
