@@ -30,7 +30,21 @@ class RmaEditorWindow(ctk.CTkToplevel):
         # Configurar ventana
         titulo = f"EDITAR EXPEDIENTE #{rma_id}" if rma_id else "CREAR NUEVO EXPEDIENTE"
         self.title(f"Gestor de Expedientes RMA - {titulo}")
-        self.geometry("1400x900")
+        
+        # Tamaño de la ventana
+        window_width = 1400
+        window_height = 900
+        
+        # Obtener tamaño de la pantalla
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Calcular posición centrada
+        center_x = int((screen_width - window_width) / 2)
+        center_y = int((screen_height - window_height) / 2)
+        
+        # Aplicar geometría con posición centrada
+        self.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
         
         # Habilitar botones de maximizar/minimizar/redimensionar
         self.resizable(True, True)
