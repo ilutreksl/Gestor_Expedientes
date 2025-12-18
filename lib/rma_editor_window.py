@@ -48,6 +48,15 @@ class RmaEditorWindow(ctk.CTkToplevel):
         
         # Habilitar botones de maximizar/minimizar/redimensionar
         self.resizable(True, True)
+        
+        # Mantener ventana siempre al frente
+        self.attributes('-topmost', True)
+        self.lift()
+        self.focus_force()
+        
+        # Asegurar que se mantenga al frente cuando pierde el foco
+        self.bind('<FocusIn>', lambda e: self.lift())
+        self.bind('<Visibility>', lambda e: self.lift())
         self.attributes('-topmost', False)
         
         # NO hacer la ventana modal para permitir múltiples ventanas

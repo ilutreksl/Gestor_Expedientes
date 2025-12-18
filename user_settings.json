@@ -63,6 +63,14 @@
           "fecha": "2025-11-05T08:30:00"
         }
       ]
+    },
+    "Carlos": {
+      "date_format": "YYYY-MM-DD",
+      "show_tooltips": true,
+      "compact_mode": true,
+      "icon_size": 24,
+      "theme": "themes/BH_rime.json",
+      "appearance_mode": "light"
     }
   }
 }
