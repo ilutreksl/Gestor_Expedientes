@@ -1,0 +1,47 @@
+name: Backup Turso Database
+
+on:
+  schedule:
+    # Cada viernes a las 17:00 (hora de España UTC+1)
+    # En UTC es las 16:00
+    - cron: '0 16 * * 5'
+  
+  # Permite ejecutar manualmente desde GitHub
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: 📦 Instalar dependencias
+        run: |
+          pip install requests
+      
+      - name: 💾 Ejecutar backup
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          EMAIL_HOST: smtp.gmail.com
+          EMAIL_PORT: 587
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: carlos@ilutrek.es
+        run: |
+          python scripts/backup_turso.py
+      
+      - name: ✅ Backup completado
+        if: success()
+        run: echo "Backup completado y enviado correctamente"
+      
+      - name: ❌ Backup falló
+        if: failure()
+        run: echo "Error en el backup - revisar logs"
