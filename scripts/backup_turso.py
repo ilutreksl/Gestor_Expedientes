@@ -16,6 +16,17 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
+# Cargar variables de entorno desde .env si existe (para pruebas locales)
+env_path = Path(__file__).parent.parent / '.env'
+if env_path.exists():
+    with open(env_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                if key not in os.environ:  # No sobrescribir si ya existe
+                    os.environ[key] = value
+
 # Configuración
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
@@ -24,6 +35,10 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_TO = os.getenv("EMAIL_TO", "carlos@ilutrek.es")
+
+# Convertir URL de Turso de libsql:// a https://
+if TURSO_DATABASE_URL and TURSO_DATABASE_URL.startswith("libsql://"):
+    TURSO_DATABASE_URL = TURSO_DATABASE_URL.replace("libsql://", "https://")
 
 def log(mensaje):
     """Imprime mensaje con timestamp"""
@@ -34,22 +49,29 @@ def obtener_tablas_turso():
     try:
         headers = {"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"}
         payload = {
-            "requests": [{"type": "execute", "stmt": {"sql": "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name", "args": []}}]
+            "statements": ["SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"]
         }
         
+        log(f"Conectando a: {TURSO_DATABASE_URL}")
         response = requests.post(TURSO_DATABASE_URL, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code != 200:
+            log(f"❌ Status code: {response.status_code}")
+            log(f"❌ Error response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            results = data.get("results", [])
-            if results:
-                rows = results[0].get("response", {}).get("result", {}).get("rows", [])
-                tablas = [row.get("values", [])[0] for row in rows if row.get("values")]
+            # La respuesta es directamente una lista de resultados
+            if isinstance(data, list) and len(data) > 0:
+                rows = data[0].get("results", {}).get("rows", [])
+                tablas = [row[0] for row in rows if row]
                 return tablas
         
         return []
     except Exception as e:
         log(f"❌ Error al obtener tablas: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def contar_registros(tabla):
@@ -57,18 +79,17 @@ def contar_registros(tabla):
     try:
         headers = {"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"}
         payload = {
-            "requests": [{"type": "execute", "stmt": {"sql": f"SELECT COUNT(*) FROM {tabla}", "args": []}}]
+            "statements": [f"SELECT COUNT(*) FROM {tabla}"]
         }
         
         response = requests.post(TURSO_DATABASE_URL, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
-            results = data.get("results", [])
-            if results:
-                rows = results[0].get("response", {}).get("result", {}).get("rows", [])
+            if isinstance(data, list) and len(data) > 0:
+                rows = data[0].get("results", {}).get("rows", [])
                 if rows:
-                    return rows[0].get("values", [])[0]
+                    return rows[0][0]
         
         return 0
     except:
@@ -79,18 +100,17 @@ def obtener_schema_tabla(tabla):
     try:
         headers = {"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"}
         payload = {
-            "requests": [{"type": "execute", "stmt": {"sql": f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tabla}'", "args": []}}]
+            "statements": [f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tabla}'"]
         }
         
         response = requests.post(TURSO_DATABASE_URL, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
-            results = data.get("results", [])
-            if results:
-                rows = results[0].get("response", {}).get("result", {}).get("rows", [])
+            if isinstance(data, list) and len(data) > 0:
+                rows = data[0].get("results", {}).get("rows", [])
                 if rows:
-                    return rows[0].get("values", [])[0]
+                    return rows[0][0]
         
         return None
     except Exception as e:
@@ -102,17 +122,16 @@ def obtener_datos_tabla(tabla):
     try:
         headers = {"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"}
         payload = {
-            "requests": [{"type": "execute", "stmt": {"sql": f"SELECT * FROM {tabla}", "args": []}}]
+            "statements": [f"SELECT * FROM {tabla}"]
         }
         
         response = requests.post(TURSO_DATABASE_URL, headers=headers, json=payload, timeout=60)
         
         if response.status_code == 200:
             data = response.json()
-            results = data.get("results", [])
-            if results:
-                result = results[0].get("response", {}).get("result", {})
-                columns = [col.get("name") for col in result.get("cols", [])]
+            if isinstance(data, list) and len(data) > 0:
+                result = data[0].get("results", {})
+                columns = result.get("columns", [])
                 rows = result.get("rows", [])
                 return columns, rows
         
@@ -159,8 +178,7 @@ def crear_backup_db(tablas):
             insert_sql = f"INSERT INTO {tabla} ({','.join(columns)}) VALUES ({placeholders})"
             
             for row in rows:
-                valores = row.get("values", [])
-                cursor.execute(insert_sql, valores)
+                cursor.execute(insert_sql, row)
                 total_registros += 1
             
             log(f"✅ {tabla}: {len(rows)} registros")
@@ -202,9 +220,8 @@ def crear_backup_sql(tablas):
                 columns, rows = obtener_datos_tabla(tabla)
                 if columns and rows:
                     for row in rows:
-                        valores = row.get("values", [])
                         valores_sql = []
-                        for v in valores:
+                        for v in row:
                             if v is None:
                                 valores_sql.append("NULL")
                             elif isinstance(v, str):
