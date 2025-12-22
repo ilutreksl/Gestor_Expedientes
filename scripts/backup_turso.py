@@ -28,7 +28,7 @@ if env_path.exists():
                     os.environ[key] = value
 
 # Configuración
-TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
@@ -37,8 +37,11 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_TO = os.getenv("EMAIL_TO", "carlos@ilutrek.es")
 
 # Convertir URL de Turso de libsql:// a https://
-if TURSO_DATABASE_URL and TURSO_DATABASE_URL.startswith("libsql://"):
+if TURSO_DATABASE_URL.startswith("libsql://"):
     TURSO_DATABASE_URL = TURSO_DATABASE_URL.replace("libsql://", "https://")
+elif not TURSO_DATABASE_URL.startswith("http"):
+    # Si no tiene protocolo, agregar https://
+    TURSO_DATABASE_URL = f"https://{TURSO_DATABASE_URL}"
 
 def log(mensaje):
     """Imprime mensaje con timestamp"""
