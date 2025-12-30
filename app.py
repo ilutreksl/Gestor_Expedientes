@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.32"
+APP_VERSION = "v0.1.33"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -10839,7 +10839,15 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             hoy = datetime.date.today().strftime("%Y-%m-%d")
             conn = connect_db()
             cur = conn.cursor()
-            cur.execute("SELECT id, codigo_rma, titulo, fecha_vencimiento FROM tareas WHERE creado_por = ? AND notificado = 0 AND fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= ?", (self.username, hoy))
+            cur.execute("""
+                SELECT id, codigo_rma, titulo, fecha_vencimiento 
+                FROM tareas 
+                WHERE creado_por = ? 
+                AND notificado = 0 
+                AND fecha_vencimiento IS NOT NULL 
+                AND fecha_vencimiento <= ?
+                AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
+            """, (self.username, hoy))
             filas = cur.fetchall()
             if filas:
                 mensajes = []
