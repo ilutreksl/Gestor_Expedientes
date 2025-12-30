@@ -71,7 +71,8 @@ def autenticar_b2():
             return {
                 'authorizationToken': data['authorizationToken'],
                 'apiUrl': data['apiUrl'],
-                'downloadUrl': data['downloadUrl']
+                'downloadUrl': data['downloadUrl'],
+                'accountId': data['accountId']
             }
         else:
             log(f"❌ Error de autenticación B2: {response.text}")
@@ -84,7 +85,7 @@ def obtener_bucket_id(auth_data):
     """Obtiene el ID del bucket"""
     try:
         headers = {"Authorization": auth_data['authorizationToken']}
-        payload = {"accountId": B2_KEY_ID.split(':')[0] if ':' in B2_KEY_ID else B2_KEY_ID[:24], "bucketName": B2_BUCKET_NAME}
+        payload = {"accountId": auth_data['accountId'], "bucketName": B2_BUCKET_NAME}
         
         response = requests.post(
             f"{auth_data['apiUrl']}/b2api/v2/b2_list_buckets",
