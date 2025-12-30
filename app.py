@@ -312,7 +312,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.31"
+APP_VERSION = "v0.1.32"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -10410,6 +10410,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
         sf.bind("<Configure>", on_sf_configure)
         canvas.bind("<Configure>", on_canvas_config)
+        
+        # Habilitar scroll con rueda del mouse
+        def on_mousewheel(event):
+            try:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except Exception:
+                pass
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        # Limpiar binding cuando se cierre la ventana
+        win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         # Controles de búsqueda y paginación en el header
         search_var = tk.StringVar()
