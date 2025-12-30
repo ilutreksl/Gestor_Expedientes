@@ -1,6 +1,6 @@
 """
 Script de Backup Automático de Turso Database
-Exporta la base de datos a formato .db y .sql y envía por email
+Exporta la base de datos a formato .db y .sql y sube a Backblaze B2
 """
 
 import os
@@ -13,8 +13,8 @@ from pathlib import Path
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
+import hashlib
+import base64
 
 # Cargar variables de entorno desde .env si existe (para pruebas locales)
 env_path = Path(__file__).parent.parent / '.env'
@@ -36,6 +36,12 @@ EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_TO = os.getenv("EMAIL_TO", "carlos@ilutrek.es")
 
+# Backblaze B2
+B2_KEY_ID = os.getenv("B2_KEY_ID")
+B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
+B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME", "gestion-expedientes-app-b2")
+MAX_BACKUPS = 30  # Número máximo de backups antes de mover a archivo
+
 # Convertir URL de Turso de libsql:// a https://
 if TURSO_DATABASE_URL.startswith("libsql://"):
     TURSO_DATABASE_URL = TURSO_DATABASE_URL.replace("libsql://", "https://")
@@ -46,6 +52,240 @@ elif not TURSO_DATABASE_URL.startswith("http"):
 def log(mensaje):
     """Imprime mensaje con timestamp"""
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {mensaje}")
+
+def autenticar_b2():
+    """Autentica con Backblaze B2 y obtiene token de autorización"""
+    try:
+        log("🔐 Autenticando con Backblaze B2...")
+        
+        # Crear credenciales en base64
+        id_and_key = f"{B2_KEY_ID}:{B2_APPLICATION_KEY}"
+        basic_auth = base64.b64encode(id_and_key.encode()).decode()
+        
+        headers = {"Authorization": f"Basic {basic_auth}"}
+        response = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            log("✅ Autenticación exitosa con B2")
+            return {
+                'authorizationToken': data['authorizationToken'],
+                'apiUrl': data['apiUrl'],
+                'downloadUrl': data['downloadUrl']
+            }
+        else:
+            log(f"❌ Error de autenticación B2: {response.text}")
+            return None
+    except Exception as e:
+        log(f"❌ Error al autenticar con B2: {e}")
+        return None
+
+def obtener_bucket_id(auth_data):
+    """Obtiene el ID del bucket"""
+    try:
+        headers = {"Authorization": auth_data['authorizationToken']}
+        payload = {"accountId": B2_KEY_ID.split(':')[0] if ':' in B2_KEY_ID else B2_KEY_ID[:24], "bucketName": B2_BUCKET_NAME}
+        
+        response = requests.post(
+            f"{auth_data['apiUrl']}/b2api/v2/b2_list_buckets",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            buckets = data.get('buckets', [])
+            for bucket in buckets:
+                if bucket['bucketName'] == B2_BUCKET_NAME:
+                    return bucket['bucketId']
+            log(f"❌ Bucket '{B2_BUCKET_NAME}' no encontrado")
+            return None
+        else:
+            log(f"❌ Error al listar buckets: {response.text}")
+            return None
+    except Exception as e:
+        log(f"❌ Error al obtener bucket ID: {e}")
+        return None
+
+def listar_archivos_b2(auth_data, bucket_id, prefix=""):
+    """Lista archivos en el bucket"""
+    try:
+        headers = {"Authorization": auth_data['authorizationToken']}
+        payload = {
+            "bucketId": bucket_id,
+            "prefix": prefix,
+            "maxFileCount": 10000
+        }
+        
+        response = requests.post(
+            f"{auth_data['apiUrl']}/b2api/v2/b2_list_file_names",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('files', [])
+        else:
+            log(f"⚠️ Error al listar archivos: {response.text}")
+            return []
+    except Exception as e:
+        log(f"⚠️ Error al listar archivos: {e}")
+        return []
+
+def subir_archivo_b2(auth_data, bucket_id, archivo_path, nombre_remoto):
+    """Sube un archivo a Backblaze B2"""
+    try:
+        # Obtener URL de subida
+        headers = {"Authorization": auth_data['authorizationToken']}
+        payload = {"bucketId": bucket_id}
+        
+        response = requests.post(
+            f"{auth_data['apiUrl']}/b2api/v2/b2_get_upload_url",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            log(f"❌ Error al obtener URL de subida: {response.text}")
+            return False
+        
+        upload_data = response.json()
+        upload_url = upload_data['uploadUrl']
+        upload_token = upload_data['authorizationToken']
+        
+        # Leer archivo y calcular SHA1
+        with open(archivo_path, 'rb') as f:
+            file_data = f.read()
+        
+        sha1 = hashlib.sha1(file_data).hexdigest()
+        
+        # Subir archivo
+        upload_headers = {
+            "Authorization": upload_token,
+            "X-Bz-File-Name": nombre_remoto,
+            "Content-Type": "application/octet-stream",
+            "X-Bz-Content-Sha1": sha1
+        }
+        
+        response = requests.post(upload_url, headers=upload_headers, data=file_data, timeout=300)
+        
+        if response.status_code == 200:
+            log(f"✅ Archivo subido: {nombre_remoto}")
+            return True
+        else:
+            log(f"❌ Error al subir archivo: {response.text}")
+            return False
+            
+    except Exception as e:
+        log(f"❌ Error al subir archivo: {e}")
+        return False
+
+def mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
+    """Mueve/renombra un archivo en B2"""
+    try:
+        headers = {"Authorization": auth_data['authorizationToken']}
+        
+        # Primero obtener el fileId del archivo actual
+        archivos = listar_archivos_b2(auth_data, bucket_id, nombre_actual)
+        file_id = None
+        
+        for archivo in archivos:
+            if archivo['fileName'] == nombre_actual:
+                file_id = archivo['fileId']
+                break
+        
+        if not file_id:
+            log(f"⚠️ Archivo no encontrado para mover: {nombre_actual}")
+            return False
+        
+        # Copiar archivo a nueva ubicación
+        payload = {
+            "sourceFileId": file_id,
+            "fileName": nombre_nuevo
+        }
+        
+        response = requests.post(
+            f"{auth_data['apiUrl']}/b2api/v2/b2_copy_file",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            log(f"⚠️ Error al copiar archivo: {response.text}")
+            return False
+        
+        # Eliminar archivo original
+        delete_payload = {
+            "fileId": file_id,
+            "fileName": nombre_actual
+        }
+        
+        response = requests.post(
+            f"{auth_data['apiUrl']}/b2api/v2/b2_delete_file_version",
+            headers=headers,
+            json=delete_payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            log(f"✅ Archivo movido: {nombre_actual} → {nombre_nuevo}")
+            return True
+        else:
+            log(f"⚠️ Error al eliminar archivo original: {response.text}")
+            return False
+            
+    except Exception as e:
+        log(f"❌ Error al mover archivo: {e}")
+        return False
+
+def gestionar_rotacion_backups(auth_data, bucket_id):
+    """Gestiona la rotación de backups: mantiene 30 y mueve antiguos a Archivo"""
+    try:
+        log("🔄 Verificando rotación de backups...")
+        
+        # Listar backups actuales (no en carpeta Archivo)
+        todos_archivos = listar_archivos_b2(auth_data, bucket_id)
+        backups = [f for f in todos_archivos if f['fileName'].startswith('backup_turso_') and not f['fileName'].startswith('Archivo/')]
+        
+        # Ordenar por nombre (que incluye fecha) - más antiguos primero
+        backups_db = sorted([f for f in backups if f['fileName'].endswith('.db')], key=lambda x: x['fileName'])
+        backups_sql = sorted([f for f in backups if f['fileName'].endswith('.sql')], key=lambda x: x['fileName'])
+        
+        archivos_movidos = 0
+        
+        # Si hay más de 30 backups .db, mover los antiguos
+        while len(backups_db) > MAX_BACKUPS:
+            backup_antiguo = backups_db.pop(0)
+            nombre_actual = backup_antiguo['fileName']
+            nombre_nuevo = f"Archivo/{nombre_actual}"
+            
+            if mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
+                archivos_movidos += 1
+        
+        # Si hay más de 30 backups .sql, mover los antiguos
+        while len(backups_sql) > MAX_BACKUPS:
+            backup_antiguo = backups_sql.pop(0)
+            nombre_actual = backup_antiguo['fileName']
+            nombre_nuevo = f"Archivo/{nombre_actual}"
+            
+            if mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
+                archivos_movidos += 1
+        
+        if archivos_movidos > 0:
+            log(f"📁 {archivos_movidos} archivos movidos a carpeta Archivo")
+        else:
+            log(f"✅ Rotación OK: {len(backups_db)} backups .db y {len(backups_sql)} backups .sql")
+        
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error en rotación de backups: {e}")
+        return False
 
 def obtener_tablas_turso():
     """Obtiene la lista de tablas de la base de datos"""
@@ -246,8 +486,8 @@ def crear_backup_sql(tablas):
         log(f"❌ Error al crear backup .sql: {e}")
         return None, 0
 
-def enviar_email(db_path, sql_path, estadisticas, errores=None):
-    """Envía email con los backups adjuntos"""
+def enviar_email(estadisticas, errores=None, b2_urls=None):
+    """Envía email con estadísticas del backup (sin adjuntos)"""
     try:
         log("📧 Preparando email...")
         
@@ -272,10 +512,15 @@ Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
   • Tamaño backup .db: {estadisticas.get('size_db', '0 KB')}
   • Tamaño backup .sql: {estadisticas.get('size_sql', '0 KB')}
 
-📁 ARCHIVOS ADJUNTOS:
-  • {db_path.name if db_path else 'No disponible'}
-  • {sql_path.name if sql_path else 'No disponible'}
+☁️ BACKBLAZE B2:
+  • Bucket: {B2_BUCKET_NAME}
+  • Archivos subidos: {estadisticas.get('archivos_subidos', 0)}
 """
+        
+        if b2_urls:
+            cuerpo += f"  • Archivos en B2:\n"
+            for url in b2_urls:
+                cuerpo += f"    - {url}\n"
         
         if errores:
             cuerpo += f"\n⚠️ ERRORES ENCONTRADOS:\n{errores}\n"
@@ -287,17 +532,6 @@ Sistema de Gestión de Expedientes RMA - ILUTREK S.L.
 """
         
         msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
-        
-        # Adjuntar archivos
-        for archivo_path in [db_path, sql_path]:
-            if archivo_path and archivo_path.exists():
-                with open(archivo_path, 'rb') as f:
-                    part = MIMEBase('application', 'octet-stream')
-                    part.set_payload(f.read())
-                    encoders.encode_base64(part)
-                    part.add_header('Content-Disposition', f'attachment; filename={archivo_path.name}')
-                    msg.attach(part)
-                    log(f"📎 Adjuntado: {archivo_path.name}")
         
         # Enviar
         log(f"📤 Enviando email a {EMAIL_TO}...")
@@ -321,13 +555,28 @@ def main():
     log("="*60)
     
     errores = []
+    b2_urls = []
     
     # Verificar variables de entorno
-    if not all([TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, EMAIL_USER, EMAIL_PASSWORD]):
+    if not all([TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, EMAIL_USER, EMAIL_PASSWORD, B2_KEY_ID, B2_APPLICATION_KEY]):
         log("❌ ERROR: Faltan variables de entorno requeridas")
         sys.exit(1)
     
     try:
+        # Autenticar con B2
+        auth_data = autenticar_b2()
+        if not auth_data:
+            log("❌ No se pudo autenticar con Backblaze B2")
+            sys.exit(1)
+        
+        # Obtener bucket ID
+        bucket_id = obtener_bucket_id(auth_data)
+        if not bucket_id:
+            log("❌ No se pudo obtener el ID del bucket")
+            sys.exit(1)
+        
+        log(f"✅ Bucket encontrado: {B2_BUCKET_NAME} (ID: {bucket_id})")
+        
         # Obtener tablas
         log("📋 Obteniendo lista de tablas...")
         tablas = obtener_tablas_turso()
@@ -354,7 +603,8 @@ def main():
             'tablas': len(tablas),
             'registros': registros_db or registros_sql,
             'size_db': f"{db_path.stat().st_size / 1024:.2f} KB" if db_path and db_path.exists() else "0 KB",
-            'size_sql': f"{sql_path.stat().st_size / 1024:.2f} KB" if sql_path and sql_path.exists() else "0 KB"
+            'size_sql': f"{sql_path.stat().st_size / 1024:.2f} KB" if sql_path and sql_path.exists() else "0 KB",
+            'archivos_subidos': 0
         }
         
         if not db_path:
@@ -362,13 +612,42 @@ def main():
         if not sql_path:
             errores.append("- No se pudo crear el backup .sql")
         
-        # Enviar email
+        # Subir archivos a B2
         log("\n" + "="*60)
-        log("📧 Enviando backup por email")
+        log("☁️ Subiendo backups a Backblaze B2")
+        log("="*60)
+        
+        archivos_subidos = 0
+        
+        if db_path and db_path.exists():
+            if subir_archivo_b2(auth_data, bucket_id, db_path, db_path.name):
+                archivos_subidos += 1
+                b2_urls.append(db_path.name)
+            else:
+                errores.append(f"- Error al subir {db_path.name}")
+        
+        if sql_path and sql_path.exists():
+            if subir_archivo_b2(auth_data, bucket_id, sql_path, sql_path.name):
+                archivos_subidos += 1
+                b2_urls.append(sql_path.name)
+            else:
+                errores.append(f"- Error al subir {sql_path.name}")
+        
+        estadisticas['archivos_subidos'] = archivos_subidos
+        
+        # Gestionar rotación de backups
+        log("\n" + "="*60)
+        log("🔄 Gestionando rotación de backups")
+        log("="*60)
+        gestionar_rotacion_backups(auth_data, bucket_id)
+        
+        # Enviar email con estadísticas
+        log("\n" + "="*60)
+        log("📧 Enviando notificación por email")
         log("="*60)
         
         errores_texto = "\n".join(errores) if errores else None
-        email_ok = enviar_email(db_path, sql_path, estadisticas, errores_texto)
+        email_ok = enviar_email(estadisticas, errores_texto, b2_urls)
         
         # Limpiar archivos temporales
         if db_path and db_path.exists():
@@ -379,7 +658,7 @@ def main():
             log(f"🗑️  Eliminado archivo temporal: {sql_path}")
         
         log("\n" + "="*60)
-        if email_ok and not errores:
+        if email_ok and not errores and archivos_subidos == 2:
             log("✅ Backup completado exitosamente")
             log("="*60)
             sys.exit(0)

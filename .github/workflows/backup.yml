@@ -2,9 +2,9 @@ name: Backup Turso Database
 
 on:
   schedule:
-    # Cada viernes a las 17:00 (hora de España UTC+1)
+    # De lunes a viernes a las 17:00 (hora de España UTC+1)
     # En UTC es las 16:00
-    - cron: '0 16 * * 5'
+    - cron: '0 16 * * 1-5'
   
   # Permite ejecutar manualmente desde GitHub
   workflow_dispatch:
@@ -35,6 +35,9 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_TO: carlos@ilutrek.es
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: gestion-expedientes-app-b2
         run: |
           python scripts/backup_turso.py
       
