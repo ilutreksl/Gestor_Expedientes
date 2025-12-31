@@ -313,7 +313,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.35"
+APP_VERSION = "v0.1.36"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4931,7 +4931,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(estados_fechas_frame, text="--- CIERRE/GESTIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Gestión:", "Fecha_Gestion", tipo="date"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Gestionado Por:", "Gestionado_Por", tipo="optionmenu", opciones=self.OPCIONES["Gestionado_Por"], valor_defecto=self.OPCIONES["Gestionado_Por"][0]); fila_estados += 1
-        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha para Factura:", "Fecha_para_factura", tipo="optionmenu", opciones=self.obtener_quincenas_futuras(), valor_defecto=self.obtener_quincenas_futuras()[0]); fila_estados += 1
+        opciones_quincenas = ["Seleccionar..."] + self.obtener_quincenas_futuras()
+        self.crear_campo(estados_fechas_frame, fila_estados, "Fecha para Factura:", "Fecha_para_factura", tipo="optionmenu", opciones=opciones_quincenas, valor_defecto="Seleccionar..."); fila_estados += 1
 
         
         # C) PESTAÑA INFORMACIÓN TÉCNICA (campos técnicos)
@@ -6570,11 +6571,42 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     # 3. Restaurar estado (si no era un campo deshabilitado, se queda en normal)
                     # NOTA: En este formulario es un campo editable, así que se queda en 'normal'
             # -----------------------------------------------
+            
+            # --- TRATAMIENTO ESPECIAL PARA FECHA_PARA_FACTURA ---
+            # Este campo usa quincenas futuras, necesita manejo especial
+            
+            if hasattr(self, 'entry_Fecha_para_factura'):
+                widget_fecha = self.entry_Fecha_para_factura
+                
+                if isinstance(widget_fecha, ctk.CTkOptionMenu):
+                    # Probar con ambos nombres posibles
+                    valor_fecha = datos_maestro.get('fecha_para_factura') or datos_maestro.get('Fecha_para_factura') or datos_maestro.get('Fecha_Para_factura')
+                    
+                    # Normalizar: si es None o la cadena 'None', tratarlo como vacío
+                    if valor_fecha is None or str(valor_fecha).strip().lower() == 'none' or str(valor_fecha).strip() == '':
+                        valor_fecha = None
+                    
+                    if valor_fecha:
+                        # Hay un valor guardado
+                        valores_actuales = list(widget_fecha.cget("values"))
+                        valor_str = str(valor_fecha).strip()
+                        
+                        # Si el valor no está en las opciones (fecha antigua), añadirlo después de "Seleccionar..."
+                        if valor_str and valor_str not in valores_actuales:
+                            valores_actuales.insert(1, valor_str)  # Después de "Seleccionar..."
+                            widget_fecha.configure(values=valores_actuales)
+                        
+                        # Establecer el valor guardado
+                        widget_fecha.set(valor_str)
+                    else:
+                        # No hay valor guardado, establecer "Seleccionar..."
+                        widget_fecha.set("Seleccionar...")
+            
             # --- Mapeo de Columna DB a Variable de Formulario ---
             for columna, valor in datos_maestro.items():
                 
-                # Excluir 'id', 'precio_total_expediente' y 'estado' que no tienen entry directo
-                if columna in ['id', 'precio_total_expediente', 'estado']:
+                # Excluir 'id', 'precio_total_expediente', 'estado' y 'fecha_para_factura' (ya procesado arriba)
+                if columna in ['id', 'precio_total_expediente', 'estado', 'fecha_para_factura']:
                     continue
 
                 # ---------------------------------------------------------------------------------
@@ -6582,9 +6614,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 # ---------------------------------------------------------------------------------
                 entry_name = None
                 
+                # Primero intentar con el nombre exacto del campo (como se crea en crear_campo)
+                nombre_exacto = f"entry_{columna}"
+                if hasattr(self, nombre_exacto):
+                    entry_name = nombre_exacto
                 # Caso A: Campos simples (Sin guiones bajos, como 'motivo', 'cliente', 'creado_por')
                 # ESTA ES LA RUTA CRÍTICA QUE 'motivo' DEBE SEGUIR
-                if '_' not in columna:
+                elif '_' not in columna:
                     # Convierte a título para hacer coincidir la convención (ej: motivo -> Motivo)
                     entry_name = f"entry_{columna.title()}" 
                 
@@ -6698,8 +6734,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         
                     # Tratamiento para OptionMenu General
                     elif isinstance(entry, ctk.CTkOptionMenu):
-                        if str(valor) in entry.cget("values"):  
-                             entry.set(str(valor))
+                        valores_actuales = list(entry.cget("values"))
+                        valor_str = str(valor) if valor is not None else ""
+                        
+                        # Si el valor de la BD no está en las opciones actuales, añadirlo
+                        if valor_str and valor_str not in valores_actuales:
+                            valores_actuales.insert(0, valor_str)  # Añadir al principio
+                            entry.configure(values=valores_actuales)
+                        
+                        # Establecer el valor
+                        if valor_str:
+                            entry.set(valor_str)
                     # Tratamiento para Textbox grande (Observaciones Técnicas u otros)
                     elif isinstance(entry, ctk.CTkTextbox):
                         try:
