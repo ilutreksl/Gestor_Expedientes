@@ -4,7 +4,8 @@
     "date_format": "YYYY-MM-DD",
     "show_tooltips": true,
     "compact_mode": true,
-    "icon_size": 24
+    "icon_size": 24,
+    "mostrar_aviso": true
   },
   "users": {
     "admin": {

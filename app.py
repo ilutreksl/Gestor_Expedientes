@@ -27,6 +27,7 @@ from CTkDatePicker import CTkDatePicker
 from lib.changelog_window import mostrar_ventana_cambios
 from lib.rma_utils import obtener_ultima_actividad, calcular_tiempos_expediente, obtener_color_tiempo, obtener_promedio_cliente
 from lib.video_utils import comprimir_video_inteligente
+from lib.avisos_manager import AvisosManager
 
 import tkinter as tk
 from tkinter import ttk
@@ -312,7 +313,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.33"
+APP_VERSION = "v0.1.34"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1150,6 +1151,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.crear_diseno()
         
+        # Establecer tamaño inicial y centrar la ventana en la pantalla
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Tamaño de la ventana (80% de la pantalla o 1400x700, lo que sea mayor)
+        window_width = max(1400, int(screen_width * 0.8))
+        window_height = max(700, int(screen_height * 0.8))
+        
+        # Calcular posición central
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # Aplicar geometría completa (tamaño + posición)
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
         # Establecer tamaño mínimo para acomodar el dashboard
         self.minsize(1400, 700)
         
@@ -1170,6 +1186,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.programar_chequeo_tareas()
         except Exception:
             pass
+        
+        # Inicializar gestor de avisos
+        try:
+            root_path = os.path.dirname(os.path.abspath(__file__))
+            self.avisos_manager = AvisosManager(root_path)
+            # Mostrar aviso si está activo (con un pequeño delay para que la ventana principal se renderice primero)
+            self.after(500, lambda: self.avisos_manager.mostrar_aviso_popup(self))
+        except Exception as e:
+            print(f"Error al inicializar avisos: {e}")
 
     def verificar_columna_motivo(self):
         """
@@ -8787,7 +8812,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x200")
+        menu_window.geometry("300x260")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
@@ -8823,6 +8848,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                          command=lambda: [menu_window.destroy(), self.mostrar_generar_numero_manual()])
         btn_numero_manual.pack(pady=10)
         
+        # Botón Administrar Avisos
+        btn_avisos = ctk.CTkButton(buttons_frame,
+                                  text="📢 Administrar Avisos",
+                                  width=240,
+                                  height=40,
+                                  fg_color="#16a34a",
+                                  hover_color="#15803d",
+                                  command=lambda: [menu_window.destroy(), self.mostrar_admin_avisos()])
+        btn_avisos.pack(pady=10)
+        
         # Botón Cerrar
         btn_cerrar = ctk.CTkButton(buttons_frame,
                                   text="❌ Cerrar",
@@ -8831,6 +8866,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                   fg_color="gray",
                                   command=menu_window.destroy)
         btn_cerrar.pack(pady=(20, 10))
+    
+    def mostrar_admin_avisos(self):
+        """Muestra el panel de administración de avisos (solo para admin)."""
+        if str(self.rol).strip().lower() not in ("admin", "administrador"):
+            messagebox.showerror("Acceso Denegado", "Solo los administradores pueden gestionar avisos.")
+            return
+        
+        try:
+            self.avisos_manager.mostrar_panel_admin(self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el panel de avisos:\n{e}")
     
     def mostrar_gestion_usuarios(self):
         """Muestra la ventana de gestión de usuarios con opciones para añadir/editar usuarios."""
