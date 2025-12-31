@@ -1,3 +1,10 @@
+V.1.0.0 - Inicio de la aplicacion.
+
+Cambios V.0.1.36
+
+- Corregido fallo con el valor de fecha para facturar. No mostraba el valor correcto, mostrando siempre el mismo valor, aunque en la BD hubiese otro distinto.
+
+
 Cambios V.0.1.35 - ✨ Últimas mejoras implementadas:
 
 - Añadido sistema de avisos del sistema. Administrable desde usuario admin.
