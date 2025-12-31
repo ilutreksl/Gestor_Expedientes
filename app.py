@@ -313,7 +313,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v0.1.34"
+APP_VERSION = "v0.1.35"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1413,6 +1413,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_mas = _load_icon("mas.png")
         self.icon_settings = _load_icon("settings.png")
         self.icon_busqueda = _load_icon("busqueda.png")
+        self.icon_bd = _load_icon("bd.png")
+        self.icon_report = _load_icon("report.png")
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
@@ -1570,7 +1572,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico"):
             self.btn_buscar = ctk.CTkButton(self.sidebar_frame,
                                            text="",
-                                           image=self.icon_reports,
+                                           image=self.icon_bd,
                                            width=44,
                                            height=44,
                                            fg_color=sidebar_bg,
@@ -1582,7 +1584,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
                                           text="",
-                                          image=self.icon_info,
+                                          image=self.icon_report,
                                           width=44,
                                           height=44,
                                           fg_color=sidebar_bg,

@@ -1,4 +1,17 @@
-Cambios V.0.1.28 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.35 - ✨ Últimas mejoras implementadas:
+
+- Añadido sistema de avisos del sistema. Administrable desde usuario admin.
+    * Sale cada vez que se inicia la aplicacion a cada usuario, deben confirmar para que se les quite.
+    * Sale siempre mientras este activado el checkbox.
+- Cmbiado los iconos de Copia de BD y Reportar por iconos mas adecuados.
+- Añadido sistema de copia de BD automatico diario.
+- Mejorada la gestion de errores en la conexion a Turso.
+    * Se ejecuta los dias laborables a las 17:00h y sube las copias a Blackblaze automaticamente.
+    * Mantiene visibles las ultimas 30 copias, a partir de esa las mueve a una carpeta denominada "Archivo" para mantenerlas el tiempo necesario.
+    * Envia correo al administrados informando de la copia y de la informacion copiada.
+
+
+Cambios V.0.1.28
 
 - 📊 Añadida estadistica para el control de clientes que presentan el material antes de la autorizacion.
 - Añadidos los campos en la pestaña de Contabilidad de la ficha de los expedientes:
