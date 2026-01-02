@@ -1,3 +1,8 @@
+V.1.0.1
+
+- Gestion de las copias de BD desde el usuario admin.
+
+
 V.1.0.0 - Inicio de la aplicacion.
 
 Cambios V.0.1.36

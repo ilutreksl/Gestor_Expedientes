@@ -28,6 +28,7 @@ from lib.changelog_window import mostrar_ventana_cambios
 from lib.rma_utils import obtener_ultima_actividad, calcular_tiempos_expediente, obtener_color_tiempo, obtener_promedio_cliente
 from lib.video_utils import comprimir_video_inteligente
 from lib.avisos_manager import AvisosManager
+from lib.backup_manager import BackupManagerB2
 
 import tkinter as tk
 from tkinter import ttk
@@ -1577,9 +1578,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                            height=44,
                                            fg_color=sidebar_bg,
                                            hover_color=sidebar_bg,
-                                           command=self.crear_copia_seguridad_db)
+                                           command=self.mostrar_gestor_backups)
             self.btn_buscar.grid(row=fila, column=0, padx=20, pady=6)
-            Tooltip(self.btn_buscar, "Crear copia de seguridad (DB)")
+            Tooltip(self.btn_buscar, "Gestor de Backups en Backblaze B2")
             fila += 1
 
         self.btn_reportar = ctk.CTkButton(self.sidebar_frame,
@@ -13229,6 +13230,315 @@ Versión de la App: {APP_VERSION}
             # Si falla (ej. en un entorno sin navegador o cliente de correo configurado)
             print(f"Error al abrir el cliente de correo: {e}")
             messagebox.showerror("Error de Email", "No se pudo abrir el cliente de correo por defecto. Por favor, envía un email manualmente a " + email_destino)
+    
+    def mostrar_gestor_backups(self):
+        """Muestra la ventana de gestión de backups en Backblaze B2"""
+        try:
+            from tkinter import filedialog
+            import threading
+            
+            # Crear ventana
+            ventana = ctk.CTkToplevel(self)
+            ventana.title("Gestor de Backups - Backblaze B2")
+            ventana.geometry("1000x600")
+            ventana.transient(self)
+            
+            # Inicializar manager
+            manager = BackupManagerB2()
+            
+            # Variable para almacenar archivos
+            archivos_actuales = []
+            
+            # Frame principal
+            main_frame = ctk.CTkFrame(ventana)
+            main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # ===== PARTE SUPERIOR: CONTROLES =====
+            control_frame = ctk.CTkFrame(main_frame)
+            control_frame.pack(fill="x", padx=5, pady=(5, 10))
+            
+            # Fila 1: Búsqueda y filtros
+            filtros_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
+            filtros_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Búsqueda
+            ctk.CTkLabel(filtros_frame, text="Buscar:").pack(side="left", padx=(0, 5))
+            entry_busqueda = ctk.CTkEntry(filtros_frame, placeholder_text="Nombre de archivo...", width=250)
+            entry_busqueda.pack(side="left", padx=5)
+            
+            # Filtro por tipo
+            ctk.CTkLabel(filtros_frame, text="Tipo:").pack(side="left", padx=(20, 5))
+            filtro_tipo = ctk.CTkOptionMenu(filtros_frame, values=["Todos", ".db", ".sql"], width=100)
+            filtro_tipo.set("Todos")
+            filtro_tipo.pack(side="left", padx=5)
+            
+            # Filtro por ubicación
+            ctk.CTkLabel(filtros_frame, text="Ubicación:").pack(side="left", padx=(20, 5))
+            filtro_ubicacion = ctk.CTkOptionMenu(filtros_frame, values=["Todos", "Raíz", "Archivo/"], width=120)
+            filtro_ubicacion.set("Todos")
+            filtro_ubicacion.pack(side="left", padx=5)
+            
+            # Fila 2: Botones de acción
+            botones_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
+            botones_frame.pack(fill="x", padx=5, pady=5)
+            
+            btn_crear_backup = ctk.CTkButton(botones_frame, text="🔄 Crear Backup Ahora", width=150)
+            btn_crear_backup.pack(side="left", padx=5)
+            Tooltip(btn_crear_backup, "Ejecuta el script de backup para crear una nueva copia de seguridad de la base de datos")
+            
+            btn_actualizar = ctk.CTkButton(botones_frame, text="↻ Actualizar Lista", width=120)
+            btn_actualizar.pack(side="left", padx=5)
+            Tooltip(btn_actualizar, "Recarga la lista de archivos desde Backblaze B2")
+            
+            # Label de estado
+            lbl_estado = ctk.CTkLabel(botones_frame, text="Listo", text_color="gray")
+            lbl_estado.pack(side="left", padx=20)
+            
+            # ===== PARTE CENTRAL: LISTADO DE ARCHIVOS =====
+            lista_frame = ctk.CTkFrame(main_frame)
+            lista_frame.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            # Header del listado
+            header_frame = ctk.CTkFrame(lista_frame, fg_color=("gray80", "gray25"), height=35)
+            header_frame.pack(fill="x", padx=2, pady=(2, 0))
+            header_frame.pack_propagate(False)
+            
+            ctk.CTkLabel(header_frame, text="Nombre", font=ctk.CTkFont(weight="bold"), width=350).pack(side="left", padx=10, pady=5)
+            ctk.CTkLabel(header_frame, text="Tamaño", font=ctk.CTkFont(weight="bold"), width=100).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(header_frame, text="Fecha", font=ctk.CTkFont(weight="bold"), width=150).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(header_frame, text="Ubicación", font=ctk.CTkFont(weight="bold"), width=100).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(header_frame, text="Acciones", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            
+            # Scrollable frame para archivos
+            scroll_frame = ctk.CTkScrollableFrame(lista_frame)
+            scroll_frame.pack(fill="both", expand=True, padx=2, pady=2)
+            
+            # ===== PARTE INFERIOR: INFORMACIÓN =====
+            info_frame = ctk.CTkFrame(main_frame, height=40)
+            info_frame.pack(fill="x", padx=5, pady=(5, 5))
+            info_frame.pack_propagate(False)
+            
+            lbl_info = ctk.CTkLabel(info_frame, text="Total: 0 archivos | Espacio: 0 B")
+            lbl_info.pack(side="left", padx=10, pady=10)
+            
+            # ===== FUNCIONES =====
+            
+            def actualizar_estado(mensaje, color="gray"):
+                lbl_estado.configure(text=mensaje, text_color=color)
+                ventana.update()
+            
+            def cargar_archivos():
+                """Carga la lista de archivos desde B2"""
+                actualizar_estado("Autenticando...", "blue")
+                
+                # Autenticar
+                success, msg = manager.autenticar()
+                if not success:
+                    messagebox.showerror("Error", f"Error de autenticación: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+                    return
+                
+                # Obtener bucket
+                success, msg = manager.obtener_bucket_id()
+                if not success:
+                    messagebox.showerror("Error", f"Error al obtener bucket: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+                    return
+                
+                actualizar_estado("Cargando archivos...", "blue")
+                
+                # Listar archivos
+                archivos, msg = manager.listar_archivos()
+                if archivos is None:
+                    messagebox.showerror("Error", f"Error al listar archivos: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+                    return
+                
+                nonlocal archivos_actuales
+                archivos_actuales = archivos
+                
+                actualizar_estado(f"Cargados {len(archivos)} archivos", "green")
+                mostrar_archivos()
+            
+            def mostrar_archivos():
+                """Muestra los archivos filtrados en la lista"""
+                # Limpiar lista actual
+                for widget in scroll_frame.winfo_children():
+                    widget.destroy()
+                
+                # Aplicar filtros
+                busqueda = entry_busqueda.get().lower()
+                tipo = filtro_tipo.get()
+                ubicacion = filtro_ubicacion.get()
+                
+                archivos_filtrados = []
+                for archivo in archivos_actuales:
+                    nombre = archivo['fileName']
+                    
+                    # Filtro de búsqueda
+                    if busqueda and busqueda not in nombre.lower():
+                        continue
+                    
+                    # Filtro de tipo
+                    if tipo != "Todos":
+                        if not nombre.endswith(tipo):
+                            continue
+                    
+                    # Filtro de ubicación
+                    if ubicacion == "Raíz" and nombre.startswith("Archivo/"):
+                        continue
+                    elif ubicacion == "Archivo/" and not nombre.startswith("Archivo/"):
+                        continue
+                    
+                    archivos_filtrados.append(archivo)
+                
+                # Mostrar archivos
+                if not archivos_filtrados:
+                    lbl_vacio = ctk.CTkLabel(scroll_frame, text="No hay archivos que coincidan con los filtros", 
+                                             text_color="gray")
+                    lbl_vacio.pack(pady=20)
+                else:
+                    for archivo in archivos_filtrados:
+                        crear_fila_archivo(archivo)
+                
+                # Actualizar información
+                total_tamano = sum(a['contentLength'] for a in archivos_filtrados)
+                lbl_info.configure(text=f"Total: {len(archivos_filtrados)} archivos | Espacio: {manager.formatear_tamaño(total_tamano)}")
+            
+            def crear_fila_archivo(archivo):
+                """Crea una fila para mostrar un archivo"""
+                fila = ctk.CTkFrame(scroll_frame, fg_color=("gray90", "gray20"))
+                fila.pack(fill="x", padx=2, pady=2)
+                
+                nombre = archivo['fileName'].replace("Archivo/", "") if archivo['fileName'].startswith("Archivo/") else archivo['fileName']
+                tamaño = manager.formatear_tamaño(archivo['contentLength'])
+                fecha = manager.formatear_fecha(archivo['uploadTimestamp'])
+                ubicacion = "Archivo/" if archivo['fileName'].startswith("Archivo/") else "Raíz"
+                
+                ctk.CTkLabel(fila, text=nombre, width=350, anchor="w").pack(side="left", padx=10, pady=5)
+                ctk.CTkLabel(fila, text=tamaño, width=100, anchor="w").pack(side="left", padx=5, pady=5)
+                ctk.CTkLabel(fila, text=fecha, width=150, anchor="w").pack(side="left", padx=5, pady=5)
+                ctk.CTkLabel(fila, text=ubicacion, width=100, anchor="w").pack(side="left", padx=5, pady=5)
+                
+                # Botones de acción
+                acciones_frame = ctk.CTkFrame(fila, fg_color="transparent")
+                acciones_frame.pack(side="left", padx=5, pady=2)
+                
+                btn_descargar = ctk.CTkButton(acciones_frame, text="⬇", width=30, height=25,
+                                              command=lambda: descargar_archivo(archivo))
+                btn_descargar.pack(side="left", padx=2)
+                Tooltip(btn_descargar, "Descargar este archivo a tu ordenador")
+                
+                if not archivo['fileName'].startswith("Archivo/"):
+                    btn_mover = ctk.CTkButton(acciones_frame, text="📁", width=30, height=25,
+                                             command=lambda: mover_a_archivo(archivo))
+                    btn_mover.pack(side="left", padx=2)
+                    Tooltip(btn_mover, "Mover este archivo a la carpeta Archivo/ (backups antiguos)")
+                
+                btn_eliminar = ctk.CTkButton(acciones_frame, text="🗑", width=30, height=25,
+                                            fg_color="red", hover_color="darkred",
+                                            command=lambda: eliminar_archivo(archivo))
+                btn_eliminar.pack(side="left", padx=2)
+                Tooltip(btn_eliminar, "Eliminar permanentemente este archivo de Backblaze B2")
+            
+            def descargar_archivo(archivo):
+                """Descarga un archivo de B2"""
+                destino = filedialog.asksaveasfilename(
+                    defaultextension=os.path.splitext(archivo['fileName'])[1],
+                    initialfile=archivo['fileName'].replace("Archivo/", ""),
+                    title="Guardar archivo"
+                )
+                
+                if not destino:
+                    return
+                
+                actualizar_estado("Descargando...", "blue")
+                success, msg = manager.descargar_archivo(archivo['fileId'], archivo['fileName'], destino)
+                
+                if success:
+                    messagebox.showinfo("Éxito", f"Archivo descargado en:\n{destino}")
+                    actualizar_estado("Descarga completada", "green")
+                else:
+                    messagebox.showerror("Error", f"Error al descargar: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+            
+            def mover_a_archivo(archivo):
+                """Mueve un archivo a la carpeta Archivo/"""
+                if not messagebox.askyesno("Confirmar", f"¿Mover '{archivo['fileName']}' a Archivo/?"):
+                    return
+                
+                actualizar_estado("Moviendo...", "blue")
+                success, msg = manager.mover_a_archivo(archivo['fileId'], archivo['fileName'])
+                
+                if success:
+                    messagebox.showinfo("Éxito", "Archivo movido a Archivo/")
+                    actualizar_estado("Archivo movido", "green")
+                    cargar_archivos()  # Recargar lista
+                else:
+                    messagebox.showerror("Error", f"Error al mover: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+            
+            def eliminar_archivo(archivo):
+                """Elimina un archivo de B2"""
+                if not messagebox.askyesno("Confirmar Eliminación", 
+                                          f"¿Estás seguro de eliminar '{archivo['fileName']}'?\n\nEsta acción no se puede deshacer."):
+                    return
+                
+                actualizar_estado("Eliminando...", "blue")
+                success, msg = manager.eliminar_archivo(archivo['fileId'], archivo['fileName'])
+                
+                if success:
+                    messagebox.showinfo("Éxito", "Archivo eliminado")
+                    actualizar_estado("Archivo eliminado", "green")
+                    cargar_archivos()  # Recargar lista
+                else:
+                    messagebox.showerror("Error", f"Error al eliminar: {msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+            
+            def crear_backup():
+                """Ejecuta el script de backup"""
+                if not messagebox.askyesno("Crear Backup", "¿Crear una nueva copia de seguridad?\n\nEsto puede tardar varios minutos."):
+                    return
+                
+                actualizar_estado("Creando backup...", "blue")
+                btn_crear_backup.configure(state="disabled", text="Creando...")
+                
+                def ejecutar():
+                    success, msg = manager.ejecutar_backup()
+                    
+                    # Actualizar UI en el hilo principal
+                    ventana.after(0, lambda: backup_completado(success, msg))
+                
+                threading.Thread(target=ejecutar, daemon=True).start()
+            
+            def backup_completado(success, msg):
+                """Callback cuando el backup termina"""
+                btn_crear_backup.configure(state="normal", text="🔄 Crear Backup Ahora")
+                
+                if success:
+                    messagebox.showinfo("Éxito", "Backup creado correctamente")
+                    actualizar_estado("Backup creado", "green")
+                    cargar_archivos()  # Recargar lista
+                else:
+                    messagebox.showerror("Error", f"Error al crear backup:\n{msg}")
+                    actualizar_estado(f"Error: {msg}", "red")
+            
+            # Conectar botones
+            btn_actualizar.configure(command=lambda: threading.Thread(target=cargar_archivos, daemon=True).start())
+            btn_crear_backup.configure(command=crear_backup)
+            
+            # Conectar filtros para actualizar al cambiar
+            entry_busqueda.bind("<KeyRelease>", lambda e: mostrar_archivos())
+            filtro_tipo.configure(command=lambda _: mostrar_archivos())
+            filtro_ubicacion.configure(command=lambda _: mostrar_archivos())
+            
+            # Cargar archivos inicialmente en un hilo
+            threading.Thread(target=cargar_archivos, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al abrir gestor de backups: {e}")
+            import traceback
+            traceback.print_exc()
     
     # ==================================================================
     # 🧑‍💼 GESTIÓN INDEPENDIENTE DE CLIENTES
