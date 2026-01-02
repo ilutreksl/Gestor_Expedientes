@@ -31,6 +31,7 @@ from lib.avisos_manager import AvisosManager
 from lib.backup_manager import BackupManagerB2
 from lib.estados_manager import EstadosArticuloManager
 from lib.personas_manager import PersonasManager
+from lib.resultado_expediente_manager import ResultadoExpedienteManager
 
 import tkinter as tk
 from tkinter import ttk
@@ -1060,11 +1061,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
     # Inicializar el gestor de personas
     personas_manager = PersonasManager()
     
+    # Inicializar el gestor de resultado expediente
+    resultado_expediente_manager = ResultadoExpedienteManager()
+    
     OPCIONES = {
         "Autorizacion": ["SI", "NO"],
         "Autorizado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
         "Gestionado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
-        "Resultado_Expediente": ["", "ABONAR", "NO ABONAR", "REPOSICION"],
+        "Resultado_Expediente": resultado_expediente_manager.cargar_resultados(),  # Cargar desde JSON
         "Estado_Producto": estados_manager.cargar_estados()  # Cargar desde JSON
     }
     
@@ -8864,7 +8868,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x380")
+        menu_window.geometry("300x430")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
@@ -8929,6 +8933,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                      hover_color="#0891b2",
                                      command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas()])
         btn_personas.pack(pady=10)
+        
+        # Botón Gestionar Resultado Expediente
+        btn_resultado = ctk.CTkButton(buttons_frame,
+                                      text="📊 Gestionar Resultado Expediente",
+                                      width=240,
+                                      height=40,
+                                      fg_color="#10b981",
+                                      hover_color="#059669",
+                                      command=lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()])
+        btn_resultado.pack(pady=10)
         
         # Botón Cerrar
         btn_cerrar = ctk.CTkButton(buttons_frame,
@@ -9341,6 +9355,203 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir el gestor de personas:\n{e}")
+            import traceback
+            traceback.print_exc()
+    
+    def mostrar_gestor_resultado_expediente(self):
+        """
+        Abre una ventana para gestionar la lista de resultados de expedientes
+        """
+        from lib.safe_toplevel import SafeCTkToplevel
+        from lib.resultado_expediente_manager import ResultadoExpedienteManager
+        
+        try:
+            # Crear ventana de gestión
+            gestor_window = SafeCTkToplevel(self)
+            gestor_window.title("Gestión de Resultado Expediente")
+            gestor_window.geometry("600x500")
+            gestor_window.transient(self)
+            gestor_window.grab_set()
+            
+            # Frame principal con padding
+            main_frame = ctk.CTkFrame(gestor_window)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Título
+            title_label = ctk.CTkLabel(main_frame,
+                                       text="📊 Gestión de Resultado Expediente",
+                                       font=("Arial", 18, "bold"))
+            title_label.pack(pady=(0, 20))
+            
+            # Frame para agregar nuevo resultado
+            add_frame = ctk.CTkFrame(main_frame)
+            add_frame.pack(fill="x", pady=(0, 20))
+            
+            entry_label = ctk.CTkLabel(add_frame,
+                                       text="Nuevo Resultado:",
+                                       font=("Arial", 12))
+            entry_label.pack(side="left", padx=(10, 5))
+            
+            entry_resultado = ctk.CTkEntry(add_frame,
+                                           width=300,
+                                           placeholder_text="Ingrese el resultado del expediente")
+            entry_resultado.pack(side="left", padx=5)
+            
+            btn_agregar = ctk.CTkButton(add_frame,
+                                        text="➕ Agregar",
+                                        width=100)
+            btn_agregar.pack(side="left", padx=5)
+            
+            # Frame scrollable para la lista de resultados
+            list_frame = ctk.CTkScrollableFrame(main_frame,
+                                                label_text="Resultados Registrados")
+            list_frame.pack(fill="both", expand=True)
+            
+            # Instanciar el gestor
+            resultados_mgr = ResultadoExpedienteManager()
+            
+            def cargar_resultados():
+                """Carga y muestra la lista de resultados"""
+                # Limpiar lista actual
+                for widget in list_frame.winfo_children():
+                    widget.destroy()
+                
+                # Obtener resultados
+                resultados = resultados_mgr.cargar_resultados()
+                
+                if not resultados:
+                    no_data_label = ctk.CTkLabel(list_frame,
+                                                 text="No hay resultados registrados",
+                                                 text_color="gray")
+                    no_data_label.pack(pady=20)
+                    return
+                
+                # Mostrar cada resultado
+                for i, resultado in enumerate(resultados):
+                    resultado_frame = ctk.CTkFrame(list_frame)
+                    resultado_frame.pack(fill="x", pady=5, padx=5)
+                    
+                    # Texto del resultado (mostrar etiqueta si está vacío)
+                    texto_mostrar = resultado if resultado else "(vacío)"
+                    color_texto = "gray" if not resultado else None
+                    
+                    nombre_label = ctk.CTkLabel(resultado_frame,
+                                               text=texto_mostrar,
+                                               font=("Arial", 12),
+                                               anchor="w",
+                                               text_color=color_texto)
+                    nombre_label.pack(side="left", padx=10, fill="x", expand=True)
+                    
+                    # Botones de acción
+                    btn_frame = ctk.CTkFrame(resultado_frame, fg_color="transparent")
+                    btn_frame.pack(side="right", padx=5)
+                    
+                    # Botón Editar
+                    btn_editar = ctk.CTkButton(btn_frame,
+                                              text="✏️",
+                                              width=40,
+                                              command=lambda r=resultado: editar_resultado(r))
+                    btn_editar.pack(side="left", padx=2)
+                    Tooltip(btn_editar, "Editar resultado")
+                    
+                    # Botón Subir
+                    if i > 0:  # No mostrar para el primero
+                        btn_subir = ctk.CTkButton(btn_frame,
+                                                text="⬆️",
+                                                width=40,
+                                                command=lambda r=resultado: mover_resultado(r, "arriba"))
+                        btn_subir.pack(side="left", padx=2)
+                        Tooltip(btn_subir, "Mover arriba")
+                    
+                    # Botón Bajar
+                    if i < len(resultados) - 1:  # No mostrar para el último
+                        btn_bajar = ctk.CTkButton(btn_frame,
+                                                text="⬇️",
+                                                width=40,
+                                                command=lambda r=resultado: mover_resultado(r, "abajo"))
+                        btn_bajar.pack(side="left", padx=2)
+                        Tooltip(btn_bajar, "Mover abajo")
+                    
+                    # Botón Eliminar
+                    btn_eliminar = ctk.CTkButton(btn_frame,
+                                               text="🗑️",
+                                               width=40,
+                                               fg_color="red",
+                                               hover_color="darkred",
+                                               command=lambda r=resultado: eliminar_resultado(r))
+                    btn_eliminar.pack(side="left", padx=2)
+                    Tooltip(btn_eliminar, "Eliminar resultado")
+            
+            def anadir_resultado():
+                """Agrega un nuevo resultado a la lista"""
+                nuevo_resultado = entry_resultado.get().strip()
+                if nuevo_resultado:
+                    success, msg = resultados_mgr.añadir_resultado(nuevo_resultado)
+                    if success:
+                        entry_resultado.delete(0, "end")
+                        cargar_resultados()
+                        recargar_resultados_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+                else:
+                    messagebox.showwarning("Advertencia", "Por favor ingrese un resultado")
+            
+            def editar_resultado(resultado_actual):
+                """Abre un diálogo para editar un resultado"""
+                from tkinter import simpledialog
+                
+                texto_mostrar = resultado_actual if resultado_actual else "(vacío)"
+                nuevo_resultado = simpledialog.askstring("Editar Resultado",
+                                                         f"Editar resultado del expediente:\n\n'{texto_mostrar}'",
+                                                         initialvalue=resultado_actual,
+                                                         parent=gestor_window)
+                if nuevo_resultado is not None and nuevo_resultado.strip():
+                    success, msg = resultados_mgr.editar_resultado(resultado_actual, nuevo_resultado.strip())
+                    if success:
+                        cargar_resultados()
+                        recargar_resultados_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def eliminar_resultado(resultado):
+                """Elimina un resultado de la lista"""
+                texto_mostrar = resultado if resultado else "(vacío)"
+                if messagebox.askyesno("Confirmar eliminación",
+                                      f"¿Está seguro de eliminar el resultado?\n\n'{texto_mostrar}'",
+                                      parent=gestor_window):
+                    
+                    success, msg = resultados_mgr.eliminar_resultado(resultado)
+                    if success:
+                        cargar_resultados()
+                        recargar_resultados_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def mover_resultado(resultado, direccion):
+                """Mueve un resultado arriba o abajo"""
+                success, msg = resultados_mgr.mover_resultado(resultado, direccion)
+                if success:
+                    cargar_resultados()
+                    recargar_resultados_app()
+                else:
+                    messagebox.showinfo("Info", msg)
+            
+            def recargar_resultados_app():
+                """Recarga los resultados en la aplicación principal"""
+                self.OPCIONES["Resultado_Expediente"] = resultados_mgr.cargar_resultados()
+            
+            # Conectar botones
+            btn_agregar.configure(command=anadir_resultado)
+            entry_resultado.bind("<Return>", lambda e: anadir_resultado())
+            
+            # Cargar resultados inicialmente
+            cargar_resultados()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de resultado expediente:\n{e}")
             import traceback
             traceback.print_exc()
     
