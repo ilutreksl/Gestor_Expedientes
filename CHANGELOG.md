@@ -1,5 +1,6 @@
-Cambios V.1.0.2 - ✨ Últimas mejoras implementadas:
+Cambios V.1.0.3 - ✨ Últimas mejoras implementadas:
 
+- Rediseñado la ficha de expedientes para mostrar en una primera vista toda la informacion.
 - Los diccionarios de seleccion de estados de productos y de personas en las fechas, ahora estan en JSON y son configurables desde el menu ADMIN del usuario admin.
 
 

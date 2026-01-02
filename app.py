@@ -317,7 +317,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.2"
+APP_VERSION = "v1.0.3"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -4343,26 +4343,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
             if tiempos['dias_total'] is None:
                 return
             
-            # Frame para el widget de tiempos (row 2 en la columna 0)
+            # Frame para el widget de tiempos - DISEÑO VERTICAL COMPACTO
             tiempos_frame = ctk.CTkFrame(parent_frame, fg_color="#f0f0f0", corner_radius=8)
-            tiempos_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="ew")
+            tiempos_frame.pack(fill="x", pady=(0, 10))
             
             # Título del widget
             ctk.CTkLabel(tiempos_frame, text="📊 TIEMPOS DE TRAMITACIÓN", 
                         font=ctk.CTkFont(size=12, weight="bold"),
                         text_color="#2c3e50").pack(anchor="w", padx=10, pady=(8, 5))
             
-            # Frame horizontal para los indicadores
-            indicadores_frame = ctk.CTkFrame(tiempos_frame, fg_color="transparent")
-            indicadores_frame.pack(fill="x", padx=10, pady=(0, 8))
-            
             # Días totales
             dias_total = tiempos['dias_total']
             color_total = obtener_color_tiempo(dias_total)
             estado_texto = " (Cerrado)" if tiempos['cerrado'] else " (En curso)"
             
-            total_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
-            total_frame.pack(side="left", padx=(0, 8), pady=2, fill="x", expand=True)
+            total_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
+            total_frame.pack(fill="x", padx=10, pady=(0, 5))
             
             ctk.CTkLabel(total_frame, text="Total:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
             ctk.CTkLabel(total_frame, text=f"{dias_total} días{estado_texto}", 
@@ -4371,8 +4367,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
             # Promedio del cliente (si está disponible)
             if promedio_cliente is not None:
-                promedio_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
-                promedio_frame.pack(side="left", padx=(0, 8), pady=2, fill="x", expand=True)
+                promedio_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
+                promedio_frame.pack(fill="x", padx=10, pady=(0, 5))
                 
                 dias_prom = int(promedio_cliente)
                 color_prom = obtener_color_tiempo(dias_prom)
@@ -4383,31 +4379,35 @@ class VentanaPrincipal(ctk.CTkToplevel):
                            font=ctk.CTkFont(size=13, weight="bold"),
                            text_color=color_prom).pack(anchor="w", padx=8, pady=(0, 4))
             
-            # Tiempos entre fases (en una línea horizontal)
-            fases_frame = ctk.CTkFrame(indicadores_frame, fg_color="white", corner_radius=6)
-            fases_frame.pack(side="left", padx=0, pady=2, fill="x", expand=True)
+            # Tiempos entre fases - DISEÑO VERTICAL
+            fases_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
+            fases_frame.pack(fill="x", padx=10, pady=(0, 8))
             
-            ctk.CTkLabel(fases_frame, text="Fases:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
-            
-            # Frame horizontal para las fases
-            fases_detalle_frame = ctk.CTkFrame(fases_frame, fg_color="transparent")
-            fases_detalle_frame.pack(fill="x", padx=8, pady=(0, 4))
+            ctk.CTkLabel(fases_frame, text="Fases:", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=8, pady=(4, 2))
             
             fases = [
-                ('E→A', tiempos['dias_e_a']),
-                ('A→R', tiempos['dias_a_r']),
-                ('R→P', tiempos['dias_r_p']),
-                ('P→C', tiempos['dias_p_c'])
+                ('Emisión → Autorización', tiempos['dias_e_a']),
+                ('Autorización → Recepción', tiempos['dias_a_r']),
+                ('Recepción → Proceso', tiempos['dias_r_p']),
+                ('Proceso → Cierre', tiempos['dias_p_c'])
             ]
             
             for nombre, dias in fases:
                 if dias is not None:
                     color = obtener_color_tiempo(dias)
-                    lbl = ctk.CTkLabel(fases_detalle_frame, 
-                                      text=f"{nombre}: {dias}d", 
-                                      font=ctk.CTkFont(size=11),
-                                      text_color=color)
-                    lbl.pack(side="left", padx=4)
+                    fase_item = ctk.CTkFrame(fases_frame, fg_color="transparent")
+                    fase_item.pack(fill="x", padx=8, pady=1)
+                    
+                    ctk.CTkLabel(fase_item, text=f"{nombre}:", 
+                               font=ctk.CTkFont(size=10),
+                               anchor="w").pack(side="left")
+                    ctk.CTkLabel(fase_item, text=f"{dias} días", 
+                               font=ctk.CTkFont(size=10, weight="bold"),
+                               text_color=color,
+                               anchor="e").pack(side="right", padx=(5, 0))
+            
+            # Espacio final
+            ctk.CTkLabel(fases_frame, text="").pack(pady=2)
             
         except Exception as e:
             print(f"Error al mostrar widget de tiempos: {e}")
@@ -4448,36 +4448,30 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         ctk.CTkLabel(header_frame, text=titulo_texto, font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, sticky="w")
         
-        # Detectar si estamos en una ventana modal (RmaEditorWindow)
-        # Si es así, el botón debe cerrar la ventana modal
-        ventana_actual = self.content_frame.winfo_toplevel()
-        es_ventana_modal = ventana_actual != self.master
-        
-        if es_ventana_modal:
-            # Estamos en RmaEditorWindow - cerrar la ventana
-            btn_volver = ctk.CTkButton(header_frame, 
-                                       text="✖️ Cerrar", 
-                                       command=ventana_actual.destroy)
-        else:
-            # Estamos en la ventana principal - volver a la lista
-            btn_volver = ctk.CTkButton(header_frame, 
-                                       text="⬅️ Volver", 
-                                       command=self.mostrar_lista_rma)
-        
-        btn_volver.grid(row=0, column=1, padx=(20, 0), sticky="e")
-        
         # --------------------------------------------------------------------------
-        # 2. Fila Principal (Código RMA + Comentarios Fijos) (Fila 1)
+        # 2. DISEÑO DE 2 COLUMNAS: Layout principal  (Fila 1)
         # --------------------------------------------------------------------------
-        # Creamos un frame de control para la Fila 1
-        fila1_control_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        fila1_control_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        # Creamos un frame contenedor para las dos columnas
+        main_layout_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        main_layout_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         
-        # Configuramos las columnas dentro de este frame: Col 0 es fija, Col 1 se expande
-        fila1_control_frame.grid_columnconfigure(0, weight=0) # Fija para el código
-        fila1_control_frame.grid_columnconfigure(1, weight=1) # Expansiva para los comentarios
+        # Configurar pesos: columna izquierda tiene más peso
+        main_layout_frame.grid_columnconfigure(0, weight=1)  # Columna izquierda (pestañas) - se expande
+        main_layout_frame.grid_columnconfigure(1, weight=0)  # Columna derecha (info) - NO se expande
+        main_layout_frame.grid_rowconfigure(0, weight=1)
+        
+        # Ajustar peso de la fila principal
+        self.content_frame.grid_rowconfigure(1, weight=1)
 
-        # A) NÚMERO DE EXPEDIENTE (Columna 0)
+        # ========== COLUMNA IZQUIERDA: Nombre expediente + Pestañas ==========
+        left_column = ctk.CTkFrame(main_layout_frame, fg_color="transparent")
+        left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        left_column.grid_rowconfigure(1, weight=1)  # Las pestañas se expanden
+        
+        # A) NÚMERO DE EXPEDIENTE (en la columna izquierda, arriba)
+        codigo_frame = ctk.CTkFrame(left_column, fg_color="transparent")
+        codigo_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        
         if es_edicion:
             # Consultar el código RMA real desde la base de datos
             conn = connect_db()
@@ -4493,86 +4487,77 @@ class VentanaPrincipal(ctk.CTkToplevel):
             texto_expediente = f"Nº EXPEDIENTE: {codigo_rma_temporal} (Temporal)"
             color_texto = "orange"  # Color naranja para indicar que es temporal
         
-        self.lbl_codigo_rma = ctk.CTkLabel(fila1_control_frame, text=texto_expediente, 
+        self.lbl_codigo_rma = ctk.CTkLabel(codigo_frame, text=texto_expediente, 
                      font=ctk.CTkFont(size=18, weight="bold"), 
                      text_color=color_texto)
-        self.lbl_codigo_rma.grid(row=0, column=0, padx=10, pady=5, sticky="w") 
+        self.lbl_codigo_rma.pack(anchor="w") 
         
         # Añadir texto explicativo para números temporales
         if not es_edicion:
-            self.lbl_explicacion = ctk.CTkLabel(fila1_control_frame, 
+            self.lbl_explicacion = ctk.CTkLabel(codigo_frame, 
                          text="⚠️ Este número es temporal. El número definitivo se asignará al guardar.", 
                          font=ctk.CTkFont(size=10),
                          text_color="gray50")
-            self.lbl_explicacion.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="w")
-        
-        # Widget de tiempos de tramitación (solo en modo edición)
-        if es_edicion:
-            self._mostrar_widget_tiempos(fila1_control_frame, rma_id)
+            self.lbl_explicacion.pack(anchor="w", pady=(0, 5))
         
         # Guardar si es modo edición para usar en el guardado
         self.es_modo_edicion = es_edicion 
         
+        # 3. Vista con pestañas (Tabview) para el formulario y el historial - EN COLUMNA IZQUIERDA
+        self.tabview = ctk.CTkTabview(left_column)
+        self.tabview.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
         
-        # B) CAJA DE COMENTARIOS (Columna 1)
-        comentarios_frame = ctk.CTkFrame(fila1_control_frame, fg_color="transparent") 
-        # Cambiamos el contenedor a fila1_control_frame y lo ponemos en column=1
-        comentarios_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
-        comentarios_frame.grid_columnconfigure(0, weight=1) 
+        # ========== COLUMNA DERECHA: Comentarios + Precio Total + Tiempos ==========
+        right_column = ctk.CTkFrame(main_layout_frame, fg_color="transparent", width=450)
+        right_column.grid(row=0, column=1, sticky="ns", padx=(5, 0))
+        right_column.grid_propagate(False)  # Mantener ancho fijo
+        
+        # B) CAJA DE COMENTARIOS (Columna derecha, arriba)
+        comentarios_frame = ctk.CTkFrame(right_column) 
+        comentarios_frame.pack(fill="x", pady=(0, 10))
 
         # Etiqueta
         ctk.CTkLabel(comentarios_frame, text="Comentarios (Guarde al momento con el botón ➕):", 
                      text_color="black",
                      font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, pady=(5, 0), sticky="nw")
         
-        # PRECIO TOTAL EXPEDIENTE (visible siempre)
-        precio_total_frame = ctk.CTkFrame(comentarios_frame, fg_color="#e8f5e9", corner_radius=8)
-        precio_total_frame.grid(row=3, column=0, padx=5, pady=(10, 5), sticky="ew")
-        
-        ctk.CTkLabel(precio_total_frame, text="💰 PRECIO TOTAL EXPEDIENTE:", 
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color="#2e7d32").pack(side="left", padx=10, pady=8)
-        
-        self.lbl_precio_total = ctk.CTkLabel(precio_total_frame, text="0.00 €", 
-                                             font=ctk.CTkFont(size=16, weight="bold"), 
-                                             text_color="#1b5e20")
-        self.lbl_precio_total.pack(side="left", padx=5, pady=8)
-        
         comentario_input_frame = ctk.CTkFrame(comentarios_frame, fg_color="transparent")
         comentario_input_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(5, 5))
-        comentario_input_frame.grid_columnconfigure(0, weight=1) # El textbox se expande
         
-        # 1. Textbox (con altura reducida) - va en la Columna 0 del nuevo frame
+        # Textbox para comentarios
         self.textbox_comentarios = ctk.CTkTextbox(comentario_input_frame, 
-                                                  height=40, # Altura compacta
-                                                  #fg_color="gray95", 
-                                                  #text_color="black",
+                                                  height=100,
                                                   wrap="word")
         self.textbox_comentarios.grid(row=0, column=0, sticky="ew")
 
-        # 2. Botón de Guardar Comentario - va en la Columna 1 del nuevo frame
+        # Botón de Guardar Comentario
         ctk.CTkButton(comentario_input_frame, 
                       text="➕", 
                       width=40, 
-                      #fg_color="gray70", 
-                      #hover_color="gray60", 
-                      #text_color="black", 
                       command=self.guardar_comentario_historial
                       ).grid(row=0, column=1, padx=(5, 0), sticky="e")
         
-        # 🛠️ 2. AJUSTE DE PESO: Fila 1 (Código RMA y Status)
-        self.content_frame.grid_rowconfigure(1, weight=0) # No se expande
-        # --------------------------------------------------------------------------
+        # PRECIO TOTAL EXPEDIENTE (visible siempre) - EN COLUMNA DERECHA
+        precio_total_frame = ctk.CTkFrame(comentarios_frame, fg_color="#e8f5e9", corner_radius=8)
+        precio_total_frame.grid(row=2, column=0, padx=5, pady=(10, 5), sticky="ew")
         
-       
+        precio_content = ctk.CTkFrame(precio_total_frame, fg_color="transparent")
+        precio_content.pack(fill="x", padx=10, pady=8)
         
-        # 3. Vista con pestañas (Tabview) para el formulario y el historial
-        self.tabview = ctk.CTkTabview(self.content_frame)
-        self.tabview.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
-        self.content_frame.grid_rowconfigure(2, weight=1)
-
-        # -----------------------------------------------------------
-        # -- 1. PESTAÑAS PRINCIPALES DEL FORMULARIO (NUEVAS) --
+        ctk.CTkLabel(precio_content, text="💰 PRECIO TOTAL EXPEDIENTE:", 
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color="#2e7d32").pack(anchor="w")
+        
+        self.lbl_precio_total = ctk.CTkLabel(precio_content, text="0.00 €", 
+                                             font=ctk.CTkFont(size=16, weight="bold"), 
+                                             text_color="#1b5e20")
+        self.lbl_precio_total.pack(anchor="w", pady=(2, 0))
+        
+        # Widget de tiempos de tramitación (solo en modo edición) - EN COLUMNA DERECHA
+        if es_edicion:
+            tiempos_container = ctk.CTkFrame(right_column)
+            tiempos_container.pack(fill="x", pady=(0, 10))
+            self._mostrar_widget_tiempos(tiempos_container, rma_id)
         # -----------------------------------------------------------
         general_tab = self.tabview.add("📝 General")
         estados_fechas_tab = self.tabview.add("⏱️ Estados y Fechas")
@@ -5243,9 +5228,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
         # 4. Botón de Guardar Definitivo
         
-        # 💡 CREAR UN FRAME PARA AGRUPAR LOS BOTONES DE ACCIÓN (Fila 3)
+        # 💡 CREAR UN FRAME PARA AGRUPAR LOS BOTONES DE ACCIÓN (Fila 2)
         btn_action_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        btn_action_frame.grid(row=3, column=0, padx=20, pady=20, sticky="ew")
+        btn_action_frame.grid(row=2, column=0, padx=20, pady=20, sticky="ew")
+        self.content_frame.grid_rowconfigure(2, weight=0)  # Los botones no se expanden
         
         # Botón de cliente (lado derecho, siempre visible)
         def abrir_ficha_cliente_desde_expediente():
@@ -5380,6 +5366,28 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 command=lambda: self.eliminar_expediente(rma_id)
             )
             self.btn_eliminar_rma.pack(side="left", padx=(5, 0))
+        
+        # Botón de cerrar (lado derecho)
+        # Detectar si estamos en una ventana modal (RmaEditorWindow)
+        ventana_actual = self.content_frame.winfo_toplevel()
+        es_ventana_modal = ventana_actual != self.master
+        
+        if es_ventana_modal:
+            # Estamos en RmaEditorWindow - cerrar la ventana
+            btn_cerrar = ctk.CTkButton(btn_action_frame, 
+                                       text="✖️ Cerrar", 
+                                       font=ctk.CTkFont(size=14, weight="bold"),
+                                       fg_color="gray",
+                                       command=ventana_actual.destroy)
+        else:
+            # Estamos en la ventana principal - volver a la lista
+            btn_cerrar = ctk.CTkButton(btn_action_frame, 
+                                       text="⬅️ Volver", 
+                                       font=ctk.CTkFont(size=14, weight="bold"),
+                                       fg_color="gray",
+                                       command=self.mostrar_lista_rma)
+        
+        btn_cerrar.pack(side="right", padx=(10, 0))
         
         # Lógica de Edición
         if es_edicion:

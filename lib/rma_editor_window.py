@@ -27,9 +27,27 @@ class RmaEditorWindow(ctk.CTkToplevel):
         # Guardar referencia a la ventana principal
         self.parent_window = parent_window
         
-        # Configurar ventana
-        titulo = f"EDITAR EXPEDIENTE #{rma_id}" if rma_id else "CREAR NUEVO EXPEDIENTE"
-        self.title(f"Gestor de Expedientes RMA - {titulo}")
+        # Obtener el código RMA si estamos en modo edición
+        codigo_rma = None
+        if rma_id:
+            try:
+                conn, cursor = parent_window.master.conectar_db()
+                if conn:
+                    cursor.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
+                    resultado = cursor.fetchone()
+                    if resultado:
+                        codigo_rma = resultado[0]
+                    conn.close()
+            except Exception as e:
+                print(f"Error obteniendo código RMA: {e}")
+        
+        # Configurar ventana con código RMA en el título
+        if codigo_rma:
+            titulo = f"Gestor de Expedientes RMA - {codigo_rma}"
+        else:
+            titulo = "Gestor de Expedientes RMA - NUEVO EXPEDIENTE"
+        
+        self.title(titulo)
         
         # Tamaño de la ventana
         window_width = 1400
