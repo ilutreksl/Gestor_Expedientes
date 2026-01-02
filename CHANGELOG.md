@@ -1,3 +1,8 @@
+Cambios V.1.0.2 - ✨ Últimas mejoras implementadas:
+
+- Los diccionarios de seleccion de estados de productos y de personas en las fechas, ahora estan en JSON y son configurables desde el menu ADMIN del usuario admin.
+
+
 V.1.0.1
 
 - Gestion de las copias de BD desde el usuario admin.
@@ -10,7 +15,7 @@ Cambios V.0.1.36
 - Corregido fallo con el valor de fecha para facturar. No mostraba el valor correcto, mostrando siempre el mismo valor, aunque en la BD hubiese otro distinto.
 
 
-Cambios V.0.1.35 - ✨ Últimas mejoras implementadas:
+Cambios V.0.1.35
 
 - Añadido sistema de avisos del sistema. Administrable desde usuario admin.
     * Sale cada vez que se inicia la aplicacion a cada usuario, deben confirmar para que se les quite.

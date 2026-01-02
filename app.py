@@ -29,6 +29,8 @@ from lib.rma_utils import obtener_ultima_actividad, calcular_tiempos_expediente,
 from lib.video_utils import comprimir_video_inteligente
 from lib.avisos_manager import AvisosManager
 from lib.backup_manager import BackupManagerB2
+from lib.estados_manager import EstadosArticuloManager
+from lib.personas_manager import PersonasManager
 
 import tkinter as tk
 from tkinter import ttk
@@ -314,7 +316,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.1"
+APP_VERSION = "v1.0.2"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1053,17 +1055,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
     """Ventana principal que gestiona el listado, creación y edición de RMAs."""
     
     # Opciones predefinidas para desplegables
+    # Inicializar el gestor de estados
+    estados_manager = EstadosArticuloManager()
+    # Inicializar el gestor de personas
+    personas_manager = PersonasManager()
+    
     OPCIONES = {
         "Autorizacion": ["SI", "NO"],
-        "Autorizado_Por": ["RAQUEL", "SILVIA", "CARLOS", "IVAN", "ANDRES"],
-        "Gestionado_Por": ["RAQUEL", "SILVIA", "CARLOS", "IVAN", "ANDRES"],
+        "Autorizado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
+        "Gestionado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
         "Resultado_Expediente": ["", "ABONAR", "NO ABONAR", "REPOSICION"],
-        "Estado_Producto": [
-            "", "EN PERFECTO ESTADO ; ABONAR", "FUNCIONA PERFECTAMENTE ; ABONAR", "SOBRANTE DE OBRA ; ABONAR", "NO FUNCIONA, ABONAR", "FUNCIONA PERFECTAMENTE ; NO ABONAR",
-            "NO FUNCIONA ; NO ABONAR", "REPOSICION FALLO PRODUCTO", "REPOSICION ; ABONAR", "MERCANCIA ENVIADA POR ERROR", "MALA MANIPULACION ; NO ABONAR",
-            "EN PERFECTO ESTADO ; ABONAR 10% DEPRECIACION", "FALLO SOLDADURA ; ABONAR", "FALLO SOLDADURA ; NO ABONAR", "FALLO MODULO ; ABONAR", "MAL MANIPULACION ; ABONAR",
-            "DANA", "CAMBIO DE PRODUCTO"
-        ]
+        "Estado_Producto": estados_manager.cargar_estados()  # Cargar desde JSON
     }
     
     def get_color_por_estado(self, estado):
@@ -8862,7 +8864,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x260")
+        menu_window.geometry("300x380")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
@@ -8908,6 +8910,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                   command=lambda: [menu_window.destroy(), self.mostrar_admin_avisos()])
         btn_avisos.pack(pady=10)
         
+        # Botón Gestionar Estados de Artículos
+        btn_estados = ctk.CTkButton(buttons_frame,
+                                    text="📋 Gestionar Estados Artículos",
+                                    width=240,
+                                    height=40,
+                                    fg_color="#8b5cf6",
+                                    hover_color="#7c3aed",
+                                    command=lambda: [menu_window.destroy(), self.mostrar_gestor_estados()])
+        btn_estados.pack(pady=10)
+        
+        # Botón Gestionar Personas
+        btn_personas = ctk.CTkButton(buttons_frame,
+                                     text="👥 Gestionar Personas",
+                                     width=240,
+                                     height=40,
+                                     fg_color="#06b6d4",
+                                     hover_color="#0891b2",
+                                     command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas()])
+        btn_personas.pack(pady=10)
+        
         # Botón Cerrar
         btn_cerrar = ctk.CTkButton(buttons_frame,
                                   text="❌ Cerrar",
@@ -8927,6 +8949,400 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.avisos_manager.mostrar_panel_admin(self)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir el panel de avisos:\n{e}")
+    
+    def mostrar_gestor_estados(self):
+        """Muestra la ventana de gestión de estados de artículos"""
+        if str(self.rol).strip().lower() not in ("admin", "administrador"):
+            messagebox.showerror("Acceso Denegado", "Solo los administradores pueden gestionar estados.")
+            return
+        
+        try:
+            # Crear ventana
+            ventana = ctk.CTkToplevel(self)
+            ventana.title("Gestionar Estados de Artículos")
+            ventana.geometry("700x600")
+            ventana.transient(self)
+            ventana.grab_set()
+            
+            # Frame principal
+            main_frame = ctk.CTkFrame(ventana)
+            main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+            
+            # Título
+            titulo = ctk.CTkLabel(main_frame, text="📋 Gestión de Estados de Artículos",
+                                 font=ctk.CTkFont(size=18, weight="bold"))
+            titulo.pack(pady=(0, 15))
+            
+            # Frame de controles
+            controles_frame = ctk.CTkFrame(main_frame)
+            controles_frame.pack(fill="x", pady=(0, 10))
+            
+            # Entrada para nuevo estado
+            entry_nuevo = ctk.CTkEntry(controles_frame, placeholder_text="Nuevo estado...", width=400)
+            entry_nuevo.pack(side="left", padx=(10, 5), pady=10)
+            
+            # Botón añadir
+            btn_anadir = ctk.CTkButton(controles_frame, text="➕ Añadir", width=100)
+            btn_anadir.pack(side="left", padx=5, pady=10)
+            
+            # Lista de estados
+            lista_frame = ctk.CTkFrame(main_frame)
+            lista_frame.pack(fill="both", expand=True, pady=(0, 10))
+            
+            # Header
+            header_frame = ctk.CTkFrame(lista_frame, fg_color=("gray80", "gray25"), height=35)
+            header_frame.pack(fill="x", padx=2, pady=(2, 0))
+            header_frame.pack_propagate(False)
+            
+            ctk.CTkLabel(header_frame, text="Estado", font=ctk.CTkFont(weight="bold"), width=450, anchor="w").pack(side="left", padx=10, pady=5)
+            ctk.CTkLabel(header_frame, text="Acciones", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            
+            # Scrollable frame
+            scroll_frame = ctk.CTkScrollableFrame(lista_frame)
+            scroll_frame.pack(fill="both", expand=True, padx=2, pady=2)
+            
+            # Frame de botones inferiores
+            botones_frame = ctk.CTkFrame(main_frame)
+            botones_frame.pack(fill="x")
+            
+            btn_recargar = ctk.CTkButton(botones_frame, text="↻ Recargar", width=120)
+            btn_recargar.pack(side="left", padx=5, pady=5)
+            
+            btn_cerrar = ctk.CTkButton(botones_frame, text="Cerrar", width=100, 
+                                       command=ventana.destroy)
+            btn_cerrar.pack(side="right", padx=5, pady=5)
+            
+            # Manager
+            estados_mgr = EstadosArticuloManager()
+            
+            # Funciones
+            def cargar_estados():
+                """Carga y muestra los estados"""
+                # Limpiar lista
+                for widget in scroll_frame.winfo_children():
+                    widget.destroy()
+                
+                estados = estados_mgr.cargar_estados()
+                
+                for i, estado in enumerate(estados):
+                    fila = ctk.CTkFrame(scroll_frame, fg_color=("gray90", "gray20"))
+                    fila.pack(fill="x", padx=2, pady=2)
+                    
+                    # Estado (vacío se muestra como texto especial)
+                    texto_estado = "(Vacío)" if estado == "" else estado
+                    lbl_estado = ctk.CTkLabel(fila, text=texto_estado, width=450, anchor="w")
+                    lbl_estado.pack(side="left", padx=10, pady=8)
+                    
+                    # Botones
+                    acciones = ctk.CTkFrame(fila, fg_color="transparent")
+                    acciones.pack(side="left", padx=5)
+                    
+                    # Editar
+                    btn_editar = ctk.CTkButton(acciones, text="✏", width=30, height=25,
+                                               command=lambda e=estado: editar_estado(e))
+                    btn_editar.pack(side="left", padx=2)
+                    Tooltip(btn_editar, "Editar este estado")
+                    
+                    # Mover arriba
+                    if i > 0:
+                        btn_arriba = ctk.CTkButton(acciones, text="▲", width=30, height=25,
+                                                   command=lambda e=estado: mover_estado(e, 'arriba'))
+                        btn_arriba.pack(side="left", padx=2)
+                        Tooltip(btn_arriba, "Mover hacia arriba")
+                    
+                    # Mover abajo
+                    if i < len(estados) - 1:
+                        btn_abajo = ctk.CTkButton(acciones, text="▼", width=30, height=25,
+                                                  command=lambda e=estado: mover_estado(e, 'abajo'))
+                        btn_abajo.pack(side="left", padx=2)
+                        Tooltip(btn_abajo, "Mover hacia abajo")
+                    
+                    # Eliminar
+                    btn_eliminar = ctk.CTkButton(acciones, text="🗑", width=30, height=25,
+                                                 fg_color="red", hover_color="darkred",
+                                                 command=lambda e=estado: eliminar_estado(e))
+                    btn_eliminar.pack(side="left", padx=2)
+                    Tooltip(btn_eliminar, "Eliminar este estado")
+            
+            def anadir_estado():
+                """Añade un nuevo estado"""
+                nuevo = entry_nuevo.get().strip()
+                if not nuevo:
+                    messagebox.showwarning("Aviso", "Escribe un estado para añadir")
+                    return
+                
+                success, msg = estados_mgr.añadir_estado(nuevo)
+                if success:
+                    entry_nuevo.delete(0, 'end')
+                    cargar_estados()
+                    recargar_estados_app()
+                    messagebox.showinfo("Éxito", msg)
+                else:
+                    messagebox.showerror("Error", msg)
+            
+            def editar_estado(estado_antiguo):
+                """Edita un estado existente"""
+                # Ventana de edición
+                ventana_edit = ctk.CTkToplevel(ventana)
+                ventana_edit.title("Editar Estado")
+                ventana_edit.geometry("500x150")
+                ventana_edit.transient(ventana)
+                ventana_edit.grab_set()
+                
+                ctk.CTkLabel(ventana_edit, text="Nuevo valor:", font=ctk.CTkFont(size=12)).pack(pady=(20, 5))
+                
+                entry_edit = ctk.CTkEntry(ventana_edit, width=400)
+                entry_edit.insert(0, estado_antiguo)
+                entry_edit.pack(pady=5)
+                
+                def guardar_edicion():
+                    nuevo_valor = entry_edit.get().strip()
+                    if not nuevo_valor:
+                        messagebox.showwarning("Aviso", "El estado no puede estar vacío")
+                        return
+                    
+                    success, msg = estados_mgr.editar_estado(estado_antiguo, nuevo_valor)
+                    if success:
+                        ventana_edit.destroy()
+                        cargar_estados()
+                        recargar_estados_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+                
+                ctk.CTkButton(ventana_edit, text="Guardar", command=guardar_edicion).pack(pady=10)
+            
+            def eliminar_estado(estado):
+                """Elimina un estado"""
+                texto_estado = "(Vacío)" if estado == "" else estado
+                if not messagebox.askyesno("Confirmar", f"¿Eliminar el estado '{texto_estado}'?"):
+                    return
+                
+                success, msg = estados_mgr.eliminar_estado(estado)
+                if success:
+                    cargar_estados()
+                    recargar_estados_app()
+                    messagebox.showinfo("Éxito", msg)
+                else:
+                    messagebox.showerror("Error", msg)
+            
+            def mover_estado(estado, direccion):
+                """Mueve un estado arriba o abajo"""
+                success, msg = estados_mgr.mover_estado(estado, direccion)
+                if success:
+                    cargar_estados()
+                    recargar_estados_app()
+                else:
+                    messagebox.showinfo("Info", msg)
+            
+            def recargar_estados_app():
+                """Recarga los estados en la aplicación principal"""
+                self.OPCIONES["Estado_Producto"] = estados_mgr.cargar_estados()
+            
+            # Conectar botones
+            btn_anadir.configure(command=anadir_estado)
+            btn_recargar.configure(command=cargar_estados)
+            entry_nuevo.bind("<Return>", lambda e: anadir_estado())
+            
+            # Cargar estados inicialmente
+            cargar_estados()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de estados:\n{e}")
+            import traceback
+            traceback.print_exc()
+    
+    def mostrar_gestor_personas(self):
+        """
+        Abre una ventana para gestionar la lista de personas
+        """
+        from lib.safe_toplevel import SafeCTkToplevel
+        from lib.personas_manager import PersonasManager
+        
+        try:
+            # Crear ventana de gestión
+            gestor_window = SafeCTkToplevel(self)
+            gestor_window.title("Gestión de Personas")
+            gestor_window.geometry("600x500")
+            gestor_window.transient(self)
+            gestor_window.grab_set()
+            
+            # Frame principal con padding
+            main_frame = ctk.CTkFrame(gestor_window)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Título
+            title_label = ctk.CTkLabel(main_frame,
+                                       text="👥 Gestión de Personas",
+                                       font=("Arial", 18, "bold"))
+            title_label.pack(pady=(0, 20))
+            
+            # Frame para agregar nueva persona
+            add_frame = ctk.CTkFrame(main_frame)
+            add_frame.pack(fill="x", pady=(0, 20))
+            
+            entry_label = ctk.CTkLabel(add_frame,
+                                       text="Nueva Persona:",
+                                       font=("Arial", 12))
+            entry_label.pack(side="left", padx=(10, 5))
+            
+            entry_persona = ctk.CTkEntry(add_frame,
+                                         width=300,
+                                         placeholder_text="Ingrese el nombre de la persona")
+            entry_persona.pack(side="left", padx=5)
+            
+            btn_agregar = ctk.CTkButton(add_frame,
+                                        text="➕ Agregar",
+                                        width=100)
+            btn_agregar.pack(side="left", padx=5)
+            
+            # Frame scrollable para la lista de personas
+            list_frame = ctk.CTkScrollableFrame(main_frame,
+                                                label_text="Personas Registradas")
+            list_frame.pack(fill="both", expand=True)
+            
+            # Instanciar el gestor
+            personas_mgr = PersonasManager()
+            
+            def cargar_personas():
+                """Carga y muestra la lista de personas"""
+                # Limpiar lista actual
+                for widget in list_frame.winfo_children():
+                    widget.destroy()
+                
+                # Obtener personas
+                personas = personas_mgr.cargar_personas()
+                
+                if not personas:
+                    no_data_label = ctk.CTkLabel(list_frame,
+                                                 text="No hay personas registradas",
+                                                 text_color="gray")
+                    no_data_label.pack(pady=20)
+                    return
+                
+                # Mostrar cada persona
+                for i, persona in enumerate(personas):
+                    persona_frame = ctk.CTkFrame(list_frame)
+                    persona_frame.pack(fill="x", pady=5, padx=5)
+                    
+                    # Nombre de la persona
+                    nombre_label = ctk.CTkLabel(persona_frame,
+                                               text=persona,
+                                               font=("Arial", 12),
+                                               anchor="w")
+                    nombre_label.pack(side="left", padx=10, fill="x", expand=True)
+                    
+                    # Botones de acción
+                    btn_frame = ctk.CTkFrame(persona_frame, fg_color="transparent")
+                    btn_frame.pack(side="right", padx=5)
+                    
+                    # Botón Editar
+                    btn_editar = ctk.CTkButton(btn_frame,
+                                              text="✏️",
+                                              width=40,
+                                              command=lambda p=persona: editar_persona(p))
+                    btn_editar.pack(side="left", padx=2)
+                    Tooltip(btn_editar, "Editar persona")
+                    
+                    # Botón Subir
+                    if i > 0:  # No mostrar para el primero
+                        btn_subir = ctk.CTkButton(btn_frame,
+                                                text="⬆️",
+                                                width=40,
+                                                command=lambda p=persona: mover_persona(p, "arriba"))
+                        btn_subir.pack(side="left", padx=2)
+                        Tooltip(btn_subir, "Mover arriba")
+                    
+                    # Botón Bajar
+                    if i < len(personas) - 1:  # No mostrar para el último
+                        btn_bajar = ctk.CTkButton(btn_frame,
+                                                text="⬇️",
+                                                width=40,
+                                                command=lambda p=persona: mover_persona(p, "abajo"))
+                        btn_bajar.pack(side="left", padx=2)
+                        Tooltip(btn_bajar, "Mover abajo")
+                    
+                    # Botón Eliminar
+                    btn_eliminar = ctk.CTkButton(btn_frame,
+                                               text="🗑️",
+                                               width=40,
+                                               fg_color="red",
+                                               hover_color="darkred",
+                                               command=lambda p=persona: eliminar_persona(p))
+                    btn_eliminar.pack(side="left", padx=2)
+                    Tooltip(btn_eliminar, "Eliminar persona")
+            
+            def anadir_persona():
+                """Agrega una nueva persona a la lista"""
+                nueva_persona = entry_persona.get().strip()
+                if nueva_persona:
+                    success, msg = personas_mgr.añadir_persona(nueva_persona)
+                    if success:
+                        entry_persona.delete(0, "end")
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+                else:
+                    messagebox.showwarning("Advertencia", "Por favor ingrese un nombre")
+            
+            def editar_persona(persona_actual):
+                """Abre un diálogo para editar una persona"""
+                from tkinter import simpledialog
+                nueva_persona = simpledialog.askstring("Editar Persona",
+                                                       f"Editar nombre de la persona:\n\n'{persona_actual}'",
+                                                       initialvalue=persona_actual,
+                                                       parent=gestor_window)
+                if nueva_persona and nueva_persona.strip():
+                    success, msg = personas_mgr.editar_persona(persona_actual, nueva_persona.strip())
+                    if success:
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def eliminar_persona(persona):
+                """Elimina una persona de la lista"""
+                if messagebox.askyesno("Confirmar eliminación",
+                                      f"¿Está seguro de eliminar la persona?\n\n'{persona}'",
+                                      parent=gestor_window):
+                    
+                    success, msg = personas_mgr.eliminar_persona(persona)
+                    if success:
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def mover_persona(persona, direccion):
+                """Mueve una persona arriba o abajo"""
+                success, msg = personas_mgr.mover_persona(persona, direccion)
+                if success:
+                    cargar_personas()
+                    recargar_personas_app()
+                else:
+                    messagebox.showinfo("Info", msg)
+            
+            def recargar_personas_app():
+                """Recarga las personas en la aplicación principal"""
+                personas_actualizadas = personas_mgr.cargar_personas()
+                self.OPCIONES["Autorizado_Por"] = personas_actualizadas
+                self.OPCIONES["Gestionado_Por"] = personas_actualizadas
+            
+            # Conectar botones
+            btn_agregar.configure(command=anadir_persona)
+            entry_persona.bind("<Return>", lambda e: anadir_persona())
+            
+            # Cargar personas inicialmente
+            cargar_personas()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de personas:\n{e}")
+            import traceback
+            traceback.print_exc()
     
     def mostrar_gestion_usuarios(self):
         """Muestra la ventana de gestión de usuarios con opciones para añadir/editar usuarios."""

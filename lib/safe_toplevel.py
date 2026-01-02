@@ -12,8 +12,8 @@ class SafeCTkToplevel(ctk.CTkToplevel):
     """
     
     def __init__(self, *args, **kwargs):
+        self._after_ids = []  # Lista de IDs de callbacks programados - DEBE ser ANTES de super().__init__
         super().__init__(*args, **kwargs)
-        self._after_ids = []  # Lista de IDs de callbacks programados
         
     def after(self, ms, func=None, *args):
         """Override de after() para registrar el ID del callback"""
@@ -40,14 +40,15 @@ class SafeCTkToplevel(ctk.CTkToplevel):
     
     def destroy(self):
         """Override de destroy() para cancelar todos los callbacks pendientes primero"""
-        # Cancelar todos los callbacks programados
-        for after_id in self._after_ids[:]:  # Copiar lista para iterar seguro
-            try:
-                super().after_cancel(after_id)
-            except:
-                pass
-        
-        self._after_ids.clear()
+        # Cancelar todos los callbacks programados (si existen)
+        if hasattr(self, '_after_ids'):
+            for after_id in self._after_ids[:]:  # Copiar lista para iterar seguro
+                try:
+                    super().after_cancel(after_id)
+                except:
+                    pass
+            
+            self._after_ids.clear()
         
         # Liberar grab si existe
         try:
