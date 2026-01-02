@@ -313,7 +313,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.0.1"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2565,6 +2565,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(filtro_frame, text="Buscar:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky="w")
         self.entry_busqueda = ctk.CTkEntry(filtro_frame, placeholder_text="Código RMA, Cliente o Doc.", width=250)
         self.entry_busqueda.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        # Bind para ejecutar búsqueda con Enter
+        self.entry_busqueda.bind("<Return>", lambda e: self.aplicar_filtros_rma())
         
         # Filtro por Estado
         estados_posibles = self.OPCIONES.get("Estado", ["Todos"])
