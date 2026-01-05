@@ -317,7 +317,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.3"
+APP_VERSION = "v1.0.5"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5725,6 +5725,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def guardar_rma_placeholder(self):
         """Punto de entrada para guardar/actualizar."""
+        # Validación: Si hay Fecha Gestión, debe haber Resultado Expediente
+        fecha_gestion = self.obtener_valor_campo("Fecha_Gestion")
+        resultado_expediente = self.obtener_valor_campo("Resultado_Expediente")
+        
+        # Si hay fecha de gestión (expediente cerrado)
+        if fecha_gestion and fecha_gestion.strip():
+            # Verificar que haya resultado
+            if not resultado_expediente or resultado_expediente.strip() == "":
+                messagebox.showwarning(
+                    "Resultado Obligatorio",
+                    "⚠️ No se puede cerrar un expediente sin especificar el Resultado.\n\n"
+                    "Ha indicado una Fecha de Gestión, pero no ha seleccionado "
+                    "un Resultado de Expediente en la pestaña Contabilidad.\n\n"
+                    "Por favor, seleccione un resultado antes de guardar."
+                )
+                return  # No guardar
+        
         if self.rma_actual_id is None:
             self.guardar_nuevo_rma()
         else:
@@ -11663,6 +11680,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # 4. Definición de las estadísticas y sus métodos (Aún no creados)
         # Se elimina la estadística 'Abonos por Cliente y Periodo' (no funcional).
         self.botones_stats = {
+            "📊 Estadísticas Anuales": self.mostrar_estadisticas_anuales_menu,
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
             "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos,
@@ -12101,6 +12119,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             mostrar_estadisticas_articulos(self)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la estadística de artículos: {e}")
+    
+    def mostrar_estadisticas_anuales_menu(self):
+        """Wrapper que delega la creación de la estadística de resumen anual
+        al módulo externo `lib.anuales_estadisticas`.
+        """
+        try:
+            from lib.anuales_estadisticas import mostrar_estadisticas_anuales
+            mostrar_estadisticas_anuales(self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar las estadísticas anuales: {e}")
     
     def mostrar_estadisticas_resolucion_menu(self):
         """Wrapper que delega la creación de la estadística de resolución de expedientes

@@ -1,5 +1,7 @@
-Cambios V.1.0.3 - ✨ Últimas mejoras implementadas:
+Cambios V.1.0.5 - ✨ Últimas mejoras implementadas:
 
+- 📊 Añadida estadistica de expedientes anual.
+- Cuando se introduzca una Fecha Gestion, se necesita un Resultado Expediente para poder cerrar y guardar un expediente. En caso de no introducirlo, saldra mensaje de advertencia.
 - Rediseñado la ficha de expedientes para mostrar en una primera vista toda la informacion.
 - Los diccionarios de seleccion de estados de productos y de personas en las fechas, ahora estan en JSON y son configurables desde el menu ADMIN del usuario admin.
 
