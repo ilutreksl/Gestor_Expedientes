@@ -21,9 +21,10 @@ class UserContextFilter(logging.Filter):
 class AppLogger:
     """Gestor centralizado de logging para la aplicación"""
     
-    def __init__(self, log_dir="logs"):
+    def __init__(self, log_dir="logs", username=None):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
+        self.username = username or "SYSTEM"
         
         # Configurar logger principal
         self.logger = logging.getLogger("GestorExpedientes")
@@ -33,8 +34,9 @@ class AppLogger:
         if self.logger.handlers:
             self.logger.handlers.clear()
         
-        # Archivo de log con fecha
-        log_file = self.log_dir / f"app_{datetime.now().strftime('%Y-%m-%d')}.log"
+        # Archivo de log con fecha y usuario
+        fecha = datetime.now().strftime('%Y-%m-%d')
+        log_file = self.log_dir / f"app_{fecha}_{self.username}.log"
         
         # Handler para archivo
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
@@ -70,9 +72,51 @@ class AppLogger:
         self.logger.info("="*80)
     
     def set_user(self, username):
-        """Actualiza el usuario actual en los logs"""
+        """Actualiza el usuario actual en los logs y reconfigura el archivo de log"""
         UserContextFilter.current_user = username if username else "SYSTEM"
-        self.logger.info(f"Usuario actualizado: {UserContextFilter.current_user}")
+        
+        # Si cambiamos de usuario, crear un nuevo archivo de log
+        if username and username != self.username:
+            self.username = username
+            
+            # Cerrar handlers anteriores
+            for handler in self.logger.handlers[:]:
+                handler.close()
+                self.logger.removeHandler(handler)
+            
+            # Crear nuevo archivo de log con el nombre del usuario
+            fecha = datetime.now().strftime('%Y-%m-%d')
+            log_file = self.log_dir / f"app_{fecha}_{self.username}.log"
+            
+            # Handler para archivo
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
+            
+            # Handler para consola
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.INFO)
+            
+            # Formato con usuario
+            formatter = logging.Formatter(
+                '[%(asctime)s] [%(username)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            
+            file_handler.setFormatter(formatter)
+            console_handler.setFormatter(formatter)
+            
+            # Añadir filtro de usuario
+            user_filter = UserContextFilter()
+            file_handler.addFilter(user_filter)
+            console_handler.addFilter(user_filter)
+            
+            # Añadir handlers
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(console_handler)
+            
+            self.logger.info("="*80)
+            self.logger.info(f"Log reconfigurado para usuario: {self.username}")
+            self.logger.info("="*80)
     
     def get_logger(self):
         """Retorna el logger configurado"""
@@ -118,16 +162,16 @@ class AppLogger:
 # Instancia global del logger
 _app_logger = None
 
-def get_app_logger():
+def get_app_logger(username=None):
     """Obtiene o crea la instancia global del logger"""
     global _app_logger
     if _app_logger is None:
-        _app_logger = AppLogger()
+        _app_logger = AppLogger(username=username)
     return _app_logger
 
-def setup_logging():
+def setup_logging(username=None):
     """Inicializa el sistema de logging completo"""
-    logger_manager = get_app_logger()
+    logger_manager = get_app_logger(username=username)
     logger_manager.override_print()
     logger_manager.setup_exception_handler()
     return logger_manager.get_logger()

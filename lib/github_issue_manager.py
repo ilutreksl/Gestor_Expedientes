@@ -76,10 +76,13 @@ def mostrar_ventana_info_issue(ventana_principal, callback_continuar):
     btn_cancelar.pack(side="right", padx=(0, 10))
 
 
-def obtener_log_mas_reciente():
+def obtener_log_mas_reciente(username=None):
     """
-    Obtiene el contenido del archivo de log más reciente.
+    Obtiene el contenido del archivo de log más reciente del usuario.
     
+    Args:
+        username: Nombre del usuario para buscar su log específico
+        
     Returns:
         tuple: (contenido_log, nombre_archivo) o None si no se encuentra
     """
@@ -89,9 +92,14 @@ def obtener_log_mas_reciente():
             logger.warning("Directorio de logs no encontrado")
             return None
         
-        archivos_log = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
+        # Buscar logs del usuario específico si se proporciona username
+        if username:
+            archivos_log = [f for f in os.listdir(logs_dir) if f.endswith(f'_{username}.log')]
+        else:
+            archivos_log = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
+        
         if not archivos_log:
-            logger.warning("No se encontraron archivos de log")
+            logger.warning(f"No se encontraron archivos de log{' para el usuario ' + username if username else ''}")
             return None
         
         # Ordenar por fecha de modificación (más reciente primero)
@@ -321,7 +329,7 @@ def mostrar_formulario_github(ventana_principal):
         
         # Adjuntar log si está marcado y es un Bug
         if adjuntar_log_var.get() and tipo == "Bug":
-            resultado_log = obtener_log_mas_reciente()
+            resultado_log = obtener_log_mas_reciente(username=ventana_principal.username)
             if resultado_log:
                 contenido_log, nombre_log = resultado_log
                 cuerpo += f"\n\n---\n\n### 📋 Log adjunto: `{nombre_log}`\n\n"
