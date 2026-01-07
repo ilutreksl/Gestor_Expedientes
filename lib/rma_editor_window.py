@@ -8,6 +8,9 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
 import datetime
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 
 class RmaEditorWindow(ctk.CTkToplevel):

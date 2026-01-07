@@ -4,6 +4,9 @@ Módulo para estadísticas de artículos con filtros por resultado de expediente
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, Toplevel, Listbox, Scrollbar, MULTIPLE, END
 import pandas as pd
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 
 def mostrar_estadisticas_articulos(ventana_principal):

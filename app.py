@@ -33,8 +33,15 @@ from lib.estados_manager import EstadosArticuloManager
 from lib.personas_manager import PersonasManager
 from lib.resultado_expediente_manager import ResultadoExpedienteManager
 
+# Sistema de logging
+from lib.logger_config import setup_logging, set_current_user, get_logger
+
 import tkinter as tk
 from tkinter import ttk
+
+# Inicializar sistema de logging (captura todos los prints y errores)
+logger = setup_logging()
+logger.info("Aplicación iniciada")
 
 # Monkey patch para prevenir errores en ventanas destruidas
 # Guardamos referencias a los métodos originales
@@ -317,7 +324,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.5"
+APP_VERSION = "v1.0.6"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1093,6 +1100,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.master = master
         self.username = username
         self.rol = rol
+        
+        # Configurar usuario en el sistema de logging
+        set_current_user(username)
+        logger.info(f"Usuario '{username}' con rol '{rol}' ha iniciado sesión")
+        
         try:
             self.toaster = ToastNotifier() if ToastNotifier else None
         except Exception:

@@ -10,6 +10,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
 matplotlib.use('Agg')  # Backend sin GUI
 from app import connect_db
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 
 def mostrar_estadisticas_resolucion(ventana_principal):

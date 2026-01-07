@@ -1,4 +1,9 @@
-Cambios V.1.0.5 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.6 - ✨ Últimas mejoras implementadas:
+
+- Implementado sistema de logging.
+
+
+Cambios V.1.0.5
 
 - 📊 Añadida estadistica de expedientes anual.
 - Cuando se introduzca una Fecha Gestion, se necesita un Resultado Expediente para poder cerrar y guardar un expediente. En caso de no introducirlo, saldra mensaje de advertencia.

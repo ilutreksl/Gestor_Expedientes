@@ -12,6 +12,12 @@ __pycache__/
 # Archivos del sistema
 .DS_Store
 Thumbs.db
+
+# Archivos de log (contienen información sensible de usuarios)
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
+
 # Carpetas a ignorar
 Adjuntos_RMA/
 plantillas/

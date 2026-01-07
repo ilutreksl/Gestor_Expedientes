@@ -10,6 +10,9 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 class BackupManagerB2:
     """Clase para gestionar backups en Backblaze B2"""

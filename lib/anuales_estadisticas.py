@@ -6,6 +6,9 @@ import customtkinter as ctk
 from tkinter import messagebox, filedialog
 from datetime import datetime
 import sqlite3
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 
 # Estados que se consideran como "mal estado"

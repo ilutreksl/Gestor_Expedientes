@@ -1,6 +1,8 @@
 """
 Utilidades para el manejo de datos de RMA
 """
+from lib.logger_config import get_logger
+logger = get_logger()
 
 def obtener_ultima_actividad(fecha_emision, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion):
     """
