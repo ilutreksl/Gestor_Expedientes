@@ -1,4 +1,4 @@
-Cambio V.1.0.6 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.7 - ✨ Últimas mejoras implementadas:
 
 - Implementado sistema de logging.
 
