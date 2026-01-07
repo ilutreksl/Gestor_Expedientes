@@ -5726,21 +5726,44 @@ class VentanaPrincipal(ctk.CTkToplevel):
     def guardar_rma_placeholder(self):
         """Punto de entrada para guardar/actualizar."""
         # Validación: Si hay Fecha Gestión, debe haber Resultado Expediente
-        fecha_gestion = self.obtener_valor_campo("Fecha_Gestion")
-        resultado_expediente = self.obtener_valor_campo("Resultado_Expediente")
-        
-        # Si hay fecha de gestión (expediente cerrado)
-        if fecha_gestion and fecha_gestion.strip():
-            # Verificar que haya resultado
-            if not resultado_expediente or resultado_expediente.strip() == "":
-                messagebox.showwarning(
-                    "Resultado Obligatorio",
-                    "⚠️ No se puede cerrar un expediente sin especificar el Resultado.\n\n"
-                    "Ha indicado una Fecha de Gestión, pero no ha seleccionado "
-                    "un Resultado de Expediente en la pestaña Contabilidad.\n\n"
-                    "Por favor, seleccione un resultado antes de guardar."
-                )
-                return  # No guardar
+        try:
+            # Obtener el widget de Fecha_Gestion
+            fecha_gestion_widget = getattr(self, "entry_Fecha_Gestion", None)
+            if fecha_gestion_widget:
+                if hasattr(fecha_gestion_widget, 'get_date'):
+                    fecha_gestion = fecha_gestion_widget.get_date()
+                elif hasattr(fecha_gestion_widget, 'get'):
+                    fecha_gestion = fecha_gestion_widget.get()
+                else:
+                    fecha_gestion = ""
+            else:
+                fecha_gestion = ""
+            
+            # Obtener el widget de Resultado_Expediente
+            resultado_widget = getattr(self, "entry_Resultado_Expediente", None)
+            if resultado_widget:
+                if hasattr(resultado_widget, 'get'):
+                    resultado_expediente = resultado_widget.get()
+                else:
+                    resultado_expediente = resultado_widget.cget("text")
+            else:
+                resultado_expediente = ""
+            
+            # Si hay fecha de gestión (expediente cerrado)
+            if fecha_gestion and str(fecha_gestion).strip():
+                # Verificar que haya resultado
+                if not resultado_expediente or str(resultado_expediente).strip() == "":
+                    messagebox.showwarning(
+                        "Resultado Obligatorio",
+                        "⚠️ No se puede cerrar un expediente sin especificar el Resultado.\n\n"
+                        "Ha indicado una Fecha de Gestión, pero no ha seleccionado "
+                        "un Resultado de Expediente en la pestaña Contabilidad.\n\n"
+                        "Por favor, seleccione un resultado antes de guardar."
+                    )
+                    return  # No guardar
+        except Exception as e:
+            print(f"Error en validación de campos: {e}")
+            # Continuar con el guardado si hay error en la validación
         
         if self.rma_actual_id is None:
             self.guardar_nuevo_rma()
