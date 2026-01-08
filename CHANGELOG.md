@@ -1,4 +1,12 @@
-Cambio V.1.0.7 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.8 - ✨ Últimas mejoras implementadas:
+
+- Añadido desplegable en el campo de Recepcionado_Por con un listado de usuarios.
+- El listado de usuarios de Recepcionado_Por es administrable desde el menu Admin del usuario admin.
+- Añadido orden de fecha mas reciente en el listado de archivos de Backups.
+- Añadido poder ordenar por nombre y por fecha en la ventana de backups.
+
+
+Cambio V.1.0.7
 
 - Implementado sistema de logging.
 

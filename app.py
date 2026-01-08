@@ -31,6 +31,7 @@ from lib.avisos_manager import AvisosManager
 from lib.backup_manager import BackupManagerB2
 from lib.estados_manager import EstadosArticuloManager
 from lib.personas_manager import PersonasManager
+from lib.personas_recepcion_manager import PersonasRecepcionManager
 from lib.resultado_expediente_manager import ResultadoExpedienteManager
 from lib import github_issue_manager
 
@@ -325,7 +326,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.7"
+APP_VERSION = "v1.0.8"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1068,6 +1069,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
     estados_manager = EstadosArticuloManager()
     # Inicializar el gestor de personas
     personas_manager = PersonasManager()
+    # Inicializar el gestor de personas de recepción
+    personas_recepcion_manager = PersonasRecepcionManager()
     
     # Inicializar el gestor de resultado expediente
     resultado_expediente_manager = ResultadoExpedienteManager()
@@ -1076,6 +1079,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         "Autorizacion": ["SI", "NO"],
         "Autorizado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
         "Gestionado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
+        "Recepcionado_Por": personas_recepcion_manager.cargar_personas(),  # Cargar desde JSON
         "Resultado_Expediente": resultado_expediente_manager.cargar_resultados(),  # Cargar desde JSON
         "Estado_Producto": estados_manager.cargar_estados()  # Cargar desde JSON
     }
@@ -4929,7 +4933,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         ctk.CTkLabel(estados_fechas_frame, text="--- RECEPCIÓN ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Recepción:", "Fecha_Recepcion", tipo="date"); fila_estados += 1
-        self.crear_campo(estados_fechas_frame, fila_estados, "Recepcionado Por:", "Recepcionado_Por"); fila_estados += 1
+        self.crear_campo(estados_fechas_frame, fila_estados, "Recepcionado Por:", "Recepcionado_Por", tipo="optionmenu", opciones=self.OPCIONES["Recepcionado_Por"], valor_defecto=self.OPCIONES["Recepcionado_Por"][0] if self.OPCIONES["Recepcionado_Por"] else ""); fila_estados += 1
         
         ctk.CTkLabel(estados_fechas_frame, text="--- PROCESO ---", font=ctk.CTkFont(weight="bold")).grid(row=fila_estados, column=0, columnspan=2, pady=(10, 5), sticky="w"); fila_estados += 1
         self.crear_campo(estados_fechas_frame, fila_estados, "Fecha Proceso:", "Fecha_Proceso", tipo="date"); fila_estados += 1
@@ -8995,6 +8999,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                      command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas()])
         btn_personas.pack(pady=10)
         
+        # Botón Gestionar Personas Recepción
+        btn_personas_recepcion = ctk.CTkButton(buttons_frame,
+                                               text="👤 Gestionar Personas Recepción",
+                                               width=240,
+                                               height=40,
+                                               fg_color="#f59e0b",
+                                               hover_color="#d97706",
+                                               command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()])
+        btn_personas_recepcion.pack(pady=10)
+        
         # Botón Gestionar Resultado Expediente
         btn_resultado = ctk.CTkButton(buttons_frame,
                                       text="📊 Gestionar Resultado Expediente",
@@ -9416,6 +9430,172 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir el gestor de personas:\n{e}")
+            import traceback
+            traceback.print_exc()
+    
+    def mostrar_gestor_personas_recepcion(self):
+        """
+        Abre una ventana para gestionar la lista de personas de recepción
+        """
+        from lib.safe_toplevel import SafeCTkToplevel
+        from lib.personas_recepcion_manager import PersonasRecepcionManager
+        
+        try:
+            # Crear ventana de gestión
+            gestor_window = SafeCTkToplevel(self)
+            gestor_window.title("Gestión de Personas de Recepción")
+            gestor_window.geometry("600x500")
+            gestor_window.transient(self)
+            gestor_window.grab_set()
+            
+            # Frame principal con padding
+            main_frame = ctk.CTkFrame(gestor_window)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Título
+            title_label = ctk.CTkLabel(main_frame,
+                                       text="👤 Gestión de Personas de Recepción",
+                                       font=("Arial", 18, "bold"))
+            title_label.pack(pady=(0, 20))
+            
+            # Frame para agregar nueva persona
+            add_frame = ctk.CTkFrame(main_frame)
+            add_frame.pack(fill="x", pady=(0, 20))
+            
+            entry_label = ctk.CTkLabel(add_frame,
+                                       text="Nueva Persona:",
+                                       font=("Arial", 12))
+            entry_label.pack(side="left", padx=(10, 5))
+            
+            entry_persona = ctk.CTkEntry(add_frame,
+                                         width=300,
+                                         placeholder_text="Ingrese el nombre de la persona")
+            entry_persona.pack(side="left", padx=5)
+            
+            btn_agregar = ctk.CTkButton(add_frame,
+                                        text="➕ Agregar",
+                                        width=100)
+            btn_agregar.pack(side="left", padx=5)
+            
+            # Frame scrollable para la lista de personas
+            list_frame = ctk.CTkScrollableFrame(main_frame,
+                                                label_text="Personas de Recepción Registradas")
+            list_frame.pack(fill="both", expand=True)
+            
+            # Instanciar el gestor
+            personas_mgr = PersonasRecepcionManager()
+            
+            def cargar_personas():
+                """Carga y muestra la lista de personas"""
+                # Limpiar lista actual
+                for widget in list_frame.winfo_children():
+                    widget.destroy()
+                
+                # Obtener personas
+                personas = personas_mgr.cargar_personas()
+                
+                if not personas:
+                    no_data_label = ctk.CTkLabel(list_frame,
+                                                 text="No hay personas de recepción registradas",
+                                                 text_color="gray")
+                    no_data_label.pack(pady=20)
+                    return
+                
+                # Mostrar cada persona
+                for i, persona in enumerate(personas):
+                    persona_frame = ctk.CTkFrame(list_frame)
+                    persona_frame.pack(fill="x", pady=5, padx=5)
+                    
+                    # Nombre de la persona
+                    nombre_label = ctk.CTkLabel(persona_frame,
+                                               text=persona,
+                                               font=("Arial", 12),
+                                               anchor="w")
+                    nombre_label.pack(side="left", padx=10, fill="x", expand=True)
+                    
+                    # Botones de acción
+                    btn_frame = ctk.CTkFrame(persona_frame, fg_color="transparent")
+                    btn_frame.pack(side="right", padx=5)
+                    
+                    # Botón Editar
+                    btn_editar = ctk.CTkButton(btn_frame,
+                                              text="✏️",
+                                              width=40,
+                                              command=lambda p=persona: editar_persona(p))
+                    btn_editar.pack(side="left", padx=2)
+                    Tooltip(btn_editar, "Editar persona")
+                    
+                    # Botón Eliminar
+                    btn_eliminar = ctk.CTkButton(btn_frame,
+                                               text="🗑️",
+                                               width=40,
+                                               fg_color="red",
+                                               hover_color="darkred",
+                                               command=lambda p=persona: eliminar_persona(p))
+                    btn_eliminar.pack(side="left", padx=2)
+                    Tooltip(btn_eliminar, "Eliminar persona")
+            
+            def anadir_persona():
+                """Agrega una nueva persona a la lista"""
+                nueva_persona = entry_persona.get().strip()
+                if nueva_persona:
+                    success, msg = personas_mgr.añadir_persona(nueva_persona)
+                    if success:
+                        entry_persona.delete(0, "end")
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+                else:
+                    messagebox.showwarning("Advertencia", "Por favor ingrese un nombre")
+            
+            def editar_persona(persona_actual):
+                """Abre un diálogo para editar una persona"""
+                from tkinter import simpledialog
+                nueva_persona = simpledialog.askstring("Editar Persona de Recepción",
+                                                       f"Editar nombre de la persona:\\n\\n'{persona_actual}'",
+                                                       initialvalue=persona_actual,
+                                                       parent=gestor_window)
+                if nueva_persona and nueva_persona.strip():
+                    success, msg = personas_mgr.editar_persona(persona_actual, nueva_persona.strip())
+                    if success:
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def eliminar_persona(persona):
+                """Elimina una persona de la lista"""
+                if messagebox.askyesno("Confirmar eliminación",
+                                      f"¿Está seguro de eliminar la persona de recepción?\\n\\n'{persona}'",
+                                      parent=gestor_window):
+                    
+                    success, msg = personas_mgr.eliminar_persona(persona)
+                    if success:
+                        cargar_personas()
+                        recargar_personas_app()
+                        messagebox.showinfo("Éxito", msg)
+                    else:
+                        messagebox.showerror("Error", msg)
+            
+            def recargar_personas_app():
+                """Recarga las personas de recepción en la aplicación principal"""
+                personas_actualizadas = personas_mgr.cargar_personas()
+                self.OPCIONES["Recepcionado_Por"] = personas_actualizadas
+                logger.info("Opciones de Recepcionado_Por actualizadas en la aplicación")
+            
+            # Conectar botones
+            btn_agregar.configure(command=anadir_persona)
+            entry_persona.bind("<Return>", lambda e: anadir_persona())
+            
+            # Cargar personas inicialmente
+            cargar_personas()
+            
+        except Exception as e:
+            logger.error(f"Error al abrir gestor de personas de recepción: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de personas de recepción:\\n{e}")
             import traceback
             traceback.print_exc()
     
@@ -13843,8 +14023,9 @@ Versión de la App: {APP_VERSION}
             # Inicializar manager
             manager = BackupManagerB2()
             
-            # Variable para almacenar archivos
+            # Variable para almacenar archivos y criterios de ordenamiento
             archivos_actuales = []
+            orden_actual = {"columna": "fecha", "ascendente": False}  # Por defecto: fecha descendente
             
             # Frame principal
             main_frame = ctk.CTkFrame(ventana)
@@ -13895,14 +14076,27 @@ Versión de la App: {APP_VERSION}
             lista_frame = ctk.CTkFrame(main_frame)
             lista_frame.pack(fill="both", expand=True, padx=5, pady=5)
             
-            # Header del listado
+            # Header del listado con botones ordenables
             header_frame = ctk.CTkFrame(lista_frame, fg_color=("gray80", "gray25"), height=35)
             header_frame.pack(fill="x", padx=2, pady=(2, 0))
             header_frame.pack_propagate(False)
             
-            ctk.CTkLabel(header_frame, text="Nombre", font=ctk.CTkFont(weight="bold"), width=350).pack(side="left", padx=10, pady=5)
+            # Botón Nombre (ordenable)
+            btn_header_nombre = ctk.CTkButton(header_frame, text="Nombre ▼", font=ctk.CTkFont(weight="bold"), 
+                                              width=350, fg_color="transparent", hover_color=("gray70", "gray30"),
+                                              command=lambda: ordenar_por("nombre"))
+            btn_header_nombre.pack(side="left", padx=10, pady=5)
+            Tooltip(btn_header_nombre, "Click para ordenar por nombre")
+            
             ctk.CTkLabel(header_frame, text="Tamaño", font=ctk.CTkFont(weight="bold"), width=100).pack(side="left", padx=5, pady=5)
-            ctk.CTkLabel(header_frame, text="Fecha", font=ctk.CTkFont(weight="bold"), width=150).pack(side="left", padx=5, pady=5)
+            
+            # Botón Fecha (ordenable)
+            btn_header_fecha = ctk.CTkButton(header_frame, text="Fecha ▼", font=ctk.CTkFont(weight="bold"), 
+                                             width=150, fg_color="transparent", hover_color=("gray70", "gray30"),
+                                             command=lambda: ordenar_por("fecha"))
+            btn_header_fecha.pack(side="left", padx=5, pady=5)
+            Tooltip(btn_header_fecha, "Click para ordenar por fecha")
+            
             ctk.CTkLabel(header_frame, text="Ubicación", font=ctk.CTkFont(weight="bold"), width=100).pack(side="left", padx=5, pady=5)
             ctk.CTkLabel(header_frame, text="Acciones", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
             
@@ -13924,41 +14118,78 @@ Versión de la App: {APP_VERSION}
                 lbl_estado.configure(text=mensaje, text_color=color)
                 ventana.update()
             
+            def actualizar_indicadores_orden():
+                """Actualiza las flechas en los encabezados según el orden actual"""
+                # Nombre
+                if orden_actual["columna"] == "nombre":
+                    flecha = " ▲" if orden_actual["ascendente"] else " ▼"
+                    btn_header_nombre.configure(text=f"Nombre{flecha}")
+                else:
+                    btn_header_nombre.configure(text="Nombre")
+                
+                # Fecha
+                if orden_actual["columna"] == "fecha":
+                    flecha = " ▲" if orden_actual["ascendente"] else " ▼"
+                    btn_header_fecha.configure(text=f"Fecha{flecha}")
+                else:
+                    btn_header_fecha.configure(text="Fecha")
+            
+            def ordenar_por(columna):
+                """Ordena la lista por la columna especificada"""
+                # Si es la misma columna, invertir el orden
+                if orden_actual["columna"] == columna:
+                    orden_actual["ascendente"] = not orden_actual["ascendente"]
+                else:
+                    # Nueva columna, orden ascendente por defecto (excepto fecha que es descendente)
+                    orden_actual["columna"] = columna
+                    orden_actual["ascendente"] = True if columna == "nombre" else False
+                
+                actualizar_indicadores_orden()
+                mostrar_archivos()
+                logger.info(f"Lista ordenada por {columna} ({'ascendente' if orden_actual['ascendente'] else 'descendente'})")
+            
             def cargar_archivos():
                 """Carga la lista de archivos desde B2"""
-                actualizar_estado("Autenticando...", "blue")
+                actualizar_estado("Conectando...", "blue")
                 
                 # Autenticar
                 success, msg = manager.autenticar()
                 if not success:
                     messagebox.showerror("Error", f"Error de autenticación: {msg}")
                     actualizar_estado(f"Error: {msg}", "red")
+                    logger.error(f"Error de autenticación en backups: {msg}")
                     return
+                
+                actualizar_estado("Autenticando...", "blue")
                 
                 # Obtener bucket
                 success, msg = manager.obtener_bucket_id()
                 if not success:
                     messagebox.showerror("Error", f"Error al obtener bucket: {msg}")
                     actualizar_estado(f"Error: {msg}", "red")
+                    logger.error(f"Error al obtener bucket: {msg}")
                     return
                 
-                actualizar_estado("Cargando archivos...", "blue")
+                actualizar_estado("Cargando lista de archivos...", "blue")
                 
                 # Listar archivos
                 archivos, msg = manager.listar_archivos()
                 if archivos is None:
                     messagebox.showerror("Error", f"Error al listar archivos: {msg}")
                     actualizar_estado(f"Error: {msg}", "red")
+                    logger.error(f"Error al listar archivos: {msg}")
                     return
                 
                 nonlocal archivos_actuales
                 archivos_actuales = archivos
                 
                 actualizar_estado(f"Cargados {len(archivos)} archivos", "green")
+                logger.info(f"Cargados {len(archivos)} archivos de backup desde B2")
+                actualizar_indicadores_orden()
                 mostrar_archivos()
             
             def mostrar_archivos():
-                """Muestra los archivos filtrados en la lista"""
+                """Muestra los archivos filtrados y ordenados en la lista"""
                 # Limpiar lista actual
                 for widget in scroll_frame.winfo_children():
                     widget.destroy()
@@ -13989,12 +14220,19 @@ Versión de la App: {APP_VERSION}
                     
                     archivos_filtrados.append(archivo)
                 
-                # Mostrar archivos
+                # Ordenar archivos según criterio actual
+                if orden_actual["columna"] == "nombre":
+                    archivos_filtrados.sort(key=lambda x: x['fileName'].lower(), reverse=not orden_actual["ascendente"])
+                elif orden_actual["columna"] == "fecha":
+                    archivos_filtrados.sort(key=lambda x: x['uploadTimestamp'], reverse=not orden_actual["ascendente"])
+                
+                # Mostrar archivos (todos de golpe, ya ordenados y filtrados)
                 if not archivos_filtrados:
                     lbl_vacio = ctk.CTkLabel(scroll_frame, text="No hay archivos que coincidan con los filtros", 
                                              text_color="gray")
                     lbl_vacio.pack(pady=20)
                 else:
+                    # Crear todas las filas de una vez
                     for archivo in archivos_filtrados:
                         crear_fila_archivo(archivo)
                 
