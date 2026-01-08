@@ -10,9 +10,186 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
 import requests
+from PIL import Image
+import io
 from lib.logger_config import get_logger
 
+# Importar configuración de Dropbox
+try:
+    import dropbox
+    from dropbox.exceptions import AuthError, ApiError
+    import dropbox_config
+    DROPBOX_DISPONIBLE = True
+except ImportError:
+    DROPBOX_DISPONIBLE = False
+
 logger = get_logger()
+
+# Registrar disponibilidad de Dropbox
+if not DROPBOX_DISPONIBLE:
+    logger.warning("Dropbox no disponible para adjuntar imágenes")
+
+
+def renderizar_markdown_simple(textbox, contenido_md):
+    """
+    Renderiza markdown básico en un CTkTextbox.
+    Convierte markdown a texto formateado simple.
+    
+    Args:
+        textbox: Widget CTkTextbox donde renderizar
+        contenido_md: Contenido markdown a renderizar
+    """
+    try:
+        textbox.configure(state="normal")
+        textbox.delete("1.0", "end")
+        
+        lineas = contenido_md.split('\n')
+        
+        for linea in lineas:
+            linea_original = linea
+            linea_stripped = linea.strip()
+            
+            # Saltar líneas vacías
+            if not linea_stripped:
+                textbox.insert("end", "\n")
+                continue
+            
+            # Headers nivel 1 (# )
+            if linea_stripped.startswith('# '):
+                texto = linea_stripped[2:].upper()
+                textbox.insert("end", f"\n{'='*60}\n{texto}\n{'='*60}\n\n")
+            
+            # Headers nivel 2 (## )
+            elif linea_stripped.startswith('## '):
+                texto = linea_stripped[3:].upper()
+                textbox.insert("end", f"\n{texto}\n{'-'*len(texto)}\n\n")
+            
+            # Headers nivel 3 (### )
+            elif linea_stripped.startswith('### '):
+                texto = linea_stripped[4:]
+                # Procesar negritas en headers nivel 3
+                if '**' in texto:
+                    texto = texto.replace('**', '')
+                textbox.insert("end", f"\n▸ {texto}\n\n")
+            
+            # Separadores (---)
+            elif linea_stripped.startswith('---'):
+                textbox.insert("end", f"\n{'─'*60}\n\n")
+            
+            # Listas con viñeta (- o *)
+            elif linea_stripped.startswith('- ') or linea_stripped.startswith('* '):
+                texto = linea_stripped[2:]
+                textbox.insert("end", f"  • {texto}\n")
+            
+            # Listas numeradas
+            elif len(linea_stripped) > 2 and linea_stripped[0].isdigit() and linea_stripped[1] == '.':
+                textbox.insert("end", f"  {linea_stripped}\n")
+            
+            # Línea con negritas **texto**
+            else:
+                texto = linea_stripped
+                # Procesar negritas: **texto** -> TEXTO
+                if '**' in texto:
+                    import re
+                    # Reemplazar **texto** por TEXTO (en mayúsculas)
+                    texto = re.sub(r'\*\*([^*]+)\*\*', lambda m: m.group(1).upper(), texto)
+                
+                textbox.insert("end", f"{texto}\n")
+        
+        textbox.configure(state="disabled")
+        
+    except Exception as e:
+        # Si falla, mostrar texto plano
+        textbox.configure(state="normal")
+        textbox.delete("1.0", "end")
+        textbox.insert("1.0", contenido_md)
+        textbox.configure(state="disabled")
+
+
+def subir_imagen_dropbox(ruta_imagen, username):
+    """
+    Sube una imagen a Dropbox con calidad media y retorna el enlace público.
+    
+    Args:
+        ruta_imagen: Ruta local de la imagen
+        username: Usuario que sube la imagen
+        
+    Returns:
+        str: URL pública de Dropbox o None si falla
+    """
+    if not DROPBOX_DISPONIBLE:
+        logger.error("Dropbox no está disponible")
+        return None
+    
+    try:
+        # Inicializar cliente Dropbox
+        if hasattr(dropbox_config, 'DROPBOX_REFRESH_TOKEN') and dropbox_config.DROPBOX_REFRESH_TOKEN:
+            dbx = dropbox.Dropbox(
+                app_key=dropbox_config.DROPBOX_APP_KEY,
+                app_secret=dropbox_config.DROPBOX_APP_SECRET,
+                oauth2_refresh_token=dropbox_config.DROPBOX_REFRESH_TOKEN
+            )
+        else:
+            dbx = dropbox.Dropbox(dropbox_config.DROPBOX_ACCESS_TOKEN)
+        
+        # Reducir calidad de imagen
+        img = Image.open(ruta_imagen)
+        
+        # Convertir RGBA a RGB si es necesario
+        if img.mode == 'RGBA':
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[3])
+            img = rgb_img
+        
+        # Redimensionar si es muy grande (max 1920px en cualquier dimensión)
+        max_size = 1920
+        if img.width > max_size or img.height > max_size:
+            ratio = min(max_size / img.width, max_size / img.height)
+            new_size = (int(img.width * ratio), int(img.height * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Guardar en memoria con calidad media
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='JPEG', quality=70, optimize=True)
+        img_byte_arr.seek(0)
+        
+        # Generar nombre único con timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        nombre_base = os.path.splitext(os.path.basename(ruta_imagen))[0]
+        nombre_archivo = f"{timestamp}_{username}_{nombre_base}.jpg"
+        
+        # Ruta en Dropbox
+        dropbox_path = f"/Images_Report/{nombre_archivo}"
+        
+        # Subir archivo
+        dbx.files_upload(img_byte_arr.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+        logger.info(f"Imagen subida a Dropbox: {dropbox_path}")
+        
+        # Crear enlace público compartido
+        try:
+            shared_link = dbx.sharing_create_shared_link_with_settings(dropbox_path)
+            url = shared_link.url
+        except ApiError as e:
+            if 'shared_link_already_exists' in str(e):
+                # Si ya existe, obtener el enlace existente
+                links = dbx.sharing_list_shared_links(path=dropbox_path).links
+                if links:
+                    url = links[0].url
+                else:
+                    logger.error("No se pudo obtener enlace compartido")
+                    return None
+            else:
+                raise
+        
+        # Convertir a enlace directo (cambiar ?dl=0 por ?raw=1)
+        url_directo = url.replace('?dl=0', '?raw=1')
+        logger.info(f"Enlace público generado: {url_directo}")
+        
+        return url_directo
+        
+    except Exception as e:
+        logger.error(f"Error al subir imagen a Dropbox: {e}")
+        return None
 
 
 def mostrar_ventana_info_issue(ventana_principal, callback_continuar):
@@ -43,8 +220,9 @@ def mostrar_ventana_info_issue(ventana_principal, callback_continuar):
     # Área de texto con scroll para el mensaje (sin doble scroll)
     texto_mensaje = ctk.CTkTextbox(ventana_info, wrap="word", font=ctk.CTkFont(size=12))
     texto_mensaje.pack(fill="both", expand=True, padx=20, pady=(20, 10))
-    texto_mensaje.insert("1.0", mensaje_content)
-    texto_mensaje.configure(state="disabled")  # Solo lectura
+    
+    # Renderizar markdown
+    renderizar_markdown_simple(texto_mensaje, mensaje_content)
     
     # Botón de aceptar
     def aceptar_y_continuar():
@@ -342,27 +520,42 @@ def mostrar_formulario_github(ventana_principal):
         # Adjuntar imágenes si hay
         if imagenes_seleccionadas:
             cuerpo += "\n\n---\n\n### 🖼️ Imágenes adjuntas:\n\n"
+            
+            # Mostrar progreso
+            ventana_issue.update()
+            
+            imagenes_subidas = 0
             for idx, ruta_imagen in enumerate(imagenes_seleccionadas, 1):
                 try:
                     nombre_archivo = os.path.basename(ruta_imagen)
-                    # GitHub issues soportan imágenes mediante markdown, pero necesitamos subirlas primero
-                    # Por ahora, incluimos el nombre y una nota
-                    cuerpo += f"{idx}. **{nombre_archivo}**\n"
                     
-                    # Intentar leer y codificar imagen (limitado a 1MB por imagen)
-                    tamaño = os.path.getsize(ruta_imagen)
-                    if tamaño < 1024 * 1024:  # Menor a 1MB
-                        # Nota: GitHub API no permite adjuntar imágenes directamente en issues via API
-                        # Se incluye referencia al nombre del archivo
-                        cuerpo += f"   - Tamaño: {tamaño / 1024:.2f} KB\n"
+                    # Subir imagen a Dropbox
+                    if DROPBOX_DISPONIBLE:
+                        logger.info(f"Subiendo imagen {idx}/{len(imagenes_seleccionadas)} a Dropbox...")
+                        url_dropbox = subir_imagen_dropbox(ruta_imagen, ventana_principal.username)
+                        
+                        if url_dropbox:
+                            # Incluir imagen directamente en el issue (se mostrará inline)
+                            cuerpo += f"**Imagen {idx}: {nombre_archivo}**\n\n"
+                            cuerpo += f"![{nombre_archivo}]({url_dropbox})\n\n"
+                            imagenes_subidas += 1
+                            logger.info(f"Imagen {idx} subida correctamente")
+                        else:
+                            cuerpo += f"{idx}. ⚠️ **{nombre_archivo}** - Error al subir a Dropbox\n"
+                            logger.warning(f"No se pudo subir imagen: {nombre_archivo}")
                     else:
-                        cuerpo += f"   - ⚠️ Archivo muy grande ({tamaño / (1024*1024):.2f} MB), no adjuntado\n"
-                        logger.warning(f"Imagen muy grande para adjuntar: {nombre_archivo}")
+                        # Si Dropbox no está disponible, solo mencionar la imagen
+                        tamaño = os.path.getsize(ruta_imagen)
+                        cuerpo += f"{idx}. **{nombre_archivo}** ({tamaño / 1024:.2f} KB)\n"
+                        
                 except Exception as e:
                     logger.error(f"Error al procesar imagen {ruta_imagen}: {e}")
-                    cuerpo += f"   - ⚠️ Error al procesar imagen\n"
+                    cuerpo += f"{idx}. ⚠️ **Error al procesar imagen**\n"
             
-            cuerpo += "\n*Nota: Las imágenes deben ser adjuntadas manualmente al issue después de su creación.*\n"
+            if not DROPBOX_DISPONIBLE:
+                cuerpo += "\n*Nota: Dropbox no disponible. Las imágenes deben adjuntarse manualmente.*\n"
+            elif imagenes_subidas > 0:
+                cuerpo += f"\n*{imagenes_subidas} imagen(es) subida(s) a Dropbox correctamente.*\n"
 
         token = os.getenv('GITHUB_TOKEN')
         if not token:

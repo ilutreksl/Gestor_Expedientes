@@ -12,10 +12,15 @@ Sistema centralizado de logging que captura automáticamente:
 
 Los archivos de log se guardan en la carpeta `logs/` con el formato:
 ```
-logs/app_YYYY-MM-DD.log
+logs/app_YYYY-MM-DD_USUARIO.log
 ```
 
-Ejemplo: `logs/app_2026-01-07.log`
+**Cada usuario tiene su propio archivo de log** para evitar conflictos de escritura concurrente en entornos multi-usuario (OneDrive compartido).
+
+Ejemplo: 
+- `logs/app_2026-01-07_Carlos.log`
+- `logs/app_2026-01-07_María.log`
+- `logs/app_2026-01-07_Pedro.log`
 
 ## 📝 Formato de Registro
 
