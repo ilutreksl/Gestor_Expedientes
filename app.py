@@ -3588,18 +3588,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
             params.append(filtros["estado"])
         
         if filtros["fecha_desde"]:
-            query += " AND fecha_creacion >= ?"
+            query += " AND fecha_emision >= ?"
             params.append(filtros["fecha_desde"])
         
         if filtros["fecha_hasta"]:
-            query += " AND fecha_creacion <= ?"
+            query += " AND fecha_emision <= ?"
             params.append(filtros["fecha_hasta"])
         
         if filtros["cliente"]:
             query += " AND cliente LIKE ?"
             params.append(f"%{filtros['cliente']}%")
         
-        query += " ORDER BY fecha_creacion DESC LIMIT 50"
+        query += " ORDER BY fecha_emision DESC LIMIT 50"
         
         conn, cursor = self.master.conectar_db()
         if not conn:
@@ -3616,51 +3616,49 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def buscar_en_detalles_con_filtros(self, termino, filtros):
         """Busca en rma_detalles aplicando filtros."""
-        query = "SELECT * FROM rma_detalles WHERE 1=1"
+        query = """SELECT d.id, d.rma_id, d.referencia_articulo, d.cantidad_segun_documento,
+                          d.cantidad_entregada, d.estado_producto, d.precio_unitario,
+                          m.codigo_rma, m.cliente, m.numero_documento_cliente 
+                   FROM rma_detalles d
+                   JOIN rma_maestro m ON d.rma_id = m.id
+                   WHERE 1=1"""
         params = []
         
         # Filtro de texto general
         if termino:
             query += """ AND (
-                numero_rma LIKE ? OR numero_serie LIKE ? OR referencia_articulo LIKE ? OR 
-                descripcion_articulo LIKE ? OR estado_producto LIKE ? OR observaciones LIKE ?
+                m.codigo_rma LIKE ? OR d.referencia_articulo LIKE ? OR d.estado_producto LIKE ?
             )"""
             termino_param = f"%{termino}%"
-            params.extend([termino_param] * 6)
+            params.extend([termino_param] * 3)
         
         # Filtros específicos para productos
         if filtros["estado_producto"]:
-            query += " AND estado_producto LIKE ?"
+            query += " AND d.estado_producto LIKE ?"
             params.append(f"%{filtros['estado_producto']}%")
         
         if filtros["referencia"]:
-            query += " AND referencia_articulo LIKE ?"
+            query += " AND d.referencia_articulo LIKE ?"
             params.append(f"%{filtros['referencia']}%")
         
         # Filtros relacionados con el expediente padre
-        if filtros["estado"] or filtros["fecha_desde"] or filtros["fecha_hasta"] or filtros["cliente"]:
-            query += """ AND numero_rma IN (
-                SELECT numero_rma FROM rma_maestro WHERE 1=1"""
-            
-            if filtros["estado"]:
-                query += " AND estado_expediente = ?"
-                params.append(filtros["estado"])
-            
-            if filtros["fecha_desde"]:
-                query += " AND fecha_creacion >= ?"
-                params.append(filtros["fecha_desde"])
-            
-            if filtros["fecha_hasta"]:
-                query += " AND fecha_creacion <= ?"
-                params.append(filtros["fecha_hasta"])
-            
-            if filtros["cliente"]:
-                query += " AND cliente LIKE ?"
-                params.append(f"%{filtros['cliente']}%")
-            
-            query += ")"
+        if filtros["estado"]:
+            query += " AND m.estado_expediente = ?"
+            params.append(filtros["estado"])
         
-        query += " ORDER BY numero_rma DESC LIMIT 50"
+        if filtros["fecha_desde"]:
+            query += " AND m.fecha_emision >= ?"
+            params.append(filtros["fecha_desde"])
+        
+        if filtros["fecha_hasta"]:
+            query += " AND m.fecha_emision <= ?"
+            params.append(filtros["fecha_hasta"])
+        
+        if filtros["cliente"]:
+            query += " AND m.cliente LIKE ?"
+            params.append(f"%{filtros['cliente']}%")
+        
+        query += " ORDER BY m.codigo_rma DESC LIMIT 50"
         
         conn, cursor = self.master.conectar_db()
         if not conn:
@@ -3780,28 +3778,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
         header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
         header_frame.pack(fill="x")
         
-        ref_texto = f"📦 {producto[3]}"  # referencia_articulo
+        ref_texto = f"📦 {producto[2]}"  # referencia_articulo (índice 2)
         ctk.CTkLabel(header_frame, text=ref_texto, 
                     font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
         
-        rma_texto = f"RMA: {producto[1]}"  # numero_rma
+        rma_texto = f"RMA: {producto[7]}"  # codigo_rma (índice 7)
         ctk.CTkLabel(header_frame, text=rma_texto, 
                     font=ctk.CTkFont(size=11), text_color="blue").pack(side="right")
         
-        # Descripción y estado
-        descripcion = producto[4] if producto[4] else "Sin descripción"  # descripcion_articulo
-        if len(descripcion) > 60:
-            descripcion = descripcion[:57] + "..."
-        ctk.CTkLabel(info_frame, text=f"📝 {descripcion}", 
-                    font=ctk.CTkFont(size=10), text_color="gray").pack(anchor="w")
-        
-        estado_prod = producto[6] if producto[6] else "Sin estado"  # estado_producto
+        # Estado y cantidades
+        estado_prod = producto[5] if producto[5] else "Sin estado"  # estado_producto (índice 5)
         ctk.CTkLabel(info_frame, text=f"🔧 Estado: {estado_prod}", 
                     font=ctk.CTkFont(size=10), text_color="orange").pack(anchor="w")
         
+        cant_info = f"📊 Cant. Documento: {producto[3]} | Entregada: {producto[4]}"  # índices 3 y 4
+        ctk.CTkLabel(info_frame, text=cant_info, 
+                    font=ctk.CTkFont(size=10), text_color="gray").pack(anchor="w")
+        
         # Botón para abrir
         btn_abrir = ctk.CTkButton(resultado_frame, text="📂 Ver en Expediente", 
-                                 command=lambda: self.abrir_expediente_desde_busqueda(producto[1]),
+                                 command=lambda: self.abrir_expediente_desde_busqueda(producto[7]),
                                  height=25, width=120)
         btn_abrir.pack(side="right", padx=10, pady=5)
 
