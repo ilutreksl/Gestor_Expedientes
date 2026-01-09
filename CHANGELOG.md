@@ -1,5 +1,6 @@
-Cambio V.1.0.8 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.9 - ✨ Últimas mejoras implementadas:
 
+- Nueva estadistica de expedientes completados por quincenas. Se puede exportar a excel.
 - Añadido desplegable en el campo de Recepcionado_Por con un listado de usuarios.
 - El listado de usuarios de Recepcionado_Por es administrable desde el menu Admin del usuario admin.
 - Añadido orden de fecha mas reciente en el listado de archivos de Backups.

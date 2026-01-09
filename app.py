@@ -326,7 +326,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.8"
+APP_VERSION = "v1.0.9"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -11893,6 +11893,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Se elimina la estadística 'Abonos por Cliente y Periodo' (no funcional).
         self.botones_stats = {
             "📊 Estadísticas Anuales": self.mostrar_estadisticas_anuales_menu,
+            "📅 Expedientes por Quincena": self.mostrar_expedientes_quincena_menu,
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
             "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos,
@@ -12351,6 +12352,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             mostrar_estadisticas_resolucion(self)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la estadística de resolución: {e}")
+    
+    def mostrar_expedientes_quincena_menu(self):
+        """Wrapper que delega la creación de la estadística de expedientes por quincena
+        al módulo externo `lib.expedientes_quincena`.
+        """
+        try:
+            from lib.expedientes_quincena import mostrar_expedientes_quincena
+            mostrar_expedientes_quincena(self.main_stats_frame, self.master.conectar_db, self.username)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la estadística de expedientes por quincena: {e}")
     
     def mostrar_recepciones_anticipadas(self):
         """Muestra estadísticas de recepciones anticipadas (recepción antes de autorización)."""
