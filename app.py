@@ -9192,7 +9192,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x480")
+        menu_window.geometry("300x600")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
