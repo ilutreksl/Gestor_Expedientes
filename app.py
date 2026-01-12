@@ -5162,6 +5162,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(input_articulo_frame, text="Cant. Entregada", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=5)
         ctk.CTkLabel(input_articulo_frame, text="Estado", font=ctk.CTkFont(size=11)).grid(row=0, column=3, padx=5)
         ctk.CTkLabel(input_articulo_frame, text="Precio Unitario", font=ctk.CTkFont(size=11)).grid(row=0, column=4, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=5, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="% Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=6, padx=5)
         
         # Entradas
         self.art_ref = ctk.CTkEntry(input_articulo_frame, width=150)
@@ -5174,6 +5176,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_estado.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
         self.art_precio = ctk.CTkEntry(input_articulo_frame, width=100)
         self.art_precio.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
+        
+        # Checkbox de depreciación
+        self.art_depreciacion_var = ctk.IntVar(value=0)
+        self.art_depreciacion_check = ctk.CTkCheckBox(input_articulo_frame, text="", variable=self.art_depreciacion_var,
+                                                      command=self.toggle_porcentaje_depreciacion, width=30)
+        self.art_depreciacion_check.grid(row=1, column=5, padx=5, pady=2)
+        
+        # Campo de porcentaje de depreciación (deshabilitado por defecto)
+        self.art_porcentaje_depreciacion = ctk.CTkEntry(input_articulo_frame, width=80, placeholder_text="0")
+        self.art_porcentaje_depreciacion.grid(row=1, column=6, padx=5, pady=2, sticky="ew")
+        self.art_porcentaje_depreciacion.configure(state="disabled")
 
         # Botones de Acción de Artículos
         # Guardar referencia al botón para permitir cambiar su comportamiento durante la edición
@@ -5181,7 +5194,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                                  text="➕",
                                                  width=30,
                                                  command=self.anadir_articulo)
-        self.btn_anadir_articulo.grid(row=1, column=5, padx=5, pady=2)
+        self.btn_anadir_articulo.grid(row=1, column=7, padx=5, pady=2)
 
         # Permitir pulsar ENTER en los campos para añadir/actualizar artículo
         try:
@@ -5471,8 +5484,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except sqlite3.Error as e:
             messagebox.showerror("Error de Base de Datos", f"Error al guardar el comentario: {e}")
     
+    def toggle_porcentaje_depreciacion(self):
+        """Habilita o deshabilita el campo de porcentaje de depreciación según el checkbox."""
+        if self.art_depreciacion_var.get() == 1:
+            self.art_porcentaje_depreciacion.configure(state="normal")
+        else:
+            self.art_porcentaje_depreciacion.configure(state="disabled")
+            self.art_porcentaje_depreciacion.delete(0, ctk.END)
+            self.art_porcentaje_depreciacion.insert(0, "0")
+    
     def anadir_articulo(self):
         """Añade una fila de artículo a la lista temporal."""
+        from lib.articulo_depreciacion import validar_porcentaje_depreciacion
+        
         try:
             referencia = self.art_ref.get()
             # Permitir decimales en las cantidades
@@ -5480,7 +5504,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
             cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
             estado = self.art_estado.get()
             # Reemplazar comas por puntos para que float funcione
-            precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0) 
+            precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
+            
+            # Depreciación
+            tiene_depreciacion = self.art_depreciacion_var.get() == 1
+            porcentaje_depreciacion = 0.0
+            
+            if tiene_depreciacion:
+                porcentaje_str = self.art_porcentaje_depreciacion.get().strip()
+                es_valido, porcentaje_valor, mensaje_error = validar_porcentaje_depreciacion(porcentaje_str)
+                
+                if not es_valido:
+                    messagebox.showerror("Error", f"Porcentaje de depreciación inválido: {mensaje_error}")
+                    return
+                
+                porcentaje_depreciacion = porcentaje_valor
+                
         except ValueError:
             print("Error: Cantidad y Precio deben ser números.")
             return
@@ -5494,7 +5533,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "cantidad_segun_documento": cant_doc,
             "cantidad_entregada": cant_entregada,
             "estado_producto": estado,
-            "precio_unitario": precio_unitario
+            "precio_unitario": precio_unitario,
+            "depreciacion": 1 if tiene_depreciacion else 0,
+            "porcentaje_depreciacion": porcentaje_depreciacion
         }
         
         self.articulos_data.append(nuevo_articulo)
@@ -5508,6 +5549,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_cant_entregada.delete(0, ctk.END)
         self.art_precio.delete(0, ctk.END)
         self.art_estado.set(self.OPCIONES["Estado_Producto"][0])
+        
+        # Limpiar depreciación
+        self.art_depreciacion_var.set(0)
+        self.art_porcentaje_depreciacion.configure(state="normal")
+        self.art_porcentaje_depreciacion.delete(0, ctk.END)
+        self.art_porcentaje_depreciacion.insert(0, "0")
+        self.art_porcentaje_depreciacion.configure(state="disabled")
+        
         # Si estábamos en modo edición, salir de él
         try:
             if hasattr(self, 'editing_articulo_index') and self.editing_articulo_index is not None:
@@ -5539,6 +5588,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     self.art_estado.set(art.get('estado_producto', self.OPCIONES['Estado_Producto'][0]))
                 except Exception:
                     pass
+                
+                # Cargar depreciación
+                depreciacion = art.get('depreciacion', 0)
+                porcentaje = art.get('porcentaje_depreciacion', 0.0)
+                
+                self.art_depreciacion_var.set(depreciacion)
+                if depreciacion == 1:
+                    self.art_porcentaje_depreciacion.configure(state="normal")
+                    self.art_porcentaje_depreciacion.delete(0, ctk.END)
+                    self.art_porcentaje_depreciacion.insert(0, str(porcentaje))
+                else:
+                    self.art_porcentaje_depreciacion.configure(state="disabled")
+                    self.art_porcentaje_depreciacion.delete(0, ctk.END)
+                    self.art_porcentaje_depreciacion.insert(0, "0")
+                    
             except Exception:
                 pass
             # Marcar índice en edición y cambiar botón
@@ -5550,6 +5614,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
     def actualizar_articulo(self):
         """Actualiza el artículo seleccionado con los valores actuales de los campos."""
+        from lib.articulo_depreciacion import validar_porcentaje_depreciacion
+        
         if not hasattr(self, 'editing_articulo_index') or self.editing_articulo_index is None:
             return
         idx = self.editing_articulo_index
@@ -5559,6 +5625,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
             cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
             estado = self.art_estado.get()
             precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
+            
+            # Depreciación
+            tiene_depreciacion = self.art_depreciacion_var.get() == 1
+            porcentaje_depreciacion = 0.0
+            
+            if tiene_depreciacion:
+                porcentaje_str = self.art_porcentaje_depreciacion.get().strip()
+                es_valido, porcentaje_valor, mensaje_error = validar_porcentaje_depreciacion(porcentaje_str)
+                
+                if not es_valido:
+                    messagebox.showerror("Error", f"Porcentaje de depreciación inválido: {mensaje_error}")
+                    return
+                
+                porcentaje_depreciacion = porcentaje_valor
+                
         except ValueError:
             messagebox.showwarning("Error", "Cantidad y Precio deben ser números válidos.")
             return
@@ -5572,7 +5653,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "cantidad_segun_documento": cant_doc,
             "cantidad_entregada": cant_entregada,
             "estado_producto": estado,
-            "precio_unitario": precio_unitario
+            "precio_unitario": precio_unitario,
+            "depreciacion": 1 if tiene_depreciacion else 0,
+            "porcentaje_depreciacion": porcentaje_depreciacion
         }
         # Reemplazar en la lista
         try:
@@ -5611,8 +5694,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return
             
         # Dibujar encabezados y filas usando grid directamente en el contenedor principal
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unitario", "Acción", ""]
-        weights = [2, 1, 1, 2, 1, 0, 0]
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Deprec.", "% Deprec.", "Acción", ""]
+        weights = [2, 1, 1, 2, 1, 0, 1, 0, 0]
         header_font = ctk.CTkFont(weight="bold", size=12)
 
         # Configurar columnas del contenedor para que se alineen entre filas
@@ -5635,13 +5718,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(self.articulos_list_frame, text=item["cantidad_entregada"]).grid(row=row, column=2, padx=5, pady=2, sticky="w")
                 ctk.CTkLabel(self.articulos_list_frame, text=item["estado_producto"]).grid(row=row, column=3, padx=5, pady=2, sticky="w")
                 ctk.CTkLabel(self.articulos_list_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=row, column=4, padx=5, pady=2, sticky="w")
+                
+                # Mostrar depreciación
+                deprec_text = "✓" if item.get("depreciacion", 0) == 1 else "-"
+                ctk.CTkLabel(self.articulos_list_frame, text=deprec_text).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                
+                # Mostrar porcentaje
+                porcentaje = item.get("porcentaje_depreciacion", 0.0)
+                porcentaje_text = f"{porcentaje}%" if item.get("depreciacion", 0) == 1 else "-"
+                ctk.CTkLabel(self.articulos_list_frame, text=porcentaje_text).grid(row=row, column=6, padx=5, pady=2, sticky="w")
 
                 # Acciones: Eliminar y Editar
                 ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
-                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=7, padx=5, pady=2, sticky="w")
                 try:
                     ctk.CTkButton(self.articulos_list_frame, text="✏️", width=30,
-                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=6, padx=2, pady=2, sticky="w")
+                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=8, padx=2, pady=2, sticky="w")
                 except Exception:
                     pass
             except Exception:
