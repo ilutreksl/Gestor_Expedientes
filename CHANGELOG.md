@@ -1,4 +1,9 @@
-Cambio V.1.0.9 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.10 - ✨ Últimas mejoras implementadas:
+
+- Corregido fallo que duplicaba contacto cuando se migraban los clientes.
+
+
+Cambio V.1.0.9
 
 - Nueva estadistica de expedientes completados por quincenas. Se puede exportar a excel.
 - Añadido desplegable en el campo de Recepcionado_Por con un listado de usuarios.

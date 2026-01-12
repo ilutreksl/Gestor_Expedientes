@@ -326,7 +326,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.9"
+APP_VERSION = "v1.0.10"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -14734,21 +14734,35 @@ Versión de la App: {APP_VERSION}
             clientes_nuevos = int(clientes_despues) - int(clientes_antes)
             clientes_ya_existian = int(total_clientes_en_rmas) - clientes_nuevos
             
-            # Migrar contactos
+            # Migrar contactos - evitando duplicados
+            # Primero obtener contactos únicos de RMAs que aún no existen en contactos_cliente
             cursor.execute("""
-                INSERT OR IGNORE INTO contactos_cliente (cliente_id, nombre, email, es_principal)
                 SELECT DISTINCT
                     c.cliente_id,
                     COALESCE(rm.Persona_de_Contacto, rm.Cliente) as nombre,
-                    rm.Email_de_Contacto,
-                    1 as es_principal
+                    rm.Email_de_Contacto
                 FROM clientes c
                 JOIN rma_maestro rm ON c.nombre = rm.Cliente
-                WHERE rm.Persona_de_Contacto IS NOT NULL AND rm.Persona_de_Contacto != ''
+                WHERE rm.Persona_de_Contacto IS NOT NULL 
+                AND rm.Persona_de_Contacto != ''
+                AND NOT EXISTS (
+                    SELECT 1 FROM contactos_cliente cc
+                    WHERE cc.cliente_id = c.cliente_id
+                    AND cc.nombre = COALESCE(rm.Persona_de_Contacto, rm.Cliente)
+                )
                 GROUP BY c.cliente_id, rm.Persona_de_Contacto
             """)
             
-            contactos_migrados = cursor.rowcount
+            contactos_a_migrar = cursor.fetchall()
+            contactos_migrados = 0
+            
+            # Insertar solo los contactos que no existen
+            for cliente_id, nombre, email in contactos_a_migrar:
+                cursor.execute("""
+                    INSERT INTO contactos_cliente (cliente_id, nombre, email, es_principal)
+                    VALUES (?, ?, ?, 1)
+                """, (cliente_id, nombre, email))
+                contactos_migrados += 1
             
             conn.commit()
             conn.close()
@@ -15699,57 +15713,85 @@ Versión de la App: {APP_VERSION}
             messagebox.showerror("Error", f"Error al exportar a Excel:\n{str(e)}")
     
     def crear_item_contacto(self, parent_frame, contacto, cliente_id):
-        """Crea un elemento visual para un contacto."""
+        """Crea un elemento visual minimalista para un contacto."""
         contacto_id, nombre, cargo, email, telefono, es_principal, activo = contacto
         
-        contacto_frame = ctk.CTkFrame(parent_frame)
-        contacto_frame.pack(fill="x", padx=5, pady=5)
+        # Frame principal con borde sutil
+        contacto_frame = ctk.CTkFrame(parent_frame, fg_color=("gray90", "gray20"))
+        contacto_frame.pack(fill="x", padx=5, pady=3)
         
-        info_frame = ctk.CTkFrame(contacto_frame, fg_color="transparent")
-        info_frame.pack(fill="x", padx=10, pady=10)
+        # Contenedor principal horizontal
+        main_container = ctk.CTkFrame(contacto_frame, fg_color="transparent")
+        main_container.pack(fill="x", padx=10, pady=8)
         
-        # Nombre y cargo
-        header_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
-        header_frame.pack(fill="x")
+        # Columna izquierda: Información del contacto
+        info_column = ctk.CTkFrame(main_container, fg_color="transparent")
+        info_column.pack(side="left", fill="x", expand=True)
         
-        nombre_text = f"👤 {nombre}"
-        if es_principal:
-            nombre_text += " ⭐ (Principal)"
+        # Nombre
+        nombre_label = ctk.CTkLabel(
+            info_column, 
+            text=nombre,
+            font=ctk.CTkFont(size=13, weight="bold")
+        )
+        nombre_label.pack(anchor="w", pady=(0, 2))
         
-        ctk.CTkLabel(header_frame, text=nombre_text, 
-                    font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
-        
+        # Cargo (si existe)
         if cargo:
-            ctk.CTkLabel(header_frame, text=f"💼 {cargo}", 
-                        font=ctk.CTkFont(size=11), text_color="blue").pack(side="left", padx=(10,0))
+            cargo_label = ctk.CTkLabel(
+                info_column,
+                text=f"💼 {cargo}",
+                font=ctk.CTkFont(size=11),
+                text_color="gray"
+            )
+            cargo_label.pack(anchor="w", pady=(0, 2))
         
-        # Información de contacto
-        if email or telefono:
-            contact_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
-            contact_frame.pack(fill="x", pady=(5,0))
-            
-            if email:
-                ctk.CTkLabel(contact_frame, text=f"📧 {email}", 
-                            font=ctk.CTkFont(size=11)).pack(side="left")
-            
-            if telefono:
-                ctk.CTkLabel(contact_frame, text=f"📞 {telefono}", 
-                            font=ctk.CTkFont(size=11)).pack(side="left", padx=(20,0))
+        # Email y Teléfono en una sola línea
+        contact_info_parts = []
+        if email:
+            contact_info_parts.append(f"📧 {email}")
+        if telefono:
+            contact_info_parts.append(f"📞 {telefono}")
         
-        # Botones de acción
-        btn_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
-        btn_frame.pack(fill="x", pady=(5,0))
+        if contact_info_parts:
+            contact_text = " • ".join(contact_info_parts)
+            contact_label = ctk.CTkLabel(
+                info_column,
+                text=contact_text,
+                font=ctk.CTkFont(size=11),
+                text_color=("gray60", "gray40")
+            )
+            contact_label.pack(anchor="w")
         
-        btn_editar = ctk.CTkButton(btn_frame, text="✏️ Editar", 
-                                 command=lambda: self.editar_contacto_cliente(contacto_id, cliente_id),
-                                 width=80, height=25)
-        btn_editar.pack(side="left", padx=(0,5))
+        # Columna derecha: Botones de acción compactos
+        actions_column = ctk.CTkFrame(main_container, fg_color="transparent")
+        actions_column.pack(side="right", padx=(10, 0))
         
-        if not es_principal:
-            btn_principal = ctk.CTkButton(btn_frame, text="⭐ Hacer Principal", 
-                                        command=lambda: self.hacer_contacto_principal(contacto_id, cliente_id),
-                                        width=120, height=25)
-            btn_principal.pack(side="left", padx=(0,5))
+        # Botón editar
+        btn_editar = ctk.CTkButton(
+            actions_column,
+            text="✏️",
+            command=lambda: self.editar_contacto_cliente(contacto_id, cliente_id),
+            width=32,
+            height=32,
+            fg_color=("gray70", "gray30"),
+            hover_color=("#3b82f6", "#2563eb")
+        )
+        btn_editar.pack(side="left", padx=2)
+        Tooltip(btn_editar, "Editar contacto")
+        
+        # Botón eliminar
+        btn_eliminar = ctk.CTkButton(
+            actions_column,
+            text="🗑️",
+            command=lambda: self.eliminar_contacto_cliente(contacto_id, cliente_id, nombre),
+            width=32,
+            height=32,
+            fg_color=("#ef4444", "#dc2626"),
+            hover_color=("#dc2626", "#b91c1c")
+        )
+        btn_eliminar.pack(side="left", padx=2)
+        Tooltip(btn_eliminar, "Eliminar contacto")
     
     def crear_item_rma_historial(self, parent_frame, numero_rma, datos, cliente_id=None):
         """Crea un elemento visual para un RMA en el historial."""
@@ -16182,58 +16224,64 @@ Versión de la App: {APP_VERSION}
                                   width=120)
         btn_guardar.pack(side="right", padx=(10,0))
     
-    def hacer_contacto_principal(self, contacto_id, cliente_id):
-        """Marca un contacto como principal."""
+    def recargar_ficha_cliente(self, cliente_id):
+        """Recarga la ficha del cliente cerrando y volviendo a abrir."""
         try:
+            # Buscar y cerrar ventanas de ficha de cliente abiertas
+            for widget in self.winfo_children():
+                if isinstance(widget, ctk.CTkToplevel):
+                    title = widget.title()
+                    if "Ficha Cliente:" in title:
+                        widget.destroy()
+                        break
+            
+            # Pequeña pausa para asegurar que la ventana se cierre
+            self.after(100, lambda: self.abrir_ficha_cliente(cliente_id))
+            
+        except Exception as e:
+            print(f"Error recargando ficha: {e}")
+            # Si falla la recarga, al menos abrir nueva ventana
+            self.abrir_ficha_cliente(cliente_id)
+    
+    def eliminar_contacto_cliente(self, contacto_id, cliente_id, nombre_contacto):
+        """Elimina un contacto del cliente (eliminación física)."""
+        respuesta = messagebox.askyesno(
+            "Confirmar Eliminación", 
+            f"¿Estás seguro de que deseas eliminar el contacto '{nombre_contacto}'?\n\n"
+            "Esta acción no se puede deshacer."
+        )
+        
+        if not respuesta:
+            return
+        
+        try:
+            from lib.logger_config import get_logger
+            logger = get_logger()
+            
             conn, cursor = self.master.conectar_db()
             if not conn: 
                 return
             
-            # Desmarcar todos los contactos del cliente
+            # Eliminar el contacto
             cursor.execute("""
-                UPDATE contactos_cliente 
-                SET es_principal = 0 
-                WHERE cliente_id = ?
-            """, (cliente_id,))
-            
-            # Marcar el contacto seleccionado como principal
-            cursor.execute("""
-                UPDATE contactos_cliente 
-                SET es_principal = 1, fecha_actualizacion = CURRENT_TIMESTAMP
+                DELETE FROM contactos_cliente 
                 WHERE contacto_id = ?
             """, (contacto_id,))
             
             conn.commit()
             conn.close()
             
-            messagebox.showinfo("Éxito", "Contacto marcado como principal correctamente")
+            logger.info(f"Contacto eliminado: {nombre_contacto} (ID: {contacto_id}) del cliente ID: {cliente_id}")
+            messagebox.showinfo("Éxito", f"Contacto '{nombre_contacto}' eliminado correctamente")
+            
+            # Recargar la ficha del cliente
+            self.recargar_ficha_cliente(cliente_id)
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error al marcar contacto como principal: {e}")
-    
-    def eliminar_contacto_cliente(self, contacto_id, ventana_padre):
-        """Elimina un contacto del cliente (eliminación suave)."""
-        if messagebox.askyesno("Confirmar Eliminación", 
-                              "¿Estás seguro de que deseas eliminar este contacto?\n\nEsta acción no se puede deshacer."):
-            try:
-                conn, cursor = self.master.conectar_db()
-                if not conn: 
-                    return
-                
-                cursor.execute("""
-                    UPDATE contactos_cliente 
-                    SET activo = 0, fecha_actualizacion = CURRENT_TIMESTAMP
-                    WHERE contacto_id = ?
-                """, (contacto_id,))
-                
-                conn.commit()
-                conn.close()
-                
-                messagebox.showinfo("Éxito", "Contacto eliminado correctamente")
-                ventana_padre.destroy()
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al eliminar contacto: {e}")
+            from lib.logger_config import get_logger
+            logger = get_logger()
+            logger.error(f"Error al eliminar contacto {contacto_id}: {e}")
+            messagebox.showerror("Error", f"Error al eliminar contacto: {e}")
     
     def nueva_nota_cliente(self, cliente_id, parent_window=None):
         """Muestra el formulario para agregar una nueva nota."""
