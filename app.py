@@ -33,6 +33,7 @@ from lib.estados_manager import EstadosArticuloManager
 from lib.personas_manager import PersonasManager
 from lib.personas_recepcion_manager import PersonasRecepcionManager
 from lib.resultado_expediente_manager import ResultadoExpedienteManager
+from lib.tipos_cliente_manager import cargar_tipos_cliente
 from lib import github_issue_manager
 
 # Sistema de logging
@@ -1081,7 +1082,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         "Gestionado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
         "Recepcionado_Por": personas_recepcion_manager.cargar_personas(),  # Cargar desde JSON
         "Resultado_Expediente": resultado_expediente_manager.cargar_resultados(),  # Cargar desde JSON
-        "Estado_Producto": estados_manager.cargar_estados()  # Cargar desde JSON
+        "Estado_Producto": estados_manager.cargar_estados(),  # Cargar desde JSON
+        "Tipo_Cliente": cargar_tipos_cliente()  # Cargar desde JSON
     }
     
     def get_color_por_estado(self, estado):
@@ -9190,7 +9192,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x430")
+        menu_window.geometry("300x480")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
@@ -9275,6 +9277,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                       hover_color="#059669",
                                       command=lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()])
         btn_resultado.pack(pady=10)
+        
+        # Botón Gestionar Tipos de Cliente
+        btn_tipos_cliente = ctk.CTkButton(buttons_frame,
+                                          text="🏢 Gestionar Tipos de Cliente",
+                                          width=240,
+                                          height=40,
+                                          fg_color="#ec4899",
+                                          hover_color="#db2777",
+                                          command=lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()])
+        btn_tipos_cliente.pack(pady=10)
         
         # Botón Cerrar
         btn_cerrar = ctk.CTkButton(buttons_frame,
@@ -10050,6 +10062,212 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir el gestor de resultado expediente:\n{e}")
+            import traceback
+            traceback.print_exc()
+    
+    def mostrar_gestor_tipos_cliente(self):
+        """
+        Abre una ventana para gestionar los tipos de cliente
+        """
+        from lib.safe_toplevel import SafeCTkToplevel
+        from lib.tipos_cliente_manager import (cargar_tipos_cliente, guardar_tipos_cliente,
+                                                anadir_tipo_cliente, eliminar_tipo_cliente,
+                                                editar_tipo_cliente)
+        
+        try:
+            # Crear ventana de gestión
+            gestor_window = SafeCTkToplevel(self)
+            gestor_window.title("Gestión de Tipos de Cliente")
+            gestor_window.geometry("600x500")
+            gestor_window.transient(self)
+            gestor_window.grab_set()
+            
+            # Frame principal con padding
+            main_frame = ctk.CTkFrame(gestor_window)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Título
+            title_label = ctk.CTkLabel(main_frame,
+                                       text="🏢 Gestión de Tipos de Cliente",
+                                       font=("Arial", 18, "bold"))
+            title_label.pack(pady=(0, 20))
+            
+            # Frame para agregar nuevo tipo
+            add_frame = ctk.CTkFrame(main_frame)
+            add_frame.pack(fill="x", pady=(0, 20))
+            
+            entry_label = ctk.CTkLabel(add_frame,
+                                       text="Nuevo Tipo:",
+                                       font=("Arial", 12))
+            entry_label.pack(side="left", padx=(10, 5))
+            
+            entry_tipo = ctk.CTkEntry(add_frame,
+                                      width=300,
+                                      placeholder_text="Ingrese el nombre del tipo de cliente")
+            entry_tipo.pack(side="left", padx=5)
+            
+            btn_agregar = ctk.CTkButton(add_frame,
+                                        text="➕ Agregar",
+                                        width=100)
+            btn_agregar.pack(side="left", padx=5)
+            
+            # Frame scrollable para la lista de tipos
+            list_frame = ctk.CTkScrollableFrame(main_frame,
+                                                label_text="Tipos Registrados")
+            list_frame.pack(fill="both", expand=True)
+            
+            def cargar_tipos():
+                """Carga y muestra la lista de tipos de cliente"""
+                # Limpiar el frame
+                for widget in list_frame.winfo_children():
+                    widget.destroy()
+                
+                # Cargar tipos
+                tipos = cargar_tipos_cliente()
+                
+                if not tipos:
+                    no_data_label = ctk.CTkLabel(list_frame,
+                                                 text="No hay tipos de cliente registrados",
+                                                 text_color="gray")
+                    no_data_label.pack(pady=20)
+                    return
+                
+                # Crear una fila para cada tipo
+                for tipo in tipos:
+                    row_frame = ctk.CTkFrame(list_frame)
+                    row_frame.pack(fill="x", pady=5, padx=5)
+                    
+                    # Nombre del tipo
+                    tipo_label = ctk.CTkLabel(row_frame,
+                                              text=tipo,
+                                              font=("Arial", 12),
+                                              anchor="w")
+                    tipo_label.pack(side="left", padx=10, fill="x", expand=True)
+                    
+                    # Botón Editar
+                    btn_edit = ctk.CTkButton(row_frame,
+                                             text="✏️",
+                                             width=40,
+                                             fg_color="#3b82f6",
+                                             hover_color="#2563eb",
+                                             command=lambda t=tipo: editar_tipo(t))
+                    btn_edit.pack(side="right", padx=2)
+                    
+                    # Botón Eliminar
+                    btn_delete = ctk.CTkButton(row_frame,
+                                               text="🗑️",
+                                               width=40,
+                                               fg_color="#ef4444",
+                                               hover_color="#dc2626",
+                                               command=lambda t=tipo: eliminar_tipo(t))
+                    btn_delete.pack(side="right", padx=2)
+            
+            def agregar_tipo():
+                """Agrega un nuevo tipo de cliente"""
+                tipo = entry_tipo.get().strip()
+                if tipo:
+                    success, mensaje = anadir_tipo_cliente(tipo)
+                    if success:
+                        messagebox.showinfo("Éxito", mensaje)
+                        entry_tipo.delete(0, 'end')
+                        cargar_tipos()
+                        # Recargar opciones en la aplicación principal
+                        self.OPCIONES["Tipo_Cliente"] = cargar_tipos_cliente()
+                    else:
+                        messagebox.showerror("Error", mensaje)
+                else:
+                    messagebox.showwarning("Advertencia", "Debe ingresar un nombre para el tipo de cliente")
+            
+            def eliminar_tipo(tipo):
+                """Elimina un tipo de cliente"""
+                if messagebox.askyesno("Confirmar Eliminación",
+                                      f"¿Está seguro de eliminar el tipo '{tipo}'?"):
+                    success, mensaje = eliminar_tipo_cliente(tipo)
+                    if success:
+                        messagebox.showinfo("Éxito", mensaje)
+                        cargar_tipos()
+                        # Recargar opciones en la aplicación principal
+                        self.OPCIONES["Tipo_Cliente"] = cargar_tipos_cliente()
+                    else:
+                        messagebox.showerror("Error", mensaje)
+            
+            def editar_tipo(tipo_antiguo):
+                """Edita un tipo de cliente existente"""
+                # Crear ventana de edición
+                edit_window = ctk.CTkToplevel(gestor_window)
+                edit_window.title("Editar Tipo de Cliente")
+                edit_window.geometry("400x150")
+                edit_window.transient(gestor_window)
+                edit_window.grab_set()
+                
+                # Centrar ventana
+                edit_window.update_idletasks()
+                x = gestor_window.winfo_x() + (gestor_window.winfo_width() // 2) - (edit_window.winfo_width() // 2)
+                y = gestor_window.winfo_y() + (gestor_window.winfo_height() // 2) - (edit_window.winfo_height() // 2)
+                edit_window.geometry(f"+{x}+{y}")
+                
+                # Frame de contenido
+                content_frame = ctk.CTkFrame(edit_window)
+                content_frame.pack(fill="both", expand=True, padx=20, pady=20)
+                
+                # Label
+                label = ctk.CTkLabel(content_frame,
+                                    text="Nuevo nombre:",
+                                    font=("Arial", 12))
+                label.pack(pady=(0, 10))
+                
+                # Entry con valor actual
+                entry_nuevo = ctk.CTkEntry(content_frame, width=300)
+                entry_nuevo.insert(0, tipo_antiguo)
+                entry_nuevo.pack(pady=(0, 20))
+                entry_nuevo.focus_set()
+                
+                # Frame de botones
+                buttons_frame = ctk.CTkFrame(content_frame)
+                buttons_frame.pack()
+                
+                def guardar_edicion():
+                    tipo_nuevo = entry_nuevo.get().strip()
+                    if tipo_nuevo:
+                        success, mensaje = editar_tipo_cliente(tipo_antiguo, tipo_nuevo)
+                        if success:
+                            messagebox.showinfo("Éxito", mensaje)
+                            edit_window.destroy()
+                            cargar_tipos()
+                            # Recargar opciones en la aplicación principal
+                            self.OPCIONES["Tipo_Cliente"] = cargar_tipos_cliente()
+                        else:
+                            messagebox.showerror("Error", mensaje)
+                    else:
+                        messagebox.showwarning("Advertencia", "El nombre no puede estar vacío")
+                
+                btn_guardar = ctk.CTkButton(buttons_frame,
+                                            text="💾 Guardar",
+                                            width=120,
+                                            command=guardar_edicion)
+                btn_guardar.pack(side="left", padx=5)
+                
+                btn_cancelar = ctk.CTkButton(buttons_frame,
+                                             text="❌ Cancelar",
+                                             width=120,
+                                             fg_color="gray",
+                                             command=edit_window.destroy)
+                btn_cancelar.pack(side="left", padx=5)
+                
+                # Permitir Enter para guardar
+                entry_nuevo.bind('<Return>', lambda e: guardar_edicion())
+            
+            # Configurar comando del botón agregar
+            btn_agregar.configure(command=agregar_tipo)
+            
+            # Permitir Enter en el entry para agregar
+            entry_tipo.bind('<Return>', lambda e: agregar_tipo())
+            
+            # Cargar tipos inicialmente
+            cargar_tipos()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de tipos de cliente:\n{e}")
             import traceback
             traceback.print_exc()
     
@@ -14884,8 +15102,8 @@ Versión de la App: {APP_VERSION}
         # Tipo de cliente
         ctk.CTkLabel(form_frame, text="Tipo de Cliente", 
                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(10,2))
-        option_tipo = ctk.CTkOptionMenu(form_frame, values=["Regular", "Premium", "VIP"])
-        option_tipo.set("Regular")
+        option_tipo = ctk.CTkOptionMenu(form_frame, values=self.OPCIONES["Tipo_Cliente"])
+        option_tipo.set(self.OPCIONES["Tipo_Cliente"][0])
         option_tipo.pack(fill="x", pady=(0,10))
         
         # Dirección
@@ -15292,9 +15510,9 @@ Versión de la App: {APP_VERSION}
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
                     row=2, column=0, sticky="w", padx=10, pady=5)
         widgets['option_tipo'] = ctk.CTkOptionMenu(info_frame, 
-                                                    values=["Normal", "Distribuidor", "VIP"])
+                                                    values=self.OPCIONES["Tipo_Cliente"])
         widgets['option_tipo'].grid(row=2, column=1, sticky="ew", padx=10, pady=5)
-        widgets['option_tipo'].set(cliente[2] if cliente[2] else "Normal")
+        widgets['option_tipo'].set(cliente[2] if cliente[2] else self.OPCIONES["Tipo_Cliente"][0])
         
         # Dirección (editable)
         ctk.CTkLabel(info_frame, text="Dirección:", 

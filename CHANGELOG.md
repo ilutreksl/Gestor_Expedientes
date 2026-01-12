@@ -1,5 +1,6 @@
 Cambio V.1.0.10 - ✨ Últimas mejoras implementadas:
 
+- Añadido tipo de cliente a los clientes. Gestion de tipo de cliente desde el menu admin del usuario admin.
 - Calculo automatico del precio final del articulo, teniendo en cuenta si el cliente tiene descuento o no y si hay depreciacion.
 - Añadido campo depreciacion en los articulos de los expedientes.
 - Añadida pestaña Condiciones a la ficha de clientes.
