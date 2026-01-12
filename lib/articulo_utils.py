@@ -621,3 +621,125 @@ def mostrar_selector_referencias(articulos_data, parent_window, callback):
         command=ventana.destroy,
         width=100
     ).pack(pady=10)
+
+
+# ==================== FUNCIONES DE CÁLCULO DE PRECIOS ====================
+
+from lib.logger_config import get_logger
+
+logger = get_logger()
+
+
+def obtener_descuento_cliente(cliente_nombre, conn):
+    """
+    Obtiene el descuento configurado para un cliente desde sus condiciones.
+    
+    Args:
+        cliente_nombre: Nombre del cliente
+        conn: Conexión a la base de datos
+        
+    Returns:
+        float: Porcentaje de descuento (0-100), o 0.0 si no tiene
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT descuento
+            FROM clientes
+            WHERE nombre = ?
+        """, (cliente_nombre,))
+        
+        resultado = cursor.fetchone()
+        
+        if resultado and resultado[0] is not None:
+            descuento = float(resultado[0])
+            logger.info(f"Descuento obtenido para cliente '{cliente_nombre}': {descuento}%")
+            return descuento
+        
+        logger.info(f"Cliente '{cliente_nombre}' no tiene descuento configurado")
+        return 0.0
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo descuento del cliente '{cliente_nombre}': {e}")
+        return 0.0
+
+
+def validar_cliente_sin_descuento(cliente_nombre, conn):
+    """
+    Verifica si un cliente tiene descuento configurado.
+    
+    Args:
+        cliente_nombre: Nombre del cliente
+        conn: Conexión a la base de datos
+        
+    Returns:
+        tuple: (tiene_descuento: bool, descuento: float)
+    """
+    descuento = obtener_descuento_cliente(cliente_nombre, conn)
+    tiene_descuento = descuento > 0
+    
+    if not tiene_descuento:
+        logger.warning(f"Cliente '{cliente_nombre}' sin descuento configurado")
+    
+    return tiene_descuento, descuento
+
+
+def calcular_precio_final(precio_unitario, descuento_cliente=0.0, tiene_depreciacion=False, porcentaje_depreciacion=0.0):
+    """
+    Calcula el precio final aplicando descuento del cliente y depreciación.
+    Orden: Precio → Descuento Cliente → Depreciación
+    
+    Args:
+        precio_unitario: Precio original del artículo
+        descuento_cliente: Porcentaje de descuento del cliente (0-100)
+        tiene_depreciacion: Si el artículo tiene depreciación
+        porcentaje_depreciacion: Porcentaje de depreciación (0-100)
+        
+    Returns:
+        float: Precio final calculado
+    """
+    try:
+        precio = float(precio_unitario)
+        
+        # Paso 1: Aplicar descuento del cliente
+        if descuento_cliente > 0:
+            precio = precio * (1 - descuento_cliente / 100)
+            logger.info(f"Precio después de descuento {descuento_cliente}%: {precio:.2f}€")
+        
+        # Paso 2: Aplicar depreciación
+        if tiene_depreciacion and porcentaje_depreciacion > 0:
+            precio = precio * (1 - porcentaje_depreciacion / 100)
+            logger.info(f"Precio después de depreciación {porcentaje_depreciacion}%: {precio:.2f}€")
+        
+        logger.info(f"Precio final calculado: {precio:.2f}€ (Original: {precio_unitario}€, Desc: {descuento_cliente}%, Deprec: {porcentaje_depreciacion}%)")
+        
+        return round(precio, 2)
+        
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error calculando precio final: {e}")
+        return float(precio_unitario) if precio_unitario else 0.0
+
+
+def calcular_precio_total_articulo(precio_final, cantidad_entregada):
+    """
+    Calcula el precio total de un artículo (precio final × cantidad).
+    
+    Args:
+        precio_final: Precio final unitario con descuentos aplicados
+        cantidad_entregada: Cantidad de unidades entregadas
+        
+    Returns:
+        float: Precio total del artículo
+    """
+    try:
+        precio = float(precio_final)
+        cantidad = float(cantidad_entregada)
+        total = precio * cantidad
+        
+        logger.info(f"Precio total: {precio:.2f}€ × {cantidad} = {total:.2f}€")
+        
+        return round(total, 2)
+        
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error calculando precio total: {e}")
+        return 0.0

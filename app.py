@@ -5162,8 +5162,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ctk.CTkLabel(input_articulo_frame, text="Cant. Entregada", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=5)
         ctk.CTkLabel(input_articulo_frame, text="Estado", font=ctk.CTkFont(size=11)).grid(row=0, column=3, padx=5)
         ctk.CTkLabel(input_articulo_frame, text="Precio Unitario", font=ctk.CTkFont(size=11)).grid(row=0, column=4, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=5, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="% Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=6, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Precio Final", font=ctk.CTkFont(size=11)).grid(row=0, column=5, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Auto", font=ctk.CTkFont(size=11)).grid(row=0, column=6, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=7, padx=5)
+        ctk.CTkLabel(input_articulo_frame, text="% Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=8, padx=5)
         
         # Entradas
         self.art_ref = ctk.CTkEntry(input_articulo_frame, width=150)
@@ -5177,16 +5179,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_precio = ctk.CTkEntry(input_articulo_frame, width=100)
         self.art_precio.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
         
+        # Campo Precio Final (calculado o manual)
+        self.art_precio_final = ctk.CTkEntry(input_articulo_frame, width=100, placeholder_text="Auto")
+        self.art_precio_final.grid(row=1, column=5, padx=5, pady=2, sticky="ew")
+        self.art_precio_final.configure(state="disabled")  # Deshabilitado por defecto (modo auto)
+        
+        # Checkbox Auto (aplicar descuentos automáticamente) - activado por defecto
+        self.art_auto_descuento_var = ctk.IntVar(value=1)
+        self.art_auto_descuento_check = ctk.CTkCheckBox(input_articulo_frame, text="", variable=self.art_auto_descuento_var,
+                                                         command=self.toggle_modo_calculo_precio, width=30)
+        self.art_auto_descuento_check.grid(row=1, column=6, padx=5, pady=2)
+        
         # Checkbox de depreciación
         self.art_depreciacion_var = ctk.IntVar(value=0)
         self.art_depreciacion_check = ctk.CTkCheckBox(input_articulo_frame, text="", variable=self.art_depreciacion_var,
                                                       command=self.toggle_porcentaje_depreciacion, width=30)
-        self.art_depreciacion_check.grid(row=1, column=5, padx=5, pady=2)
+        self.art_depreciacion_check.grid(row=1, column=7, padx=5, pady=2)
         
         # Campo de porcentaje de depreciación (deshabilitado por defecto)
         self.art_porcentaje_depreciacion = ctk.CTkEntry(input_articulo_frame, width=80, placeholder_text="0")
-        self.art_porcentaje_depreciacion.grid(row=1, column=6, padx=5, pady=2, sticky="ew")
+        self.art_porcentaje_depreciacion.grid(row=1, column=8, padx=5, pady=2, sticky="ew")
         self.art_porcentaje_depreciacion.configure(state="disabled")
+        
+        # Bindings para cálculo en tiempo real
+        self.art_precio.bind("<KeyRelease>", self.calcular_precio_final_tiempo_real)
+        self.art_porcentaje_depreciacion.bind("<KeyRelease>", self.calcular_precio_final_tiempo_real)
 
         # Botones de Acción de Artículos
         # Guardar referencia al botón para permitir cambiar su comportamiento durante la edición
@@ -5194,7 +5211,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                                  text="➕",
                                                  width=30,
                                                  command=self.anadir_articulo)
-        self.btn_anadir_articulo.grid(row=1, column=7, padx=5, pady=2)
+        self.btn_anadir_articulo.grid(row=1, column=9, padx=5, pady=2)
+        
+        # Label de advertencia para cliente sin descuento (oculto por defecto)
+        self.lbl_advertencia_sin_descuento = ctk.CTkLabel(input_articulo_frame, 
+                                                          text="⚠️ Cliente sin descuento configurado - Introduce precio final manualmente",
+                                                          text_color="orange",
+                                                          font=ctk.CTkFont(size=11, weight="bold"))
+        self.lbl_advertencia_sin_descuento.grid(row=2, column=0, columnspan=10, padx=5, pady=5, sticky="w")
+        self.lbl_advertencia_sin_descuento.grid_remove()  # Ocultar por defecto
 
         # Permitir pulsar ENTER en los campos para añadir/actualizar artículo
         try:
@@ -5202,6 +5227,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.art_cant_doc.bind("<Return>", self._enter_articulo)
             self.art_cant_entregada.bind("<Return>", self._enter_articulo)
             self.art_precio.bind("<Return>", self._enter_articulo)
+            self.art_precio_final.bind("<Return>", self._enter_articulo)
+            self.art_porcentaje_depreciacion.bind("<Return>", self._enter_articulo)
         except Exception:
             pass
         
@@ -5492,6 +5519,102 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.art_porcentaje_depreciacion.configure(state="disabled")
             self.art_porcentaje_depreciacion.delete(0, ctk.END)
             self.art_porcentaje_depreciacion.insert(0, "0")
+        # Recalcular precio final si está en modo auto
+        self.calcular_precio_final_tiempo_real()
+    
+    def toggle_modo_calculo_precio(self):
+        """Cambia entre modo automático y manual para el cálculo del precio final."""
+        if self.art_auto_descuento_var.get() == 1:  # Modo AUTO
+            self.art_precio_final.configure(state="disabled")
+            self.calcular_precio_final_tiempo_real()  # Calcular automáticamente
+        else:  # Modo MANUAL
+            self.art_precio_final.configure(state="normal")
+    
+    def calcular_precio_final_tiempo_real(self, event=None):
+        """Calcula el precio final en tiempo real aplicando descuento del cliente y depreciación."""
+        from lib.articulo_utils import obtener_descuento_cliente, calcular_precio_final, validar_cliente_sin_descuento
+        
+        # Solo calcular si está en modo auto
+        if self.art_auto_descuento_var.get() != 1:
+            return
+        
+        try:
+            # Obtener precio unitario
+            precio_str = self.art_precio.get().strip().replace(',', '.')
+            if not precio_str:
+                self.art_precio_final.configure(state="normal")
+                self.art_precio_final.delete(0, ctk.END)
+                self.art_precio_final.configure(state="disabled")
+                return
+            
+            precio_unitario = float(precio_str)
+            
+            # Obtener nombre del cliente
+            cliente_nombre = self.entry_Cliente.get().strip()
+            if not cliente_nombre:
+                # Si no hay cliente, precio final = precio unitario
+                self.art_precio_final.configure(state="normal")
+                self.art_precio_final.delete(0, ctk.END)
+                self.art_precio_final.insert(0, f"{precio_unitario:.2f}")
+                self.art_precio_final.configure(state="disabled")
+                return
+            
+            # Obtener conexión a la base de datos
+            conn, cursor = self.master.conectar_db()
+            
+            # Verificar si el cliente tiene descuento configurado
+            tiene_descuento, valor_descuento = validar_cliente_sin_descuento(cliente_nombre, conn)
+            
+            # Obtener datos de depreciación
+            tiene_depreciacion = self.art_depreciacion_var.get() == 1
+            porcentaje_depreciacion = 0.0
+            
+            if tiene_depreciacion:
+                porcentaje_str = self.art_porcentaje_depreciacion.get().strip()
+                if porcentaje_str:
+                    porcentaje_depreciacion = float(porcentaje_str.replace(',', '.'))
+            
+            # Si no tiene descuento NI depreciación, desactivar modo auto
+            if not tiene_descuento and not tiene_depreciacion:
+                # Desmarcar checkbox Auto
+                self.art_auto_descuento_check.deselect()
+                
+                # Habilitar campo para entrada manual
+                self.art_precio_final.configure(state="normal")
+                self.art_precio_final.delete(0, ctk.END)
+                self.art_precio_final.insert(0, f"{precio_unitario:.2f}")
+                
+                # Mostrar advertencia en label solo si es el primer artículo del expediente
+                if len(self.articulos_data) == 0:
+                    if hasattr(self, 'lbl_advertencia_sin_descuento'):
+                        self.lbl_advertencia_sin_descuento.grid()
+                
+                return
+            
+            # Obtener descuento del cliente desde la base de datos
+            descuento_cliente = obtener_descuento_cliente(cliente_nombre, conn)
+            
+            # Calcular precio final
+            precio_final = calcular_precio_final(
+                precio_unitario,
+                descuento_cliente,
+                tiene_depreciacion,
+                porcentaje_depreciacion
+            )
+            
+            # Actualizar campo (habilitarlo temporalmente)
+            self.art_precio_final.configure(state="normal")
+            self.art_precio_final.delete(0, ctk.END)
+            self.art_precio_final.insert(0, f"{precio_final:.2f}")
+            self.art_precio_final.configure(state="disabled")
+            
+        except ValueError as ve:
+            # Si hay error en la conversión, limpiar el campo
+            self.art_precio_final.configure(state="normal")
+            self.art_precio_final.delete(0, ctk.END)
+            self.art_precio_final.configure(state="disabled")
+        except Exception as e:
+            print(f"Error al calcular precio final: {e}")
     
     def anadir_articulo(self):
         """Añade una fila de artículo a la lista temporal."""
@@ -5505,6 +5628,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
             estado = self.art_estado.get()
             # Reemplazar comas por puntos para que float funcione
             precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
+            
+            # Precio final (auto o manual)
+            if self.art_auto_descuento_var.get() == 1:  # Modo AUTO
+                # Ya está calculado en el campo
+                precio_final = float(self.art_precio_final.get().replace(',', '.') or precio_unitario)
+            else:  # Modo MANUAL
+                precio_final_str = self.art_precio_final.get().strip().replace(',', '.')
+                precio_final = float(precio_final_str) if precio_final_str else precio_unitario
             
             # Depreciación
             tiene_depreciacion = self.art_depreciacion_var.get() == 1
@@ -5534,6 +5665,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "cantidad_entregada": cant_entregada,
             "estado_producto": estado,
             "precio_unitario": precio_unitario,
+            "precio_final": precio_final,
             "depreciacion": 1 if tiene_depreciacion else 0,
             "porcentaje_depreciacion": porcentaje_depreciacion
         }
@@ -5549,6 +5681,21 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.art_cant_entregada.delete(0, ctk.END)
         self.art_precio.delete(0, ctk.END)
         self.art_estado.set(self.OPCIONES["Estado_Producto"][0])
+        
+        # Limpiar precio final
+        self.art_precio_final.configure(state="normal")
+        self.art_precio_final.delete(0, ctk.END)
+        if self.art_auto_descuento_var.get() == 1:
+            self.art_precio_final.configure(state="disabled")
+        
+        # Resetear auto a activado por defecto
+        self.art_auto_descuento_var.set(1)
+        self.art_auto_descuento_check.select()
+        self.art_precio_final.configure(state="disabled")
+        
+        # Ocultar advertencia de sin descuento
+        if hasattr(self, 'lbl_advertencia_sin_descuento'):
+            self.lbl_advertencia_sin_descuento.grid_remove()
         
         # Limpiar depreciación
         self.art_depreciacion_var.set(0)
@@ -5589,6 +5736,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 except Exception:
                     pass
                 
+                # Cargar precio final (activar modo manual temporalmente)
+                precio_final = art.get('precio_final', art.get('precio_unitario', 0.0))
+                self.art_precio_final.configure(state="normal")
+                self.art_precio_final.delete(0, ctk.END)
+                self.art_precio_final.insert(0, str(precio_final))
+                
+                # Mantener modo auto activado por defecto
+                self.art_auto_descuento_var.set(1)
+                self.art_precio_final.configure(state="disabled")
+                
                 # Cargar depreciación
                 depreciacion = art.get('depreciacion', 0)
                 porcentaje = art.get('porcentaje_depreciacion', 0.0)
@@ -5626,6 +5783,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
             estado = self.art_estado.get()
             precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
             
+            # Precio final (auto o manual)
+            if self.art_auto_descuento_var.get() == 1:  # Modo AUTO
+                precio_final = float(self.art_precio_final.get().replace(',', '.') or precio_unitario)
+            else:  # Modo MANUAL
+                precio_final_str = self.art_precio_final.get().strip().replace(',', '.')
+                precio_final = float(precio_final_str) if precio_final_str else precio_unitario
+            
             # Depreciación
             tiene_depreciacion = self.art_depreciacion_var.get() == 1
             porcentaje_depreciacion = 0.0
@@ -5654,6 +5818,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "cantidad_entregada": cant_entregada,
             "estado_producto": estado,
             "precio_unitario": precio_unitario,
+            "precio_final": precio_final,
             "depreciacion": 1 if tiene_depreciacion else 0,
             "porcentaje_depreciacion": porcentaje_depreciacion
         }
@@ -5694,8 +5859,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return
             
         # Dibujar encabezados y filas usando grid directamente en el contenedor principal
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Deprec.", "% Deprec.", "Acción", ""]
-        weights = [2, 1, 1, 2, 1, 0, 1, 0, 0]
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Precio Final", "Deprec.", "% Deprec.", "Acción", ""]
+        weights = [2, 1, 1, 2, 1, 1, 0, 1, 0, 0]
         header_font = ctk.CTkFont(weight="bold", size=12)
 
         # Configurar columnas del contenedor para que se alineen entre filas
@@ -5719,21 +5884,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 ctk.CTkLabel(self.articulos_list_frame, text=item["estado_producto"]).grid(row=row, column=3, padx=5, pady=2, sticky="w")
                 ctk.CTkLabel(self.articulos_list_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=row, column=4, padx=5, pady=2, sticky="w")
                 
+                # Mostrar precio final
+                precio_final = item.get("precio_final", item.get("precio_unitario", 0.0))
+                ctk.CTkLabel(self.articulos_list_frame, text=f"{precio_final:.2f} €").grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                
                 # Mostrar depreciación
                 deprec_text = "✓" if item.get("depreciacion", 0) == 1 else "-"
-                ctk.CTkLabel(self.articulos_list_frame, text=deprec_text).grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=deprec_text).grid(row=row, column=6, padx=5, pady=2, sticky="w")
                 
                 # Mostrar porcentaje
                 porcentaje = item.get("porcentaje_depreciacion", 0.0)
                 porcentaje_text = f"{porcentaje}%" if item.get("depreciacion", 0) == 1 else "-"
-                ctk.CTkLabel(self.articulos_list_frame, text=porcentaje_text).grid(row=row, column=6, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(self.articulos_list_frame, text=porcentaje_text).grid(row=row, column=7, padx=5, pady=2, sticky="w")
 
                 # Acciones: Eliminar y Editar
                 ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
-                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=7, padx=5, pady=2, sticky="w")
+                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=8, padx=5, pady=2, sticky="w")
                 try:
                     ctk.CTkButton(self.articulos_list_frame, text="✏️", width=30,
-                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=8, padx=2, pady=2, sticky="w")
+                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=9, padx=2, pady=2, sticky="w")
                 except Exception:
                     pass
             except Exception:
@@ -5755,8 +5924,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 else:
                     cantidad = float(cantidad)
                 
-                # Convertir precio_unitario a float de forma segura
-                precio = item.get('precio_unitario', 0.0)
+                # Usar precio_final en lugar de precio_unitario para el cálculo
+                precio = item.get('precio_final', item.get('precio_unitario', 0.0))
                 if isinstance(precio, str):
                     # Limpiar el string y convertir a float
                     precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
@@ -14971,6 +15140,7 @@ Versión de la App: {APP_VERSION}
             
             datos = {
                 'nombre': widgets_info['entry_nombre'].get().strip(),
+                'tipo_cliente': widgets_info['option_tipo'].get(),
                 'direccion': widgets_info['entry_direccion'].get().strip(),
                 'telefono_principal': widgets_info['entry_telefono'].get().strip(),
                 'email_principal': widgets_info['entry_email'].get().strip(),
@@ -15117,44 +15287,53 @@ Versión de la App: {APP_VERSION}
         widgets['entry_nombre'].grid(row=1, column=1, sticky="ew", padx=10, pady=5)
         widgets['entry_nombre'].insert(0, cliente[1])
         
+        # Tipo de cliente (editable)
+        ctk.CTkLabel(info_frame, text="Tipo Cliente:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(
+                    row=2, column=0, sticky="w", padx=10, pady=5)
+        widgets['option_tipo'] = ctk.CTkOptionMenu(info_frame, 
+                                                    values=["Normal", "Distribuidor", "VIP"])
+        widgets['option_tipo'].grid(row=2, column=1, sticky="ew", padx=10, pady=5)
+        widgets['option_tipo'].set(cliente[2] if cliente[2] else "Normal")
+        
         # Dirección (editable)
         ctk.CTkLabel(info_frame, text="Dirección:", 
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-                    row=2, column=0, sticky="w", padx=10, pady=5)
+                    row=3, column=0, sticky="w", padx=10, pady=5)
         widgets['entry_direccion'] = ctk.CTkEntry(info_frame)
-        widgets['entry_direccion'].grid(row=2, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_direccion'].grid(row=3, column=1, sticky="ew", padx=10, pady=5)
         widgets['entry_direccion'].insert(0, cliente[3] or "")
         
         # Teléfono (editable)
         ctk.CTkLabel(info_frame, text="Teléfono Principal:", 
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-                    row=3, column=0, sticky="w", padx=10, pady=5)
+                    row=4, column=0, sticky="w", padx=10, pady=5)
         widgets['entry_telefono'] = ctk.CTkEntry(info_frame)
-        widgets['entry_telefono'].grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_telefono'].grid(row=4, column=1, sticky="ew", padx=10, pady=5)
         widgets['entry_telefono'].insert(0, cliente[4] or "")
         
         # Email (editable)
         ctk.CTkLabel(info_frame, text="Email Principal:", 
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-                    row=4, column=0, sticky="w", padx=10, pady=5)
+                    row=5, column=0, sticky="w", padx=10, pady=5)
         widgets['entry_email'] = ctk.CTkEntry(info_frame)
-        widgets['entry_email'].grid(row=4, column=1, sticky="ew", padx=10, pady=5)
+        widgets['entry_email'].grid(row=5, column=1, sticky="ew", padx=10, pady=5)
         widgets['entry_email'].insert(0, cliente[5] or "")
         
         # Fechas (solo lectura)
         ctk.CTkLabel(info_frame, text="Fecha Registro:", 
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-                    row=5, column=0, sticky="w", padx=10, pady=5)
+                    row=6, column=0, sticky="w", padx=10, pady=5)
         ctk.CTkLabel(info_frame, text=cliente[8].split()[0] if cliente[8] else "No disponible", 
                     font=ctk.CTkFont(size=12)).grid(
-                    row=5, column=1, sticky="w", padx=10, pady=5)
+                    row=6, column=1, sticky="w", padx=10, pady=5)
         
         ctk.CTkLabel(info_frame, text="Última Actualización:", 
                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-                    row=6, column=0, sticky="w", padx=10, pady=5)
+                    row=7, column=0, sticky="w", padx=10, pady=5)
         ctk.CTkLabel(info_frame, text=cliente[9].split()[0] if cliente[9] else "No disponible", 
                     font=ctk.CTkFont(size=12)).grid(
-                    row=6, column=1, sticky="w", padx=10, pady=5)
+                    row=7, column=1, sticky="w", padx=10, pady=5)
         
         # Notas generales (editable)
         ctk.CTkLabel(scroll_frame, text="📝 Notas Generales", 

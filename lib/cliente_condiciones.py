@@ -25,7 +25,7 @@ def cargar_condiciones_cliente(cliente_id, conn):
         cursor.execute("""
             SELECT descuento, campo_reserva_1, campo_reserva_2
             FROM clientes
-            WHERE id = ?
+            WHERE cliente_id = ?
         """, (cliente_id,))
         
         resultado = cursor.fetchone()
@@ -88,7 +88,7 @@ def guardar_condiciones_cliente(cliente_id, descuento, campo_reserva_1, campo_re
             SET descuento = ?,
                 campo_reserva_1 = ?,
                 campo_reserva_2 = ?
-            WHERE id = ?
+            WHERE cliente_id = ?
         """, (descuento_float, campo_reserva_1, campo_reserva_2, cliente_id))
         
         conn.commit()

@@ -1,5 +1,6 @@
 Cambio V.1.0.10 - ✨ Últimas mejoras implementadas:
 
+- Calculo automatico del precio final del articulo, teniendo en cuenta si el cliente tiene descuento o no y si hay depreciacion.
 - Añadido campo depreciacion en los articulos de los expedientes.
 - Añadida pestaña Condiciones a la ficha de clientes.
 - Corregido fallo que duplicaba contacto cuando se migraban los clientes.
