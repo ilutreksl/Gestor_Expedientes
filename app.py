@@ -35,6 +35,7 @@ from lib.personas_recepcion_manager import PersonasRecepcionManager
 from lib.resultado_expediente_manager import ResultadoExpedienteManager
 from lib.tipos_cliente_manager import cargar_tipos_cliente
 from lib import github_issue_manager
+from lib import rma_asociaciones
 
 # Sistema de logging
 from lib.logger_config import setup_logging, set_current_user, get_logger
@@ -4588,6 +4589,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
         historial_tab = self.tabview.add("📜 Historial de Cambios")
         # Pestaña de Tareas por RMA (creación/edición desde la ficha del expediente)
         tareas_tab = self.tabview.add("🗒️ Tareas")
+        # Pestaña de Asociaciones (solo en modo edición)
+        if es_edicion:
+            asociaciones_tab = self.tabview.add("🔗 Asociados")
         self.historial_tab = historial_tab
 
         # Configurar todas las pestañas con un marco scrollable (excepto Adjuntos/Historial, si es necesario)
@@ -4895,6 +4899,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         if es_edicion:
             self.cargar_lista_tareas_rma()
     # Nota: No recrear tareas_scroll aquí para evitar duplicados en la pestaña de Tareas.
+        
+        # Configurar la pestaña de Asociaciones (solo en modo edición)
+        if es_edicion:
+            self.crear_tab_asociaciones(asociaciones_tab, rma_id)
             
         # -----------------------------------------------------------
         # -- 2. MOVER LLAMADAS A crear_campo A SUS NUEVOS FRAMES --
@@ -15930,6 +15938,332 @@ Versión de la App: {APP_VERSION}
             'entry_reserva1': entry_reserva1,
             'entry_reserva2': entry_reserva2
         }
+    
+    def crear_tab_asociaciones(self, tab_frame, rma_id):
+        """Crea la pestaña de asociaciones de expedientes RMA."""
+        # Frame principal scrollable
+        scroll_frame = ctk.CTkScrollableFrame(tab_frame, label_text="Expedientes Asociados")
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Frame para el encabezado con botón
+        header_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(5, 15))
+        
+        ctk.CTkLabel(header_frame, 
+                    text="🔗 Gestión de Asociaciones",
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=5)
+        
+        # Botón para asociar nuevo expediente
+        ctk.CTkButton(header_frame, 
+                     text="➕ Asociar Expediente",
+                     command=lambda: self.mostrar_dialogo_asociar_rma(rma_id),
+                     width=150).pack(side="right", padx=5)
+        
+        # Frame para la lista de asociaciones
+        self.asociaciones_list_frame = ctk.CTkFrame(scroll_frame)
+        self.asociaciones_list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Guardar el rma_id para refrescos
+        self.asociaciones_rma_id = rma_id
+        
+        # Cargar asociaciones
+        self.cargar_lista_asociaciones()
+    
+    def cargar_lista_asociaciones(self):
+        """Carga y muestra la lista de expedientes asociados."""
+        # Limpiar contenido anterior
+        for widget in self.asociaciones_list_frame.winfo_children():
+            widget.destroy()
+        
+        if not hasattr(self, 'asociaciones_rma_id') or self.asociaciones_rma_id is None:
+            ctk.CTkLabel(self.asociaciones_list_frame, 
+                        text="No se puede cargar asociaciones",
+                        text_color="red").pack(pady=20)
+            return
+        
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                ctk.CTkLabel(self.asociaciones_list_frame, 
+                            text="Error de conexión a base de datos",
+                            text_color="red").pack(pady=20)
+                return
+            
+            # Obtener asociaciones
+            asociaciones = rma_asociaciones.obtener_asociaciones(self.asociaciones_rma_id, conn)
+            conn.close()
+            
+            if not asociaciones:
+                ctk.CTkLabel(self.asociaciones_list_frame, 
+                            text="No hay expedientes asociados",
+                            text_color="gray",
+                            font=ctk.CTkFont(size=12)).pack(pady=20)
+                return
+            
+            # Crear encabezados de tabla
+            headers_frame = ctk.CTkFrame(self.asociaciones_list_frame, fg_color="#2b2b2b")
+            headers_frame.pack(fill="x", padx=5, pady=(0, 5))
+            
+            ctk.CTkLabel(headers_frame, text="Código RMA", width=120, 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Cliente", width=250, 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Estado", width=120, 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Motivo", width=200, 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Acciones", width=150, 
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            
+            # Crear fila para cada asociación
+            for asoc in asociaciones:
+                self.crear_fila_asociacion(asoc)
+                
+        except Exception as e:
+            logger.error(f"Error cargando asociaciones: {e}")
+            ctk.CTkLabel(self.asociaciones_list_frame, 
+                        text=f"Error: {str(e)}",
+                        text_color="red").pack(pady=20)
+    
+    def crear_fila_asociacion(self, asoc):
+        """Crea una fila visual para una asociación."""
+        row_frame = ctk.CTkFrame(self.asociaciones_list_frame, fg_color="#1a1a1a")
+        row_frame.pack(fill="x", padx=5, pady=2)
+        
+        # Código RMA
+        ctk.CTkLabel(row_frame, text=asoc['codigo_rma'], width=120).pack(side="left", padx=5, pady=5)
+        
+        # Cliente (truncado si es muy largo)
+        cliente_texto = asoc['nombre_cliente'][:30] + "..." if len(asoc['nombre_cliente']) > 30 else asoc['nombre_cliente']
+        ctk.CTkLabel(row_frame, text=cliente_texto, width=250).pack(side="left", padx=5, pady=5)
+        
+        # Estado
+        ctk.CTkLabel(row_frame, text=asoc['estado_expediente'], width=120).pack(side="left", padx=5, pady=5)
+        
+        # Motivo (truncado si es muy largo)
+        motivo_texto = asoc['motivo'][:25] + "..." if len(asoc['motivo']) > 25 else asoc['motivo'] if asoc['motivo'] else "-"
+        ctk.CTkLabel(row_frame, text=motivo_texto, width=200).pack(side="left", padx=5, pady=5)
+        
+        # Botones de acciones
+        acciones_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+        acciones_frame.pack(side="left", padx=5, pady=5)
+        
+        ctk.CTkButton(acciones_frame, 
+                     text="👁️",
+                     width=40,
+                     command=lambda: self.abrir_rma_asociado(asoc['rma_id'])).pack(side="left", padx=2)
+        
+        ctk.CTkButton(acciones_frame, 
+                     text="❌",
+                     width=40,
+                     fg_color="darkred",
+                     hover_color="red",
+                     command=lambda: self.desasociar_expediente(asoc['rma_id'])).pack(side="left", padx=2)
+    
+    def mostrar_dialogo_asociar_rma(self, rma_id):
+        """Muestra un diálogo para buscar y asociar un expediente RMA."""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Asociar Expediente")
+        dlg.geometry("700x500")
+        dlg.grab_set()
+        
+        # Frame de búsqueda
+        search_frame = ctk.CTkFrame(dlg)
+        search_frame.pack(fill="x", padx=15, pady=15)
+        
+        ctk.CTkLabel(search_frame, 
+                    text="Buscar por Código RMA o Cliente:",
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(0, 5))
+        
+        search_entry = ctk.CTkEntry(search_frame, placeholder_text="Escriba para buscar...")
+        search_entry.pack(fill="x", pady=5)
+        
+        # Frame para resultados
+        resultados_frame = ctk.CTkScrollableFrame(dlg, label_text="Resultados de Búsqueda")
+        resultados_frame.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+        
+        # Frame para motivo
+        motivo_frame = ctk.CTkFrame(dlg)
+        motivo_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        ctk.CTkLabel(motivo_frame, 
+                    text="Motivo de Asociación (opcional):",
+                    font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(0, 5))
+        
+        motivo_entry = ctk.CTkEntry(motivo_frame, placeholder_text="Ej: Mismo cliente, misma incidencia...")
+        motivo_entry.pack(fill="x", pady=5)
+        
+        # Variable para almacenar el RMA seleccionado
+        rma_seleccionado = {'id': None}
+        
+        def buscar_rmas():
+            """Busca RMAs según el término ingresado."""
+            termino = search_entry.get().strip()
+            
+            # Limpiar resultados anteriores
+            for widget in resultados_frame.winfo_children():
+                widget.destroy()
+            
+            if len(termino) < 2:
+                ctk.CTkLabel(resultados_frame, 
+                            text="Escriba al menos 2 caracteres para buscar",
+                            text_color="gray").pack(pady=20)
+                return
+            
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn:
+                    ctk.CTkLabel(resultados_frame, 
+                                text="Error de conexión",
+                                text_color="red").pack(pady=20)
+                    return
+                
+                resultados = rma_asociaciones.buscar_rmas_para_asociar(termino, rma_id, conn)
+                conn.close()
+                
+                if not resultados:
+                    ctk.CTkLabel(resultados_frame, 
+                                text="No se encontraron expedientes",
+                                text_color="gray").pack(pady=20)
+                    return
+                
+                # Mostrar resultados
+                for rma in resultados:
+                    resultado_row = ctk.CTkFrame(resultados_frame)
+                    resultado_row.pack(fill="x", padx=5, pady=2)
+                    
+                    info_text = f"{rma['codigo_rma']} - {rma['nombre_cliente']} ({rma['estado_expediente']})"
+                    ctk.CTkLabel(resultado_row, text=info_text, anchor="w").pack(side="left", padx=10, pady=8, fill="x", expand=True)
+                    
+                    def seleccionar(rma_data=rma):
+                        rma_seleccionado['id'] = rma_data['id']
+                        # Resaltar selección
+                        for child in resultados_frame.winfo_children():
+                            child.configure(fg_color="transparent")
+                        resultado_row.configure(fg_color=("gray75", "gray25"))
+                    
+                    ctk.CTkButton(resultado_row, 
+                                 text="Seleccionar",
+                                 width=100,
+                                 command=seleccionar).pack(side="right", padx=5, pady=5)
+                
+            except Exception as e:
+                logger.error(f"Error buscando RMAs: {e}")
+                ctk.CTkLabel(resultados_frame, 
+                            text=f"Error: {str(e)}",
+                            text_color="red").pack(pady=20)
+        
+        # Buscar al escribir (con delay)
+        search_entry.bind('<KeyRelease>', lambda e: self.after(500, buscar_rmas))
+        
+        # Botones de acción
+        botones_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        botones_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        def confirmar_asociacion():
+            """Confirma y crea la asociación."""
+            if rma_seleccionado['id'] is None:
+                messagebox.showwarning("Selección Requerida", "Debe seleccionar un expediente para asociar")
+                return
+            
+            motivo = motivo_entry.get().strip()
+            
+            try:
+                conn, cursor = self.master.conectar_db()
+                if not conn:
+                    messagebox.showerror("Error", "No se pudo conectar a la base de datos")
+                    return
+                
+                exito, mensaje = rma_asociaciones.asociar_expedientes(
+                    rma_id, 
+                    rma_seleccionado['id'], 
+                    motivo, 
+                    self.username, 
+                    conn
+                )
+                
+                conn.close()
+                
+                if exito:
+                    messagebox.showinfo("Éxito", mensaje)
+                    dlg.destroy()
+                    # Refrescar lista de asociaciones
+                    if hasattr(self, 'cargar_lista_asociaciones'):
+                        self.cargar_lista_asociaciones()
+                else:
+                    messagebox.showerror("Error", mensaje)
+                    
+            except Exception as e:
+                logger.error(f"Error al asociar expedientes: {e}")
+                messagebox.showerror("Error", f"Error inesperado: {str(e)}")
+        
+        ctk.CTkButton(botones_frame, 
+                     text="✓ Asociar",
+                     command=confirmar_asociacion,
+                     fg_color="green",
+                     hover_color="darkgreen").pack(side="left", padx=5)
+        
+        ctk.CTkButton(botones_frame, 
+                     text="✗ Cancelar",
+                     command=dlg.destroy,
+                     fg_color="gray",
+                     hover_color="darkgray").pack(side="left", padx=5)
+    
+    def abrir_rma_asociado(self, rma_id):
+        """Abre un expediente asociado en una nueva ventana."""
+        try:
+            # Crear una nueva ventana para mostrar el RMA
+            ventana_rma = ctk.CTkToplevel(self)
+            ventana_rma.title(f"Expediente RMA Asociado - ID {rma_id}")
+            ventana_rma.geometry("1200x800")
+            
+            # Crear una instancia temporal de la aplicación en la nueva ventana
+            # Esta es una forma simple - podrías necesitar ajustar según tu arquitectura
+            from app import GestorRMAApp
+            
+            # Crear un frame en la ventana
+            content_frame = ctk.CTkFrame(ventana_rma)
+            content_frame.pack(fill="both", expand=True)
+            
+            # Mostrar el RMA (necesitarás adaptar esto según tu aplicación)
+            messagebox.showinfo("Abrir RMA", f"Abriendo expediente ID: {rma_id}\n\nNota: Función en desarrollo")
+            
+        except Exception as e:
+            logger.error(f"Error abriendo RMA asociado: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir el expediente: {str(e)}")
+    
+    def desasociar_expediente(self, rma_asociado_id):
+        """Elimina la asociación con un expediente."""
+        # Confirmar acción
+        if not messagebox.askyesno("Confirmar", 
+                                  "¿Está seguro de que desea eliminar esta asociación?"):
+            return
+        
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                messagebox.showerror("Error", "No se pudo conectar a la base de datos")
+                return
+            
+            exito, mensaje = rma_asociaciones.desasociar_expedientes(
+                self.asociaciones_rma_id, 
+                rma_asociado_id, 
+                conn
+            )
+            
+            conn.close()
+            
+            if exito:
+                messagebox.showinfo("Éxito", mensaje)
+                # Refrescar lista
+                if hasattr(self, 'cargar_lista_asociaciones'):
+                    self.cargar_lista_asociaciones()
+            else:
+                messagebox.showerror("Error", mensaje)
+                
+        except Exception as e:
+            logger.error(f"Error al desasociar expedientes: {e}")
+            messagebox.showerror("Error", f"Error inesperado: {str(e)}")
     
     def cargar_estadisticas_cliente(self, cliente_id):
         """Carga las estadísticas del cliente con filtros aplicados."""
