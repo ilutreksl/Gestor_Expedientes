@@ -1,5 +1,6 @@
 Cambio V.1.0.10 - ✨ Últimas mejoras implementadas:
 
+- Añadida pestaña Condiciones a la ficha de clientes.
 - Corregido fallo que duplicaba contacto cuando se migraban los clientes.
 
 

@@ -326,7 +326,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.10"
+APP_VERSION = "v1.0.10no estoy utilizando python virtual, sin o"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -14672,11 +14672,11 @@ Versión de la App: {APP_VERSION}
                 
                 cursor.execute("""
                     INSERT INTO clientes (nombre, tipo_cliente, direccion, telefono_principal, 
-                                        email_principal, notas_generales)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                                        email_principal, notas_generales, descuento, campo_reserva_1, campo_reserva_2)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (nombre, option_tipo.get(), entry_direccion.get().strip(),
                      entry_telefono.get().strip(), entry_email.get().strip(),
-                     text_notas.get("1.0", "end-1c").strip()))
+                     text_notas.get("1.0", "end-1c").strip(), 0.0, "", ""))
                 
                 conn.commit()
                 conn.close()
@@ -14865,12 +14865,18 @@ Versión de la App: {APP_VERSION}
         tab_stats = tabview.add("📊 Estadísticas")
         self.crear_tab_estadisticas_cliente_completa(tab_stats, cliente_id, cliente[1])
         
+        # Pestaña 6: Condiciones
+        tab_condiciones = tabview.add("💰 Condiciones")
+        widgets_condiciones = self.crear_tab_condiciones_cliente(tab_condiciones, cliente_id)
+        
         # Botones de acción ANTES de definir funciones
         botones_frame = ctk.CTkFrame(ventana)
         botones_frame.pack(fill="x", padx=10, pady=(5, 10))
         
         # Función para guardar cambios
         def guardar_cambios_cliente():
+            from lib.cliente_condiciones import guardar_condiciones_cliente, validar_descuento
+            
             datos = {
                 'nombre': widgets_info['entry_nombre'].get().strip(),
                 'direccion': widgets_info['entry_direccion'].get().strip(),
@@ -14883,8 +14889,35 @@ Versión de la App: {APP_VERSION}
                 messagebox.showerror("Error", "El nombre del cliente es obligatorio")
                 return
             
+            # Validar descuento antes de guardar
+            descuento_str = widgets_condiciones['entry_descuento'].get().strip()
+            es_valido, descuento_valor, mensaje_error = validar_descuento(descuento_str)
+            
+            if not es_valido:
+                messagebox.showerror("Error", f"Error en Condiciones: {mensaje_error}")
+                return
+            
+            # Actualizar datos del cliente
             if self.actualizar_cliente(cliente_id, datos):
+                # Guardar condiciones comerciales
+                try:
+                    conn, cursor = self.master.conectar_db()
+                    if conn:
+                        reserva1 = widgets_condiciones['entry_reserva1'].get().strip()
+                        reserva2 = widgets_condiciones['entry_reserva2'].get().strip()
+                        
+                        if not guardar_condiciones_cliente(cliente_id, descuento_valor, reserva1, reserva2, conn):
+                            messagebox.showerror("Error", "Error al guardar las condiciones comerciales")
+                            conn.close()
+                            return
+                        
+                        conn.close()
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al guardar condiciones: {str(e)}")
+                    return
+                
                 messagebox.showinfo("Éxito", f"Cliente '{datos['nombre']}' actualizado correctamente")
+                
                 # Recargar estadísticas
                 try:
                     conn, cursor = self.master.conectar_db()
@@ -15346,6 +15379,68 @@ Versión de la App: {APP_VERSION}
         
         # Cargar datos iniciales
         cargar_datos_estadisticas()
+    
+    def crear_tab_condiciones_cliente(self, tab_frame, cliente_id):
+        """Crea la pestaña de condiciones comerciales del cliente."""
+        from lib.cliente_condiciones import cargar_condiciones_cliente, guardar_condiciones_cliente, validar_descuento
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        # Cargar condiciones actuales
+        try:
+            conn, cursor = self.master.conectar_db()
+            if conn:
+                condiciones = cargar_condiciones_cliente(cliente_id, conn)
+                conn.close()
+            else:
+                condiciones = {'descuento': 0.0, 'campo_reserva_1': "", 'campo_reserva_2': ""}
+        except Exception as e:
+            print(f"Error cargando condiciones: {e}")
+            condiciones = {'descuento': 0.0, 'campo_reserva_1': "", 'campo_reserva_2': ""}
+        
+        # Grid layout compacto
+        main_frame.grid_columnconfigure(1, weight=1)
+        
+        # Campo Descuento
+        ctk.CTkLabel(main_frame, text="Descuento (%):", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, sticky="w", pady=8, padx=(0, 10))
+        
+        entry_descuento = ctk.CTkEntry(main_frame, placeholder_text="Ej: 10.5", width=150)
+        entry_descuento.grid(row=0, column=1, sticky="w", pady=8)
+        entry_descuento.insert(0, str(condiciones['descuento']) if condiciones['descuento'] else "0")
+        
+        # Campo Reserva 1
+        ctk.CTkLabel(main_frame, text="Campo Reserva 1:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(row=1, column=0, sticky="w", pady=8, padx=(0, 10))
+        
+        entry_reserva1 = ctk.CTkEntry(main_frame, placeholder_text="Información adicional", width=400)
+        entry_reserva1.grid(row=1, column=1, sticky="w", pady=8)
+        if condiciones['campo_reserva_1']:
+            entry_reserva1.insert(0, condiciones['campo_reserva_1'])
+        
+        # Campo Reserva 2
+        ctk.CTkLabel(main_frame, text="Campo Reserva 2:", 
+                    font=ctk.CTkFont(size=12, weight="bold")).grid(row=2, column=0, sticky="w", pady=8, padx=(0, 10))
+        
+        entry_reserva2 = ctk.CTkEntry(main_frame, placeholder_text="Información adicional", width=400)
+        entry_reserva2.grid(row=2, column=1, sticky="w", pady=8)
+        if condiciones['campo_reserva_2']:
+            entry_reserva2.insert(0, condiciones['campo_reserva_2'])
+        
+        # Nota informativa
+        ctk.CTkLabel(main_frame, 
+                    text="ℹ️ Los cambios se guardarán con el botón 'Guardar Cambios' de la ficha",
+                    font=ctk.CTkFont(size=10),
+                    text_color="gray").grid(row=3, column=0, columnspan=2, sticky="w", pady=(15, 0))
+        
+        # Retornar widgets para posible uso externo
+        return {
+            'entry_descuento': entry_descuento,
+            'entry_reserva1': entry_reserva1,
+            'entry_reserva2': entry_reserva2
+        }
     
     def cargar_estadisticas_cliente(self, cliente_id):
         """Carga las estadísticas del cliente con filtros aplicados."""
