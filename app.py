@@ -6924,9 +6924,35 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.datos_rma_maestro = datos_maestro
             
             # 2. Cargar RMA Detalles (Artículos)
-            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario, precio_final, depreciacion, porcentaje_depreciacion FROM rma_detalles WHERE rma_id = ?", (rma_id,))
             columnas_detalle = [col[0] for col in cursor.description]
             articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
+            
+            # IMPORTANTE: Recalcular precio_final si está en 0 (datos antiguos)
+            # Obtener descuento del cliente para los cálculos
+            descuento_cliente = datos_maestro.get('descuento_cliente', 0.0) or 0.0
+            
+            for articulo in articulos_db:
+                precio_final_actual = articulo.get('precio_final', 0) or 0
+                
+                # Si precio_final es 0, recalcularlo
+                if precio_final_actual == 0:
+                    from lib.articulo_depreciacion import calcular_precio_final
+                    
+                    precio_unitario = articulo.get('precio_unitario', 0.0) or 0.0
+                    tiene_depreciacion = articulo.get('depreciacion', 0) == 1
+                    porcentaje_depreciacion = articulo.get('porcentaje_depreciacion', 0.0) or 0.0
+                    
+                    # Recalcular
+                    precio_final_recalculado = calcular_precio_final(
+                        precio_unitario,
+                        descuento_cliente,
+                        tiene_depreciacion,
+                        porcentaje_depreciacion
+                    )
+                    
+                    # Actualizar el diccionario
+                    articulo['precio_final'] = precio_final_recalculado
 
             conn.close()
 
