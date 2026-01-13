@@ -6929,30 +6929,40 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
             
             # IMPORTANTE: Recalcular precio_final si está en 0 (datos antiguos)
-            # Obtener descuento del cliente para los cálculos
-            descuento_cliente = datos_maestro.get('descuento_cliente', 0.0) or 0.0
-            
-            for articulo in articulos_db:
-                precio_final_actual = articulo.get('precio_final', 0) or 0
+            try:
+                from lib.articulo_utils import calcular_precio_final
+                # Obtener descuento del cliente para los cálculos
+                descuento_cliente = datos_maestro.get('descuento_cliente', 0.0) or 0.0
                 
-                # Si precio_final es 0, recalcularlo
-                if precio_final_actual == 0:
-                    from lib.articulo_depreciacion import calcular_precio_final
-                    
-                    precio_unitario = articulo.get('precio_unitario', 0.0) or 0.0
-                    tiene_depreciacion = articulo.get('depreciacion', 0) == 1
-                    porcentaje_depreciacion = articulo.get('porcentaje_depreciacion', 0.0) or 0.0
-                    
-                    # Recalcular
-                    precio_final_recalculado = calcular_precio_final(
-                        precio_unitario,
-                        descuento_cliente,
-                        tiene_depreciacion,
-                        porcentaje_depreciacion
-                    )
-                    
-                    # Actualizar el diccionario
-                    articulo['precio_final'] = precio_final_recalculado
+                for articulo in articulos_db:
+                    try:
+                        precio_final_actual = articulo.get('precio_final', 0) or 0
+                        
+                        # Si precio_final es 0, recalcularlo
+                        if precio_final_actual == 0:
+                            precio_unitario = articulo.get('precio_unitario', 0.0) or 0.0
+                            tiene_depreciacion = articulo.get('depreciacion', 0) == 1
+                            porcentaje_depreciacion = articulo.get('porcentaje_depreciacion', 0.0) or 0.0
+                            
+                            # Recalcular
+                            precio_final_recalculado = calcular_precio_final(
+                                precio_unitario,
+                                descuento_cliente,
+                                tiene_depreciacion,
+                                porcentaje_depreciacion
+                            )
+                            
+                            # Actualizar el diccionario
+                            articulo['precio_final'] = precio_final_recalculado
+                    except Exception as e:
+                        # Si falla el recálculo de un artículo, continuar con los demás
+                        print(f"Error recalculando precio_final para artículo: {e}")
+                        # Mantener precio_unitario como fallback
+                        if articulo.get('precio_final', 0) == 0:
+                            articulo['precio_final'] = articulo.get('precio_unitario', 0.0)
+            except Exception as e:
+                print(f"Error en recálculo general de precios: {e}")
+                # Continuar sin recalcular
 
             conn.close()
 
