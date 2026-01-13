@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.10no estoy utilizando python virtual, sin o"
+APP_VERSION = "v1.0.10"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -16001,7 +16001,7 @@ Versión de la App: {APP_VERSION}
                 return
             
             # Crear encabezados de tabla
-            headers_frame = ctk.CTkFrame(self.asociaciones_list_frame, fg_color="#2b2b2b")
+            headers_frame = ctk.CTkFrame(self.asociaciones_list_frame)
             headers_frame.pack(fill="x", padx=5, pady=(0, 5))
             
             ctk.CTkLabel(headers_frame, text="Código RMA", width=120, 
@@ -16027,7 +16027,7 @@ Versión de la App: {APP_VERSION}
     
     def crear_fila_asociacion(self, asoc):
         """Crea una fila visual para una asociación."""
-        row_frame = ctk.CTkFrame(self.asociaciones_list_frame, fg_color="#1a1a1a")
+        row_frame = ctk.CTkFrame(self.asociaciones_list_frame)
         row_frame.pack(fill="x", padx=5, pady=2)
         
         # Código RMA
