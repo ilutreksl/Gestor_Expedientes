@@ -2828,6 +2828,29 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     print(f"Params: {params}")
                     raise
             
+                # Obtener asociaciones en una sola consulta optimizada (bidireccional)
+                asociaciones_dict = {}
+                try:
+                    cursor.execute("""
+                        SELECT a.rma_id as rma_principal, r.codigo_rma
+                        FROM rma_asociaciones a
+                        INNER JOIN rma_maestro r ON r.id = a.rma_asociado_id
+                        UNION
+                        SELECT a.rma_asociado_id as rma_principal, r.codigo_rma
+                        FROM rma_asociaciones a
+                        INNER JOIN rma_maestro r ON r.id = a.rma_id
+                    """)
+                    
+                    for row in cursor.fetchall():
+                        rma_principal_id = row[0]
+                        codigo_asociado = row[1]
+                        if rma_principal_id not in asociaciones_dict:
+                            asociaciones_dict[rma_principal_id] = []
+                        asociaciones_dict[rma_principal_id].append(codigo_asociado)
+                except Exception as e:
+                    print(f"Error cargando asociaciones: {e}")
+                    asociaciones_dict = {}
+                
                 conn.close()
 
                 # 3. Dibujar la tabla de resultados (Encabezados y Registros)
@@ -2838,21 +2861,23 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 header_font = ctk.CTkFont(weight="bold")
                 # Configurar anchos de columnas para mejor distribución
                 self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
-                self.lista_rma_frame.grid_columnconfigure(1, weight=2, minsize=200)  # CLIENTE (reducido)
-                self.lista_rma_frame.grid_columnconfigure(2, weight=1, minsize=150)  # DOCUMENTO
-                self.lista_rma_frame.grid_columnconfigure(3, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
-                self.lista_rma_frame.grid_columnconfigure(4, weight=1, minsize=180)  # ESTADO (ampliado)
-                self.lista_rma_frame.grid_columnconfigure(5, weight=0, minsize=110)  # FECHA EMISIÓN
+                self.lista_rma_frame.grid_columnconfigure(1, weight=0)               # ASOCIACIÓN (icono - sin minsize)
+                self.lista_rma_frame.grid_columnconfigure(2, weight=2, minsize=200)  # CLIENTE (reducido)
+                self.lista_rma_frame.grid_columnconfigure(3, weight=1, minsize=150)  # DOCUMENTO
+                self.lista_rma_frame.grid_columnconfigure(4, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
+                self.lista_rma_frame.grid_columnconfigure(5, weight=1, minsize=180)  # ESTADO (ampliado)
+                self.lista_rma_frame.grid_columnconfigure(6, weight=0, minsize=110)  # FECHA EMISIÓN
             
                 ctk.CTkLabel(self.lista_rma_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-                ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
-                ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
-                ctk.CTkLabel(self.lista_rma_frame, text="ÚLTIMA ACTIVIDAD", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
-                ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
-                ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w")
+                # Columna 1 sin encabezado (para el icono de asociación)
+                ctk.CTkLabel(self.lista_rma_frame, text="CLIENTE", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="DOCUMENTO DE CLIENTE", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="ÚLTIMA ACTIVIDAD", font=header_font).grid(row=0, column=4, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="ESTADO", font=header_font).grid(row=0, column=5, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(self.lista_rma_frame, text="FECHA EMISIÓN", font=header_font).grid(row=0, column=6, padx=5, pady=5, sticky="w")
                 # Eliminada columna 'ACCIONES' para usar doble clic en la fila
                 if not registros:
-                    ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
+                    ctk.CTkLabel(self.lista_rma_frame, text="No se encontraron expedientes con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=7, padx=10, pady=20)
                     return
 
                 # Registros (filas) - usar fondo por defecto del tema (sin cebra)
@@ -2897,40 +2922,56 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         actions_bg = colors[0]
 
                     f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height, width=22)
                     f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f5 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
+                    f6 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
 
                     # Colocar cada columna en la grilla principal para que se alinee con encabezados
                     f0.grid(row=row, column=0, sticky="nsew", padx=0, pady=0)
-                    f1.grid(row=row, column=1, sticky="nsew", padx=0, pady=0)
+                    f1.grid(row=row, column=1, sticky="ns", padx=0, pady=0)  # Sin expandir horizontalmente
+                    f1.grid_propagate(False)  # Evitar que el frame se expanda
                     f2.grid(row=row, column=2, sticky="nsew", padx=0, pady=0)
                     f3.grid(row=row, column=3, sticky="nsew", padx=0, pady=0)
                     f4.grid(row=row, column=4, sticky="nsew", padx=0, pady=0)
                     f5.grid(row=row, column=5, sticky="nsew", padx=0, pady=0)
+                    f6.grid(row=row, column=6, sticky="nsew", padx=0, pady=0)
 
                     # Contenido de cada columna con padding muy reducido para filas más finas
                     # Crear labels y mantener referencias para enlazar eventos (doble click)
                     lbl0 = ctk.CTkLabel(f0, text=codigo_rma)
                     lbl0.pack(anchor="w", padx=4, pady=0)
-                    lbl1 = ctk.CTkLabel(f1, text=cliente)
-                    lbl1.pack(anchor="w", padx=4, pady=0)
-                    lbl2 = ctk.CTkLabel(f2, text=numero_documento_cliente)
+                    
+                    # Columna de asociación (icono)
+                    lbl1 = None
+                    if rma_id in asociaciones_dict:
+                        codigos_asociados = asociaciones_dict[rma_id]
+                        lbl1 = ctk.CTkLabel(f1, text="🔗", cursor="hand2")
+                        lbl1.pack(anchor="center", padx=0, pady=0)
+                        # Crear tooltip con la lista de RMAs asociados
+                        tooltip_text = "Asociado a: " + ", ".join(codigos_asociados)
+                        Tooltip(lbl1, tooltip_text)
+                        # Al hacer clic, abrir ventana con asociaciones
+                        lbl1.bind("<Button-1>", lambda e, rid=rma_id: self.mostrar_ventana_asociaciones(rid))
+                    
+                    lbl2 = ctk.CTkLabel(f2, text=cliente)
                     lbl2.pack(anchor="w", padx=4, pady=0)
-                    lbl3 = ctk.CTkLabel(f3, text=ultima_actividad)
+                    lbl3 = ctk.CTkLabel(f3, text=numero_documento_cliente)
                     lbl3.pack(anchor="w", padx=4, pady=0)
-                    lbl4 = ctk.CTkLabel(f4, text=estado, text_color=color)
+                    lbl4 = ctk.CTkLabel(f4, text=ultima_actividad)
                     lbl4.pack(anchor="w", padx=4, pady=0)
-                    lbl5 = ctk.CTkLabel(f5, text=fecha_emision)
+                    lbl5 = ctk.CTkLabel(f5, text=estado, text_color=color)
                     lbl5.pack(anchor="w", padx=4, pady=0)
+                    lbl6 = ctk.CTkLabel(f6, text=fecha_emision)
+                    lbl6.pack(anchor="w", padx=4, pady=0)
                     # En lugar de botón de editar, abrimos el editor con doble clic en cualquier columna de la fila
 
                     # Hover efectos para toda la fila: aplicar a cada columna
-                    cols = [f0, f1, f2, f3, f4, f5]
+                    cols = [f0, f1, f2, f3, f4, f5, f6]
                     # Guardar el color original por columna para restaurarlo correctamente
-                    originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
+                    originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
 
                     def _on_enter(e, cols=cols):
                         for rf in cols:
@@ -2947,7 +2988,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                 pass
 
                     # También enlazamos los labels internos para asegurar que capturan el doble click
-                    inner_widgets = [lbl0, lbl1, lbl2, lbl3, lbl4, lbl5]
+                    inner_widgets = [lbl0, lbl2, lbl3, lbl4, lbl5, lbl6]  # No incluir lbl1 si tiene evento de asociación
+                    if lbl1 is None:  # Si no hay icono de asociación, agregar el label vacío para hover
+                        inner_widgets.append(lbl1)
 
                     for rf in cols:
                         rf.bind("<Enter>", _on_enter)
@@ -2960,19 +3003,20 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
                     # Enlazar eventos a labels (algunas platforms capturan el evento en el label)
                     for w in inner_widgets:
-                        try:
-                            w.configure(cursor="hand2")
-                        except Exception:
-                            pass
-                        try:
-                            w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
-                        except Exception:
-                            pass
+                        if w is not None:
+                            try:
+                                w.configure(cursor="hand2")
+                            except Exception:
+                                pass
+                            try:
+                                w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
+                            except Exception:
+                                pass
             
         except Exception as e:
             print(f"Error al cargar lista de RMA: {e}")
             if conn: conn.close()
-            ctk.CTkLabel(self.lista_rma_frame, text=f"Error al cargar la lista: {e}").grid(row=1, column=0, columnspan=6, padx=10, pady=20)
+            ctk.CTkLabel(self.lista_rma_frame, text=f"Error al cargar la lista: {e}").grid(row=1, column=0, columnspan=7, padx=10, pady=20)
 
     def crear_copia_seguridad_db(self):
         """
@@ -16300,6 +16344,104 @@ Versión de la App: {APP_VERSION}
         except Exception as e:
             logger.error(f"Error al desasociar expedientes: {e}")
             messagebox.showerror("Error", f"Error inesperado: {str(e)}")
+    
+    def mostrar_ventana_asociaciones(self, rma_id):
+        """Muestra una ventana emergente con todas las asociaciones del expediente."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                messagebox.showerror("Error", "No se pudo conectar a la base de datos")
+                return
+            
+            # Obtener información del RMA principal
+            cursor.execute("SELECT codigo_rma, cliente FROM rma_maestro WHERE id = ?", (rma_id,))
+            rma_info = cursor.fetchone()
+            if not rma_info:
+                conn.close()
+                messagebox.showerror("Error", "No se encontró el expediente")
+                return
+            
+            codigo_rma, nombre_cliente = rma_info
+            
+            # Obtener asociaciones
+            asociaciones = rma_asociaciones.obtener_asociaciones(rma_id, conn)
+            conn.close()
+            
+            if not asociaciones:
+                messagebox.showinfo("Sin Asociaciones", 
+                                  f"El expediente {codigo_rma} no tiene asociaciones.")
+                return
+            
+            # Crear ventana emergente
+            dlg = ctk.CTkToplevel(self)
+            dlg.title(f"Asociaciones de {codigo_rma}")
+            dlg.geometry("650x400")
+            dlg.grab_set()
+            
+            # Encabezado
+            header_frame = ctk.CTkFrame(dlg)
+            header_frame.pack(fill="x", padx=15, pady=15)
+            
+            ctk.CTkLabel(header_frame, 
+                        text=f"Expedientes asociados a: {codigo_rma}",
+                        font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w")
+            
+            ctk.CTkLabel(header_frame, 
+                        text=f"Cliente: {nombre_cliente}",
+                        font=ctk.CTkFont(size=11),
+                        text_color="gray").pack(anchor="w", pady=(2, 0))
+            
+            # Frame scrollable para la lista
+            lista_frame = ctk.CTkScrollableFrame(dlg, label_text=f"Total: {len(asociaciones)} asociación(es)")
+            lista_frame.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+            
+            # Configurar columnas de la grilla
+            lista_frame.grid_columnconfigure(0, weight=1, minsize=120)  # Código RMA
+            lista_frame.grid_columnconfigure(1, weight=2, minsize=200)  # Cliente
+            lista_frame.grid_columnconfigure(2, weight=1, minsize=150)  # Estado
+            lista_frame.grid_columnconfigure(3, weight=0, minsize=80)   # Botón Abrir
+            
+            # Encabezados
+            header_font = ctk.CTkFont(weight="bold", size=11)
+            ctk.CTkLabel(lista_frame, text="CÓDIGO RMA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(lista_frame, text="CLIENTE", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(lista_frame, text="ESTADO", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(lista_frame, text="", font=header_font).grid(row=0, column=3, padx=5, pady=5, sticky="w")
+            
+            # Listar asociaciones
+            for idx, asoc in enumerate(asociaciones, start=1):
+                row_frame = ctk.CTkFrame(lista_frame, fg_color="transparent")
+                row_frame.grid(row=idx, column=0, columnspan=4, sticky="ew", padx=2, pady=2)
+                row_frame.grid_columnconfigure(0, weight=1, minsize=120)
+                row_frame.grid_columnconfigure(1, weight=2, minsize=200)
+                row_frame.grid_columnconfigure(2, weight=1, minsize=150)
+                row_frame.grid_columnconfigure(3, weight=0, minsize=80)
+                
+                # Datos
+                ctk.CTkLabel(row_frame, text=asoc['codigo_rma'], anchor="w").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+                ctk.CTkLabel(row_frame, text=asoc['nombre_cliente'], anchor="w").grid(row=0, column=1, padx=5, pady=5, sticky="w")
+                
+                # Estado con color
+                color_estado = self.get_color_por_estado(asoc['estado_expediente'])
+                ctk.CTkLabel(row_frame, text=asoc['estado_expediente'], 
+                           text_color=color_estado, anchor="w").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+                
+                # Botón abrir
+                btn_abrir = ctk.CTkButton(row_frame, text="👁 Abrir", width=70,
+                                         command=lambda aid=asoc['rma_id']: self.abrir_rma_asociado_desde_ventana(aid, dlg))
+                btn_abrir.grid(row=0, column=3, padx=5, pady=2)
+            
+            # Botón cerrar
+            ctk.CTkButton(dlg, text="Cerrar", command=dlg.destroy).pack(pady=(0, 15))
+            
+        except Exception as e:
+            logger.error(f"Error al mostrar ventana de asociaciones: {e}")
+            messagebox.showerror("Error", f"Error al cargar asociaciones: {str(e)}")
+    
+    def abrir_rma_asociado_desde_ventana(self, rma_asociado_id, ventana_padre):
+        """Abre un expediente asociado en una nueva ventana independiente desde la ventana de asociaciones."""
+        ventana_padre.destroy()  # Cerrar la ventana de asociaciones primero
+        self.abrir_rma_asociado(rma_asociado_id)  # Luego abrir el expediente
     
     def cargar_estadisticas_cliente(self, cliente_id):
         """Carga las estadísticas del cliente con filtros aplicados."""
