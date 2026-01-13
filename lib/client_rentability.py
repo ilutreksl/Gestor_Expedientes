@@ -160,7 +160,7 @@ def mostrar_rentabilidad_clientes(app):
         where_clause, params = construir_where_and_params()
         # Subconsulta que calcula el total por expediente a partir de rma_detalles
         sub_calc = (
-            "(SELECT rma_id, SUM(COALESCE(cantidad_entregada,0) * COALESCE(precio_unitario,0)) as calc_total "
+            "(SELECT rma_id, SUM(COALESCE(cantidad_entregada,0) * COALESCE(precio_final, precio_unitario,0)) as calc_total "
             "FROM rma_detalles GROUP BY rma_id) AS calc"
         )
 

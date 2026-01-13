@@ -24,7 +24,7 @@ def calcular_estadisticas_basicas_cliente(nombre_cliente, conn):
     cursor.execute("""
         SELECT 
             COUNT(DISTINCT m.id) as total_expedientes,
-            SUM(COALESCE(d.cantidad_entregada, 0) * COALESCE(d.precio_unitario, 0)) as coste_total,
+            SUM(COALESCE(d.cantidad_entregada, 0) * COALESCE(d.precio_final, d.precio_unitario, 0)) as coste_total,
             COUNT(DISTINCT CASE WHEN m.estado = 'Completado' THEN m.id END) as expedientes_completados,
             COUNT(DISTINCT CASE WHEN m.resultado_expediente LIKE '%ABONAR%' AND m.resultado_expediente NOT LIKE '%NO ABONAR%' THEN m.id END) as total_abonos
         FROM rma_maestro m
@@ -101,7 +101,7 @@ def obtener_estadisticas_detalladas_cliente(nombre_cliente, conn, fecha_desde=No
             m.estado,
             m.resultado_expediente,
             COUNT(d.id) as num_articulos,
-            SUM(d.cantidad_entregada * d.precio_unitario) as coste_expediente,
+            SUM(d.cantidad_entregada * COALESCE(d.precio_final, d.precio_unitario)) as coste_expediente,
             MAX(CASE 
                 WHEN d.estado_producto IN ('NO FUNCIONA, ABONAR', 'NO FUNCIONA ; NO ABONAR', 
                                   'REPOSICION FALLO PRODUCTO', 'REPOSICION ; ABONAR',

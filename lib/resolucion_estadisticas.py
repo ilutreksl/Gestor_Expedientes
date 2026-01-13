@@ -195,7 +195,7 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                     m.resultado_expediente,
                     m.id,
                     COUNT(d.id) as num_articulos,
-                    SUM(d.cantidad_entregada * d.precio_unitario) as coste_total,
+                    SUM(d.cantidad_entregada * COALESCE(d.precio_final, d.precio_unitario)) as coste_total,
                     MAX(CASE 
                         WHEN d.estado_producto IN ('NO FUNCIONA, ABONAR', 'NO FUNCIONA ; NO ABONAR', 
                                           'REPOSICION FALLO PRODUCTO', 'REPOSICION ; ABONAR',

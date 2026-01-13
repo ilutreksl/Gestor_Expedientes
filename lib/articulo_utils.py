@@ -200,7 +200,7 @@ class VentanaEstadosArticulo(ctk.CTkToplevel):
             sql = """
                 SELECT COALESCE(rd.estado_producto, 'Sin estado') as estado,
                        SUM(COALESCE(rd.cantidad_entregada, 0)) as total_cantidad,
-                       SUM(COALESCE(rd.cantidad_entregada, 0) * COALESCE(rd.precio_unitario, 0)) as total_euros
+                       SUM(COALESCE(rd.cantidad_entregada, 0) * COALESCE(rd.precio_final, rd.precio_unitario, 0)) as total_euros
                 FROM rma_detalles rd
                 LEFT JOIN rma_maestro rm ON rd.rma_id = rm.id
                 WHERE rd.referencia_articulo = ?

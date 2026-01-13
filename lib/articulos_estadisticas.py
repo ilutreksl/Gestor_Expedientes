@@ -141,7 +141,7 @@ def mostrar_estadisticas_articulos(ventana_principal):
                 d.referencia_articulo,
                 d.estado_producto,
                 SUM(d.cantidad_entregada) as cantidad_total,
-                AVG(d.precio_unitario) as precio_promedio,
+                AVG(COALESCE(d.precio_final, d.precio_unitario)) as precio_promedio,
                 COUNT(DISTINCT m.codigo_rma) as num_expedientes,
                 m.resultado_expediente
             FROM rma_detalles d

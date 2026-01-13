@@ -5976,7 +5976,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 else:
                     cantidad = float(cantidad)
 
-                precio = item.get('precio_unitario', 0.0) or 0.0
+                # Usar precio_final si existe, sino precio_unitario como fallback
+                precio = item.get('precio_final', None)
+                if precio is None or precio == '' or precio == 0:
+                    precio = item.get('precio_unitario', 0.0) or 0.0
+                
                 if isinstance(precio, str):
                     precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
                 else:
@@ -6335,8 +6339,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 else:
                     cantidad = float(cantidad)
                 
-                # Convertir precio_unitario a float de forma segura
-                precio = item.get('precio_unitario', 0.0)
+                # Usar precio_final si existe, sino precio_unitario como fallback
+                precio = item.get('precio_final', None)
+                if precio is None or precio == '' or precio == 0:
+                    precio = item.get('precio_unitario', 0.0)
+                
                 if isinstance(precio, str):
                     precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
                 elif precio is None:
@@ -7380,7 +7387,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                             else:
                                 cantidad = float(cantidad)
 
-                            precio = item.get('precio_unitario', 0.0) or 0.0
+                            # Usar precio_final si existe, sino precio_unitario como fallback
+                            precio = item.get('precio_final', None)
+                            if precio is None or precio == '' or precio == 0:
+                                precio = item.get('precio_unitario', 0.0) or 0.0
+                            
                             if isinstance(precio, str):
                                 precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
                             else:
