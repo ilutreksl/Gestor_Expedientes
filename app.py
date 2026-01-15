@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.10"
+APP_VERSION = "v1.0.11"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2694,6 +2694,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Limpiar el frame (siempre)
         for widget in self.lista_rma_frame.winfo_children():
             widget.destroy()
+        
+        # Resetear selección
+        self.fila_seleccionada_rma = None
+        self.frames_seleccionados_rma = []
 
         conn, cursor = self.master.conectar_db()
         if not conn: 
@@ -2973,19 +2977,60 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     # Guardar el color original por columna para restaurarlo correctamente
                     originals = ["transparent", "transparent", "transparent", "transparent", "transparent", "transparent", "transparent"]
 
-                    def _on_enter(e, cols=cols):
+                    # Función para seleccionar fila con clic simple
+                    def _seleccionar_fila(e, cols=cols, row_id=rma_id):
+                        # Deseleccionar fila anterior
+                        if hasattr(self, 'frames_seleccionados_rma') and self.frames_seleccionados_rma:
+                            for frame_anterior in self.frames_seleccionados_rma:
+                                try:
+                                    frame_anterior.configure(fg_color="transparent")
+                                except Exception:
+                                    pass
+                        
+                        # Obtener color de selección del tema
+                        try:
+                            modo = ctk.get_appearance_mode()
+                            color_seleccion = ("#D6EAF8" if modo == "Light" else "#2C5F8D")
+                        except Exception:
+                            color_seleccion = "#D6EAF8"
+                        
+                        # Seleccionar nueva fila
                         for rf in cols:
                             try:
-                                rf.configure(fg_color="transparent")
+                                # El frame del icono mantiene su tamaño fijo
+                                if rf == cols[1]:  # f1 (icono)
+                                    rf.configure(fg_color=color_seleccion)
+                                else:
+                                    rf.configure(fg_color=color_seleccion)
                             except Exception:
                                 pass
+                        
+                        # Guardar referencia a la fila seleccionada
+                        self.fila_seleccionada_rma = row_id
+                        self.frames_seleccionados_rma = cols
+
+                    def _on_enter(e, cols=cols):
+                        # Solo aplicar hover si no está seleccionada
+                        if not hasattr(self, 'fila_seleccionada_rma') or self.fila_seleccionada_rma != rma_id:
+                            try:
+                                modo = ctk.get_appearance_mode()
+                                hover_color = ("#F5F5F5" if modo == "Light" else "#2B2B2B")
+                            except Exception:
+                                hover_color = "#F5F5F5"
+                            for rf in cols:
+                                try:
+                                    rf.configure(fg_color=hover_color)
+                                except Exception:
+                                    pass
 
                     def _on_leave(e, cols=cols, originals=originals):
-                        for idx, rf in enumerate(cols):
-                            try:
-                                rf.configure(fg_color=originals[idx])
-                            except Exception:
-                                pass
+                        # Solo restaurar si no está seleccionada
+                        if not hasattr(self, 'fila_seleccionada_rma') or self.fila_seleccionada_rma != rma_id:
+                            for idx, rf in enumerate(cols):
+                                try:
+                                    rf.configure(fg_color=originals[idx])
+                                except Exception:
+                                    pass
 
                     # También enlazamos los labels internos para asegurar que capturan el doble click
                     inner_widgets = [lbl0, lbl2, lbl3, lbl4, lbl5, lbl6]  # No incluir lbl1 si tiene evento de asociación
@@ -2995,6 +3040,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     for rf in cols:
                         rf.bind("<Enter>", _on_enter)
                         rf.bind("<Leave>", _on_leave)
+                        rf.bind("<Button-1>", _seleccionar_fila)  # Clic simple para seleccionar
+                        rf.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))  # Doble clic para abrir
                         # Mostrar cursor 'hand2' para indicar que la fila es clicable
                         try:
                             rf.configure(cursor="hand2")
@@ -3009,7 +3056,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             except Exception:
                                 pass
                             try:
-                                w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))
+                                w.bind("<Button-1>", _seleccionar_fila)  # Clic simple para seleccionar
+                                w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))  # Doble clic para abrir
                             except Exception:
                                 pass
             
@@ -5907,6 +5955,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
         """Redibuja la tabla con los artículos de la lista temporal."""
         for widget in self.articulos_list_frame.winfo_children():
             widget.destroy()
+        
+        # Resetear selección
+        self.fila_seleccionada_articulo = None
+        self.frames_seleccionados_articulo = []
             
         if not self.articulos_data:
             ctk.CTkLabel(self.articulos_list_frame, text="No hay artículos asociados a este RMA.", text_color="gray").pack(pady=10)
@@ -5931,27 +5983,46 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Filas: colocar directamente labels en la grilla del contenedor para mantener columnas alineadas
         for i, item in enumerate(self.articulos_data):
             row = i + 1
+            idx = i  # Guardar índice para eventos
+            
             try:
-                ctk.CTkLabel(self.articulos_list_frame, text=item["referencia_articulo"]).grid(row=row, column=0, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(self.articulos_list_frame, text=item["cantidad_segun_documento"]).grid(row=row, column=1, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(self.articulos_list_frame, text=item["cantidad_entregada"]).grid(row=row, column=2, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(self.articulos_list_frame, text=item["estado_producto"]).grid(row=row, column=3, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(self.articulos_list_frame, text=f"{item['precio_unitario']:.2f} €").grid(row=row, column=4, padx=5, pady=2, sticky="w")
+                # Crear frames para cada columna (excepto acciones)
+                frames_fila = []
+                for col in range(8):  # Columnas 0-7 (sin acciones)
+                    f = ctk.CTkFrame(self.articulos_list_frame, fg_color="transparent")
+                    f.grid(row=row, column=col, sticky="ew", padx=0, pady=0)
+                    frames_fila.append(f)
                 
-                # Mostrar precio final
+                # Labels dentro de los frames
+                lbl_ref = ctk.CTkLabel(frames_fila[0], text=item["referencia_articulo"])
+                lbl_ref.pack(anchor="w", padx=5, pady=2)
+                
+                lbl_cant_doc = ctk.CTkLabel(frames_fila[1], text=item["cantidad_segun_documento"])
+                lbl_cant_doc.pack(anchor="w", padx=5, pady=2)
+                
+                lbl_cant_ent = ctk.CTkLabel(frames_fila[2], text=item["cantidad_entregada"])
+                lbl_cant_ent.pack(anchor="w", padx=5, pady=2)
+                
+                lbl_estado = ctk.CTkLabel(frames_fila[3], text=item["estado_producto"])
+                lbl_estado.pack(anchor="w", padx=5, pady=2)
+                
+                lbl_precio_unit = ctk.CTkLabel(frames_fila[4], text=f"{item['precio_unitario']:.2f} €")
+                lbl_precio_unit.pack(anchor="w", padx=5, pady=2)
+                
                 precio_final = item.get("precio_final", item.get("precio_unitario", 0.0))
-                ctk.CTkLabel(self.articulos_list_frame, text=f"{precio_final:.2f} €").grid(row=row, column=5, padx=5, pady=2, sticky="w")
+                lbl_precio_final = ctk.CTkLabel(frames_fila[5], text=f"{precio_final:.2f} €")
+                lbl_precio_final.pack(anchor="w", padx=5, pady=2)
                 
-                # Mostrar depreciación
                 deprec_text = "✓" if item.get("depreciacion", 0) == 1 else "-"
-                ctk.CTkLabel(self.articulos_list_frame, text=deprec_text).grid(row=row, column=6, padx=5, pady=2, sticky="w")
+                lbl_deprec = ctk.CTkLabel(frames_fila[6], text=deprec_text)
+                lbl_deprec.pack(anchor="w", padx=5, pady=2)
                 
-                # Mostrar porcentaje
                 porcentaje = item.get("porcentaje_depreciacion", 0.0)
                 porcentaje_text = f"{porcentaje}%" if item.get("depreciacion", 0) == 1 else "-"
-                ctk.CTkLabel(self.articulos_list_frame, text=porcentaje_text).grid(row=row, column=7, padx=5, pady=2, sticky="w")
+                lbl_porc = ctk.CTkLabel(frames_fila[7], text=porcentaje_text)
+                lbl_porc.pack(anchor="w", padx=5, pady=2)
 
-                # Acciones: Eliminar y Editar
+                # Acciones: Eliminar y Editar (sin eventos de selección)
                 ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
                               command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=8, padx=5, pady=2, sticky="w")
                 try:
@@ -5959,6 +6030,67 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                   command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=9, padx=2, pady=2, sticky="w")
                 except Exception:
                     pass
+                
+                # Eventos de selección
+                labels_fila = [lbl_ref, lbl_cant_doc, lbl_cant_ent, lbl_estado, lbl_precio_unit, lbl_precio_final, lbl_deprec, lbl_porc]
+                
+                def _seleccionar_articulo(e, frames=frames_fila, idx_art=idx):
+                    if hasattr(self, 'frames_seleccionados_articulo') and self.frames_seleccionados_articulo:
+                        for f in self.frames_seleccionados_articulo:
+                            try:
+                                f.configure(fg_color="transparent")
+                            except:
+                                pass
+                    
+                    try:
+                        modo = ctk.get_appearance_mode()
+                        color_sel = ("#D6EAF8" if modo == "Light" else "#2C5F8D")
+                    except:
+                        color_sel = "#D6EAF8"
+                    
+                    for f in frames:
+                        try:
+                            f.configure(fg_color=color_sel)
+                        except:
+                            pass
+                    
+                    self.fila_seleccionada_articulo = idx_art
+                    self.frames_seleccionados_articulo = frames
+                
+                def _on_enter_art(e, frames=frames_fila, idx_art=idx):
+                    if not hasattr(self, 'fila_seleccionada_articulo') or self.fila_seleccionada_articulo != idx_art:
+                        try:
+                            modo = ctk.get_appearance_mode()
+                            hover_color = ("#F5F5F5" if modo == "Light" else "#2B2B2B")
+                        except:
+                            hover_color = "#F5F5F5"
+                        for f in frames:
+                            try:
+                                f.configure(fg_color=hover_color)
+                            except:
+                                pass
+                
+                def _on_leave_art(e, frames=frames_fila, idx_art=idx):
+                    if not hasattr(self, 'fila_seleccionada_articulo') or self.fila_seleccionada_articulo != idx_art:
+                        for f in frames:
+                            try:
+                                f.configure(fg_color="transparent")
+                            except:
+                                pass
+                
+                # Bind a frames y labels
+                for f in frames_fila:
+                    f.bind("<Button-1>", _seleccionar_articulo)
+                    f.bind("<Double-Button-1>", lambda e, idx_art=idx: self.editar_articulo(idx_art))
+                    f.bind("<Enter>", _on_enter_art)
+                    f.bind("<Leave>", _on_leave_art)
+                    f.configure(cursor="hand2")
+                
+                for lbl in labels_fila:
+                    lbl.bind("<Button-1>", _seleccionar_articulo)
+                    lbl.bind("<Double-Button-1>", lambda e, idx_art=idx: self.editar_articulo(idx_art))
+                    lbl.configure(cursor="hand2")
+                
             except Exception:
                 # Silenciar errores de renderizado individual para no romper toda la lista
                 pass
@@ -14835,10 +14967,14 @@ Versión de la App: {APP_VERSION}
                 fecha = manager.formatear_fecha(archivo['uploadTimestamp'])
                 ubicacion = "Archivo/" if archivo['fileName'].startswith("Archivo/") else "Raíz"
                 
-                ctk.CTkLabel(fila, text=nombre, width=350, anchor="w").pack(side="left", padx=10, pady=5)
-                ctk.CTkLabel(fila, text=tamaño, width=100, anchor="w").pack(side="left", padx=5, pady=5)
-                ctk.CTkLabel(fila, text=fecha, width=150, anchor="w").pack(side="left", padx=5, pady=5)
-                ctk.CTkLabel(fila, text=ubicacion, width=100, anchor="w").pack(side="left", padx=5, pady=5)
+                lbl_nombre = ctk.CTkLabel(fila, text=nombre, width=350, anchor="w")
+                lbl_nombre.pack(side="left", padx=10, pady=5)
+                lbl_tamano = ctk.CTkLabel(fila, text=tamaño, width=100, anchor="w")
+                lbl_tamano.pack(side="left", padx=5, pady=5)
+                lbl_fecha = ctk.CTkLabel(fila, text=fecha, width=150, anchor="w")
+                lbl_fecha.pack(side="left", padx=5, pady=5)
+                lbl_ubicacion = ctk.CTkLabel(fila, text=ubicacion, width=100, anchor="w")
+                lbl_ubicacion.pack(side="left", padx=5, pady=5)
                 
                 # Botones de acción
                 acciones_frame = ctk.CTkFrame(fila, fg_color="transparent")
@@ -14860,6 +14996,48 @@ Versión de la App: {APP_VERSION}
                                             command=lambda: eliminar_archivo(archivo))
                 btn_eliminar.pack(side="left", padx=2)
                 Tooltip(btn_eliminar, "Eliminar permanentemente este archivo de Backblaze B2")
+                
+                # Eventos de selección
+                file_id = archivo['fileId']
+                
+                def _seleccionar_backup(e):
+                    if hasattr(ventana, 'fila_seleccionada_backup') and hasattr(ventana, 'frame_seleccionado_backup'):
+                        try:
+                            ventana.frame_seleccionado_backup.configure(fg_color=("gray90", "gray20"))
+                        except:
+                            pass
+                    
+                    try:
+                        modo = ctk.get_appearance_mode()
+                        color_sel = ("#D6EAF8" if modo == "Light" else "#2C5F8D")
+                    except:
+                        color_sel = "#D6EAF8"
+                    
+                    fila.configure(fg_color=color_sel)
+                    ventana.fila_seleccionada_backup = file_id
+                    ventana.frame_seleccionado_backup = fila
+                
+                def _on_enter_backup(e):
+                    if not hasattr(ventana, 'fila_seleccionada_backup') or ventana.fila_seleccionada_backup != file_id:
+                        try:
+                            modo = ctk.get_appearance_mode()
+                            hover_color = ("#F5F5F5" if modo == "Light" else "#2B2B2B")
+                        except:
+                            hover_color = "#F5F5F5"
+                        fila.configure(fg_color=hover_color)
+                
+                def _on_leave_backup(e):
+                    if not hasattr(ventana, 'fila_seleccionada_backup') or ventana.fila_seleccionada_backup != file_id:
+                        fila.configure(fg_color=("gray90", "gray20"))
+                
+                fila.bind("<Button-1>", _seleccionar_backup)
+                fila.bind("<Enter>", _on_enter_backup)
+                fila.bind("<Leave>", _on_leave_backup)
+                fila.configure(cursor="hand2")
+                
+                for lbl in [lbl_nombre, lbl_tamano, lbl_fecha, lbl_ubicacion]:
+                    lbl.bind("<Button-1>", _seleccionar_backup)
+                    lbl.configure(cursor="hand2")
             
             def descargar_archivo(archivo):
                 """Descarga un archivo de B2"""
@@ -15044,6 +15222,10 @@ Versión de la App: {APP_VERSION}
         for widget in self.clientes_frame.winfo_children():
             widget.destroy()
         
+        # Resetear selección
+        self.fila_seleccionada_cliente = None
+        self.frame_seleccionado_cliente = None
+        
         try:
             conn, cursor = self.master.conectar_db()
             if not conn: 
@@ -15165,6 +15347,54 @@ Versión de la App: {APP_VERSION}
         stats_label = ctk.CTkLabel(stats_frame, text=stats_text, 
                                  font=ctk.CTkFont(size=9), text_color="gray")
         stats_label.pack(side="left")
+        
+        # Implementar selección con clic simple
+        def _seleccionar_cliente(e):
+            # Deseleccionar cliente anterior
+            if hasattr(self, 'frame_seleccionado_cliente') and self.frame_seleccionado_cliente:
+                try:
+                    self.frame_seleccionado_cliente.configure(fg_color="transparent")
+                except Exception:
+                    pass
+            
+            # Obtener color de selección
+            try:
+                modo = ctk.get_appearance_mode()
+                color_seleccion = ("#D6EAF8" if modo == "Light" else "#2C5F8D")
+            except Exception:
+                color_seleccion = "#D6EAF8"
+            
+            # Seleccionar nuevo cliente
+            cliente_frame.configure(fg_color=color_seleccion)
+            
+            # Guardar referencia
+            self.fila_seleccionada_cliente = cliente_id
+            self.frame_seleccionado_cliente = cliente_frame
+        
+        def _on_enter_cliente(e):
+            if not hasattr(self, 'fila_seleccionada_cliente') or self.fila_seleccionada_cliente != cliente_id:
+                try:
+                    modo = ctk.get_appearance_mode()
+                    hover_color = ("#F5F5F5" if modo == "Light" else "#2B2B2B")
+                except Exception:
+                    hover_color = "#F5F5F5"
+                cliente_frame.configure(fg_color=hover_color)
+        
+        def _on_leave_cliente(e):
+            if not hasattr(self, 'fila_seleccionada_cliente') or self.fila_seleccionada_cliente != cliente_id:
+                cliente_frame.configure(fg_color="transparent")
+        
+        # Bind eventos
+        cliente_frame.bind("<Button-1>", _seleccionar_cliente)
+        cliente_frame.bind("<Double-Button-1>", lambda e: self.abrir_ficha_cliente(cliente_id))
+        cliente_frame.bind("<Enter>", _on_enter_cliente)
+        cliente_frame.bind("<Leave>", _on_leave_cliente)
+        cliente_frame.configure(cursor="hand2")
+        
+        # Bind a labels también
+        for lbl in [nombre_label, estado_label, stats_label]:
+            lbl.bind("<Button-1>", _seleccionar_cliente)
+            lbl.bind("<Double-Button-1>", lambda e: self.abrir_ficha_cliente(cliente_id))
     
     def filtrar_clientes(self, event=None):
         """Filtra la lista de clientes según los criterios de búsqueda."""
@@ -16066,6 +16296,10 @@ Versión de la App: {APP_VERSION}
         for widget in self.asociaciones_list_frame.winfo_children():
             widget.destroy()
         
+        # Resetear selección
+        self.fila_seleccionada_asoc = None
+        self.frame_seleccionado_asoc = None
+        
         if not hasattr(self, 'asociaciones_rma_id') or self.asociaciones_rma_id is None:
             ctk.CTkLabel(self.asociaciones_list_frame, 
                         text="No se puede cargar asociaciones",
@@ -16122,34 +16356,91 @@ Versión de la App: {APP_VERSION}
         row_frame.pack(fill="x", padx=5, pady=2)
         
         # Código RMA
-        ctk.CTkLabel(row_frame, text=asoc['codigo_rma'], width=120).pack(side="left", padx=5, pady=5)
+        lbl_codigo = ctk.CTkLabel(row_frame, text=asoc['codigo_rma'], width=120)
+        lbl_codigo.pack(side="left", padx=5, pady=5)
         
         # Cliente (truncado si es muy largo)
         cliente_texto = asoc['nombre_cliente'][:30] + "..." if len(asoc['nombre_cliente']) > 30 else asoc['nombre_cliente']
-        ctk.CTkLabel(row_frame, text=cliente_texto, width=250).pack(side="left", padx=5, pady=5)
+        lbl_cliente = ctk.CTkLabel(row_frame, text=cliente_texto, width=250)
+        lbl_cliente.pack(side="left", padx=5, pady=5)
         
         # Estado
-        ctk.CTkLabel(row_frame, text=asoc['estado_expediente'], width=120).pack(side="left", padx=5, pady=5)
+        lbl_estado = ctk.CTkLabel(row_frame, text=asoc['estado_expediente'], width=120)
+        lbl_estado.pack(side="left", padx=5, pady=5)
         
         # Motivo (truncado si es muy largo)
         motivo_texto = asoc['motivo'][:25] + "..." if len(asoc['motivo']) > 25 else asoc['motivo'] if asoc['motivo'] else "-"
-        ctk.CTkLabel(row_frame, text=motivo_texto, width=200).pack(side="left", padx=5, pady=5)
+        lbl_motivo = ctk.CTkLabel(row_frame, text=motivo_texto, width=200)
+        lbl_motivo.pack(side="left", padx=5, pady=5)
         
         # Botones de acciones
         acciones_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
         acciones_frame.pack(side="left", padx=5, pady=5)
         
-        ctk.CTkButton(acciones_frame, 
+        btn_ver = ctk.CTkButton(acciones_frame, 
                      text="👁️",
                      width=40,
-                     command=lambda: self.abrir_rma_asociado(asoc['rma_id'])).pack(side="left", padx=2)
+                     command=lambda: self.abrir_rma_asociado(asoc['rma_id']))
+        btn_ver.pack(side="left", padx=2)
         
-        ctk.CTkButton(acciones_frame, 
+        btn_eliminar = ctk.CTkButton(acciones_frame, 
                      text="❌",
                      width=40,
                      fg_color="darkred",
                      hover_color="red",
-                     command=lambda: self.desasociar_expediente(asoc['rma_id'])).pack(side="left", padx=2)
+                     command=lambda: self.desasociar_expediente(asoc['rma_id']))
+        btn_eliminar.pack(side="left", padx=2)
+        
+        # Implementar selección con clic simple
+        rma_id = asoc['rma_id']
+        
+        def _seleccionar_fila_asoc(e):
+            # Deseleccionar fila anterior
+            if hasattr(self, 'fila_seleccionada_asoc') and hasattr(self, 'frame_seleccionado_asoc'):
+                try:
+                    self.frame_seleccionado_asoc.configure(fg_color="transparent")
+                except Exception:
+                    pass
+            
+            # Obtener color de selección
+            try:
+                modo = ctk.get_appearance_mode()
+                color_seleccion = ("#D6EAF8" if modo == "Light" else "#2C5F8D")
+            except Exception:
+                color_seleccion = "#D6EAF8"
+            
+            # Seleccionar nueva fila
+            row_frame.configure(fg_color=color_seleccion)
+            
+            # Guardar referencia
+            self.fila_seleccionada_asoc = rma_id
+            self.frame_seleccionado_asoc = row_frame
+        
+        def _on_enter_asoc(e):
+            if not hasattr(self, 'fila_seleccionada_asoc') or self.fila_seleccionada_asoc != rma_id:
+                try:
+                    modo = ctk.get_appearance_mode()
+                    hover_color = ("#F5F5F5" if modo == "Light" else "#2B2B2B")
+                except Exception:
+                    hover_color = "#F5F5F5"
+                row_frame.configure(fg_color=hover_color)
+        
+        def _on_leave_asoc(e):
+            if not hasattr(self, 'fila_seleccionada_asoc') or self.fila_seleccionada_asoc != rma_id:
+                row_frame.configure(fg_color="transparent")
+        
+        # Bind eventos
+        row_frame.bind("<Button-1>", _seleccionar_fila_asoc)
+        row_frame.bind("<Double-Button-1>", lambda e: self.abrir_rma_asociado(rma_id))
+        row_frame.bind("<Enter>", _on_enter_asoc)
+        row_frame.bind("<Leave>", _on_leave_asoc)
+        row_frame.configure(cursor="hand2")
+        
+        # Bind a labels también
+        for lbl in [lbl_codigo, lbl_cliente, lbl_estado, lbl_motivo]:
+            lbl.bind("<Button-1>", _seleccionar_fila_asoc)
+            lbl.bind("<Double-Button-1>", lambda e: self.abrir_rma_asociado(rma_id))
+            lbl.configure(cursor="hand2")
     
     def mostrar_dialogo_asociar_rma(self, rma_id):
         """Muestra un diálogo para buscar y asociar un expediente RMA."""
