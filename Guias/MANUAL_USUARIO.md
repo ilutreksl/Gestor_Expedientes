@@ -254,6 +254,97 @@ A veces varios expedientes están relacionados entre sí (ej: devolución múlti
 
 **Beneficio**: Los expedientes asociados muestran el icono 🔗 en la lista y puedes navegar entre ellos fácilmente.
 
+### Ver y Filtrar el Historial de Cambios
+
+Cada expediente tiene un **historial completo** de todos los cambios realizados. La pestaña **"📜 Historial de Cambios"** te permite ver estos registros y filtrarlos para encontrar información específica.
+
+#### Acceder al historial
+
+1. Abre un expediente (botón ✏️ Editar o haciendo doble clic)
+2. Ve a la pestaña **"📜 Historial de Cambios"**
+3. Verás un panel de filtros en la parte superior
+
+#### Panel de filtros de búsqueda
+
+El historial incluye potentes filtros para encontrar cambios específicos:
+
+**🔍 Buscar en descripción:**
+- Campo de texto libre
+- Busca palabras o frases dentro de las descripciones de cambios
+- Ejemplo: escribe "estado" para ver todos los cambios de estado
+- No distingue mayúsculas/minúsculas
+
+**👤 Filtro por usuario:**
+- Desplegable con todos los usuarios que han modificado este expediente
+- Selecciona "Todos" para ver cambios de cualquier usuario
+- Selecciona un usuario específico para ver solo sus cambios
+
+**📅 Filtro por fechas:**
+- **Desde**: Fecha inicial (formato DD/MM/YYYY)
+- **Hasta**: Fecha final (formato DD/MM/YYYY)
+- Ejemplos:
+  - `01/01/2025` en "Desde" → cambios desde el 1 de enero
+  - `31/01/2025` en "Hasta" → cambios hasta el 31 de enero
+  - Ambos campos → cambios en ese rango
+
+**📝 Solo comentarios manuales:**
+- Checkbox para filtrar solo los comentarios añadidos manualmente
+- Los comentarios manuales son los que empiezan con "COMENTARIO MANUAL:"
+- Útil para ver solo notas específicas, excluyendo cambios automáticos
+
+#### Aplicar y limpiar filtros
+
+**🔍 Aplicar Filtros:**
+1. Configura los filtros que necesites
+2. Haz clic en el botón **"🔍 Aplicar Filtros"**
+3. La lista se actualizará mostrando solo los registros que coincidan
+
+**🗑️ Limpiar Filtros:**
+- Haz clic en **"🗑️ Limpiar Filtros"** para resetear todos los filtros
+- Esto muestra de nuevo el historial completo
+
+#### Interpretando el historial
+
+Cada registro muestra:
+- **FECHA/HORA**: Cuándo se realizó el cambio (más recientes primero)
+- **USUARIO**: Quién realizó la modificación
+- **DESCRIPCIÓN DEL CAMBIO**: Qué se modificó
+
+**Tipos de cambios registrados:**
+- ✅ Cambios de estado (ej: "Estado cambiado de 'Recibido' a 'Autorizado'")
+- 📝 Modificaciones de campos (ej: "Campo 'Motivo' actualizado a: Producto defectuoso")
+- 📦 Cambios en artículos (añadidos, editados, eliminados)
+- 💬 Comentarios manuales añadidos por usuarios
+- 🔗 Asociaciones creadas o eliminadas
+- 📧 Emails enviados
+- 📎 Archivos adjuntados
+
+#### Ejemplos prácticos de uso
+
+**Ejemplo 1: Ver quién autorizó un expediente**
+1. Filtro por usuario: "Todos"
+2. Buscar en descripción: "autorizado"
+3. Aplicar filtros
+4. Resultado: verás cuándo y quién cambió el estado a autorizado
+
+**Ejemplo 2: Ver comentarios del mes pasado**
+1. Fecha desde: 01/12/2024
+2. Fecha hasta: 31/12/2024
+3. Solo comentarios manuales: ✅
+4. Aplicar filtros
+5. Resultado: solo comentarios manuales de diciembre
+
+**Ejemplo 3: Ver todos los cambios de un usuario específico**
+1. Filtro por usuario: selecciona el nombre
+2. Aplicar filtros
+3. Resultado: historial completo de ese usuario en este expediente
+
+💡 **Consejos:**
+- Los filtros se pueden combinar para búsquedas muy específicas
+- El formato de fecha debe ser estricto: DD/MM/YYYY (ej: 05/02/2025)
+- Si no encuentras algo, prueba con palabras más cortas en la búsqueda
+- El historial NUNCA se puede editar ni eliminar (registro de auditoría)
+
 ---
 
 ## Gestión de Clientes

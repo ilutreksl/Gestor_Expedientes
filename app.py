@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.13"
+APP_VERSION = "v1.0.14"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7643,40 +7643,138 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 pass
     
     def mostrar_historial(self, parent_frame):
-        """Muestra la lista de registros de cambios para el RMA actual."""
+        """Muestra la lista de registros de cambios para el RMA actual con filtros de búsqueda."""
+        from lib.historial_filtros import obtener_historial_filtrado, obtener_usuarios_historial, validar_formato_fecha
         
-        # Destruye el 'historial_scroll_frame' anterior y todos sus hijos.
+        # Destruye el contenido anterior
         for widget in parent_frame.winfo_children():
             widget.destroy()
         
-        # Marco scrollable para contener la lista de eventos
-        historial_scroll_frame = ctk.CTkScrollableFrame(parent_frame, label_text="Detalle de Cambios en el Expediente")
-        historial_scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Frame principal contenedor
+        main_frame = ctk.CTkFrame(parent_frame)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Encabezados
-        header_font = ctk.CTkFont(weight="bold")
-        historial_scroll_frame.grid_columnconfigure(2, weight=1) # Descripción se expande
-        ctk.CTkLabel(historial_scroll_frame, text="FECHA/HORA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        ctk.CTkLabel(historial_scroll_frame, text="USUARIO", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        ctk.CTkLabel(historial_scroll_frame, text="DESCRIPCIÓN DEL CAMBIO", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        # ===== PANEL DE FILTROS =====
+        filtros_frame = ctk.CTkFrame(main_frame)
+        filtros_frame.pack(fill="x", padx=5, pady=5)
         
-        conn, cursor = self.master.conectar_db()
-        if not conn: return
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-                SELECT fecha_cambio, usuario, descripcion_cambio 
-                FROM rma_historial 
-                WHERE rma_id = ? 
-                ORDER BY id DESC
-            """, (self.rma_actual_id,))
+        # Título del panel de filtros
+        ctk.CTkLabel(filtros_frame, text="🔍 Filtros de Búsqueda", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(5,10))
+        
+        # Frame para los controles de filtro
+        controles_frame = ctk.CTkFrame(filtros_frame)
+        controles_frame.pack(fill="x", padx=10, pady=(0,10))
+        
+        # Fila 1: Búsqueda de texto y usuario
+        fila1_frame = ctk.CTkFrame(controles_frame)
+        fila1_frame.pack(fill="x", pady=5)
+        
+        # Búsqueda de texto
+        ctk.CTkLabel(fila1_frame, text="Buscar en descripción:").pack(side="left", padx=(5,5))
+        entry_busqueda = ctk.CTkEntry(fila1_frame, width=250, placeholder_text="Escribe para buscar...")
+        entry_busqueda.pack(side="left", padx=(0,20))
+        Tooltip(entry_busqueda, "Busca texto en las descripciones del historial")
+        
+        # Filtro por usuario
+        ctk.CTkLabel(fila1_frame, text="Usuario:").pack(side="left", padx=(5,5))
+        usuarios = obtener_usuarios_historial(self.rma_actual_id, self.master.conectar_db)
+        lista_usuarios = ["Todos"] + usuarios
+        combo_usuario = ctk.CTkOptionMenu(fila1_frame, values=lista_usuarios, width=150)
+        combo_usuario.set("Todos")
+        combo_usuario.pack(side="left", padx=(0,5))
+        Tooltip(combo_usuario, "Filtra por usuario que realizó el cambio")
+        
+        # Fila 2: Filtros de fecha y tipo
+        fila2_frame = ctk.CTkFrame(controles_frame)
+        fila2_frame.pack(fill="x", pady=5)
+        
+        # Fecha desde
+        ctk.CTkLabel(fila2_frame, text="Desde:").pack(side="left", padx=(5,5))
+        entry_fecha_desde = ctk.CTkEntry(fila2_frame, width=120, placeholder_text="DD/MM/YYYY")
+        entry_fecha_desde.pack(side="left", padx=(0,10))
+        Tooltip(entry_fecha_desde, "Fecha inicial (formato: DD/MM/YYYY)")
+        
+        # Fecha hasta
+        ctk.CTkLabel(fila2_frame, text="Hasta:").pack(side="left", padx=(5,5))
+        entry_fecha_hasta = ctk.CTkEntry(fila2_frame, width=120, placeholder_text="DD/MM/YYYY")
+        entry_fecha_hasta.pack(side="left", padx=(0,20))
+        Tooltip(entry_fecha_hasta, "Fecha final (formato: DD/MM/YYYY)")
+        
+        # Checkbox solo comentarios manuales
+        var_solo_manuales = ctk.BooleanVar(value=False)
+        check_manuales = ctk.CTkCheckBox(fila2_frame, text="Solo comentarios manuales", variable=var_solo_manuales)
+        check_manuales.pack(side="left", padx=(5,5))
+        Tooltip(check_manuales, "Muestra solo comentarios añadidos manualmente (no cambios automáticos)")
+        
+        # Frame para botones de acción
+        botones_frame = ctk.CTkFrame(controles_frame)
+        botones_frame.pack(fill="x", pady=5)
+        
+        # Frame scrollable para resultados (se crea una sola vez)
+        resultados_frame = ctk.CTkScrollableFrame(main_frame, label_text="Historial de Cambios")
+        resultados_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        def aplicar_filtros():
+            """Aplica los filtros y actualiza la lista de historial."""
+            # Validar fechas
+            fecha_desde = entry_fecha_desde.get().strip()
+            fecha_hasta = entry_fecha_hasta.get().strip()
             
-            registros = cursor.fetchall()
-            conn.close()
-
+            if fecha_desde:
+                valido, mensaje = validar_formato_fecha(fecha_desde)
+                if not valido:
+                    messagebox.showwarning("Fecha inválida", f"Fecha desde: {mensaje}")
+                    return
+            
+            if fecha_hasta:
+                valido, mensaje = validar_formato_fecha(fecha_hasta)
+                if not valido:
+                    messagebox.showwarning("Fecha inválida", f"Fecha hasta: {mensaje}")
+                    return
+            
+            # Obtener registros filtrados
+            registros = obtener_historial_filtrado(
+                rma_id=self.rma_actual_id,
+                texto_busqueda=entry_busqueda.get(),
+                usuario_filtro=combo_usuario.get(),
+                fecha_desde=fecha_desde if fecha_desde else None,
+                fecha_hasta=fecha_hasta if fecha_hasta else None,
+                solo_comentarios_manuales=var_solo_manuales.get(),
+                connect_db_func=self.master.conectar_db
+            )
+            
+            # Mostrar resultados
+            mostrar_resultados(registros)
+            logger.info(f"Filtros aplicados en historial de RMA {self.rma_actual_id}: {len(registros)} registros")
+        
+        def limpiar_filtros():
+            """Limpia todos los filtros y muestra el historial completo."""
+            entry_busqueda.delete(0, 'end')
+            combo_usuario.set("Todos")
+            entry_fecha_desde.delete(0, 'end')
+            entry_fecha_hasta.delete(0, 'end')
+            var_solo_manuales.set(False)
+            aplicar_filtros()
+            logger.debug(f"Filtros limpiados en historial de RMA {self.rma_actual_id}")
+        
+        def mostrar_resultados(registros):
+            """Muestra los resultados del historial en el frame de resultados."""
+            # Limpiar el frame de resultados (destruir solo los hijos, no el frame)
+            for widget in resultados_frame.winfo_children():
+                widget.destroy()
+            
+            # Actualizar el label del frame
+            resultados_frame.configure(label_text=f"Historial de Cambios ({len(registros)} registros)")
+            
+            # Encabezados
+            header_font = ctk.CTkFont(weight="bold")
+            resultados_frame.grid_columnconfigure(2, weight=1)  # Descripción se expande
+            ctk.CTkLabel(resultados_frame, text="FECHA/HORA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(resultados_frame, text="USUARIO", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(resultados_frame, text="DESCRIPCIÓN DEL CAMBIO", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
+            
             if not registros:
-                ctk.CTkLabel(historial_scroll_frame, text="No hay registros de historial para este RMA.", text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
+                ctk.CTkLabel(resultados_frame, text="No hay registros que coincidan con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
                 return
             
             # Mostrar los registros
@@ -7684,16 +7782,23 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 fecha, usuario, descripcion = reg
                 row = i + 1
                 
-                ctk.CTkLabel(historial_scroll_frame, text=fecha).grid(row=row, column=0, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(historial_scroll_frame, text=usuario).grid(row=row, column=1, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(resultados_frame, text=fecha).grid(row=row, column=0, padx=5, pady=2, sticky="w")
+                ctk.CTkLabel(resultados_frame, text=usuario).grid(row=row, column=1, padx=5, pady=2, sticky="w")
                 
                 # Usamos wrap para que el texto de la descripción no se salga
-                ctk.CTkLabel(historial_scroll_frame, text=descripcion, wraplength=500, justify="left").grid(row=row, column=2, padx=5, pady=2, sticky="w")
-
-        except Exception as e:
-            print(f"Error al cargar historial: {e}")
-            if conn: conn.close()
-            ctk.CTkLabel(historial_scroll_frame, text="Error al cargar el historial.", text_color="red").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
+                ctk.CTkLabel(resultados_frame, text=descripcion, wraplength=500, justify="left").grid(row=row, column=2, padx=5, pady=2, sticky="w")
+        
+        # Botones de acción
+        btn_aplicar = ctk.CTkButton(botones_frame, text="🔍 Aplicar Filtros", command=aplicar_filtros, fg_color="#2b6cb0", hover_color="#1e4f8a")
+        btn_aplicar.pack(side="left", padx=5, pady=5)
+        Tooltip(btn_aplicar, "Aplica los filtros seleccionados al historial")
+        
+        btn_limpiar = ctk.CTkButton(botones_frame, text="🗑️ Limpiar Filtros", command=limpiar_filtros, fg_color="#718096", hover_color="#4a5568")
+        btn_limpiar.pack(side="left", padx=5, pady=5)
+        Tooltip(btn_limpiar, "Limpia todos los filtros y muestra el historial completo")
+        
+        # Cargar historial completo al inicio
+        aplicar_filtros()
 
 
     def determinar_estado_rma(self, datos_maestro):
