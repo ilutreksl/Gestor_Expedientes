@@ -11,8 +11,19 @@ import pandas as pd
 import sys
 
 # Importar Tooltip desde app.py
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from app import Tooltip
+# Añadir el directorio padre al path si no está
+directorio_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if directorio_padre not in sys.path:
+    sys.path.insert(0, directorio_padre)
+
+# Importar Tooltip
+try:
+    from app import Tooltip
+except ImportError:
+    # Fallback: crear una clase Tooltip básica si no se puede importar
+    class Tooltip:
+        def __init__(self, widget, text):
+            pass
 
 logger = logging.getLogger("GestorExpedientes")
 

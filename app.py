@@ -11880,6 +11880,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             """Muestra la ventana de detalle del proveedor con pestañas."""
             from lib.ventana_proveedor import VentanaDetalleProveedor
             
+            # Inyectar la clase Tooltip en el módulo para evitar problemas de importación circular
+            import lib.ventana_proveedor as modulo_proveedor
+            modulo_proveedor.Tooltip = Tooltip
+            
             try:
                 VentanaDetalleProveedor(
                     parent=self,
