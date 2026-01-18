@@ -1,4 +1,12 @@
-Cambio V.1.0.10 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:
+
+- Añadido filtros y busqueda en el historial de cada expediente.
+- Mejorada la ventana de RMP. Ahora separada por ventanas y añadidas las funciones de gestion de adjuntos y treas.
+- Añadido boton de ayuda en los ajustes de usuario. Abre una nueva ventana mostrando el uso de la aplicacion.
+- Corregido bug en el cual esde la ventana de RMP abria una ficha de expediente, lo abria en la ventana principal y no en una nueva ventana.
+
+
+Cambio V.1.0.10
 
 - Sistema de asociacion de expedientes bidireccional.
 - Añadido tipo de cliente a los clientes. Gestion de tipo de cliente desde el menu admin del usuario admin.
