@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.11"
+APP_VERSION = "v1.0.12"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -11910,7 +11910,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 lbl_estado = ctk.CTkLabel(row, text=estado if estado else "-", anchor="w")
                 lbl_estado.grid(row=0, column=3, padx=5, sticky="w")
 
-                ctk.CTkButton(row, text="Editar", width=70, command=lambda rid=rma_id: (self.mostrar_nuevo_rma(rma_id=rid), vent.destroy())).grid(row=0, column=4, padx=5)
+                ctk.CTkButton(row, text="Editar", width=70, command=lambda rid=rma_id: self._abrir_editor_rma(rma_id=rid)).grid(row=0, column=4, padx=5)
 
                 # Hover
                 def on_enter(e, r=row):
@@ -11928,8 +11928,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 row.bind("<Leave>", on_leave)
 
                 # Doble clic abre editor
-                row.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
-                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: (self._abrir_editor_rma(rma_id=rid), vent.destroy()))
+                row.bind("<Double-Button-1>", lambda e, rid=rma_id: self._abrir_editor_rma(rma_id=rid))
+                lbl_codigo.bind("<Double-Button-1>", lambda e, rid=rma_id: self._abrir_editor_rma(rma_id=rid))
 
             # ===== SECCIÓN 3: HISTORIAL DEL PROVEEDOR =====
             hist_frame = ctk.CTkFrame(cont)
