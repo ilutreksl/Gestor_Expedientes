@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.12"
+APP_VERSION = "v1.0.13"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -11475,6 +11475,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     try:
                         btn_hist = ctk.CTkButton(row, text="Ver historial", width=110, command=lambda n=nombre: mostrar_historial_proveedor(n))
                         btn_hist.grid(row=0, column=3, padx=5)
+                        Tooltip(btn_hist, "Ver historial completo del proveedor")
                     except Exception:
                         # Si falla la creación del botón, ignoramos para no romper el listado
                         pass
@@ -11571,6 +11572,23 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 messagebox.showerror("Error BD", f"No se pudo cargar lista de proveedores: {e}")
 
         def mostrar_expedientes_proveedor(proveedor_nombre, estado_actual='', factura_actual=''):
+            """Muestra la ventana de detalle del proveedor con pestañas."""
+            from lib.ventana_proveedor import VentanaDetalleProveedor
+            
+            try:
+                VentanaDetalleProveedor(
+                    parent=self,
+                    proveedor_nombre=proveedor_nombre,
+                    estado_actual=estado_actual,
+                    factura_actual=factura_actual,
+                    connect_db_func=connect_db,
+                    cargar_proveedores_func=cargar_proveedores
+                )
+            except Exception as e:
+                logger.error(f"Error abriendo ventana de proveedor {proveedor_nombre}: {e}", exc_info=True)
+                messagebox.showerror("Error", f"Error al abrir detalle del proveedor: {e}")
+        
+        def mostrar_expedientes_proveedor_OLD(proveedor_nombre, estado_actual='', factura_actual=''):
             # Ventana detallada del proveedor: info, expedientes, historial y comentarios
             vent = ctk.CTkToplevel(self)
             vent.title(f"Detalle RMP - {proveedor_nombre}")

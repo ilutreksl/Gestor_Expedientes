@@ -13,14 +13,15 @@
 3. [Pantalla Principal (Dashboard)](#pantalla-principal-dashboard)
 4. [Trabajar con Expedientes RMA](#trabajar-con-expedientes-rma)
 5. [Gestión de Clientes](#gestión-de-clientes)
-6. [Búsqueda de Expedientes](#búsqueda-de-expedientes)
-7. [Gestión de Artículos](#gestión-de-artículos)
-8. [Adjuntar Archivos](#adjuntar-archivos)
-9. [Tareas y Recordatorios](#tareas-y-recordatorios)
-10. [Estadísticas e Informes](#estadísticas-e-informes)
-11. [Configuración Personal](#configuración-personal)
-12. [Preguntas Frecuentes](#preguntas-frecuentes)
-13. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
+6. [Gestión de Proveedores RMP](#gestión-de-proveedores-rmp)
+7. [Búsqueda de Expedientes](#búsqueda-de-expedientes)
+8. [Gestión de Artículos](#gestión-de-artículos)
+9. [Adjuntar Archivos](#adjuntar-archivos)
+10. [Tareas y Recordatorios](#tareas-y-recordatorios)
+11. [Estadísticas e Informes](#estadísticas-e-informes)
+12. [Configuración Personal](#configuración-personal)
+13. [Preguntas Frecuentes](#preguntas-frecuentes)
+14. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
 
 ---
 
@@ -329,6 +330,196 @@ Si un cliente ya no trabaja contigo pero quieres conservar su historial:
 3. Guarda cambios
 
 Los clientes inactivos aparecen con color gris en la lista.
+
+---
+
+## Gestión de Proveedores RMP
+
+El módulo de **Proveedores RMP** (Return to Manufacturer Proveedor) te permite gestionar las devoluciones a proveedores de forma organizada mediante pestañas.
+
+### Acceder a la Ventana de Proveedores
+
+1. Haz clic en el botón **📦 RMP** del menú lateral
+2. Se abrirá una ventana con la lista de todos los proveedores
+
+### Ver Detalle de un Proveedor
+
+1. En la lista de proveedores, haz clic en el nombre del proveedor que quieres consultar
+2. Se abrirá una ventana con 5 pestañas organizadas:
+
+#### 📋 Pestaña "General"
+
+Muestra todos los expedientes asociados al proveedor:
+
+- **Listado de expedientes**: Código RMA, cliente, fecha y estado
+- **Acciones disponibles**:
+  - **Editar**: Abre el expediente en una ventana independiente
+  - **Doble clic**: También abre el expediente
+- **Exportar a Excel**: Genera un archivo Excel con todos los expedientes del proveedor
+  - El archivo se guarda en: `Adjuntos_RMA/RMP/`
+  - Se sube automáticamente a Dropbox (si está configurado)
+  - Queda registrado en el historial
+
+💡 **Consejo**: Usa la exportación a Excel para enviar listados al proveedor.
+
+#### 💰 Pestaña "Contabilidad"
+
+Gestiona la información contable del proveedor:
+
+- **Factura de Abono**: Número de la factura recibida del proveedor
+  - Escribe el número de factura
+  - Haz clic en **💾 Guardar Factura**
+  
+💡 **Uso práctico**: Cuando el proveedor te envíe la factura de abono, regístrala aquí para tener todo centralizado.
+
+#### 📎 Pestaña "Adjuntos"
+
+Gestiona los archivos relacionados con el proveedor almacenados en Dropbox:
+
+**Listar archivos**:
+- La pestaña muestra automáticamente todos los archivos del proveedor que hay en Dropbox
+- Se muestran archivos que empiezan con el nombre del proveedor
+- Información visible: Nombre del archivo, tamaño, fecha de modificación
+
+**Acciones con archivos**:
+- **👁️ Visualizar**: Abre el archivo para verlo (se descarga temporalmente)
+- **⬇️ Descargar**: Guarda el archivo en tu ordenador
+  - Elige la ubicación donde guardarlo
+  - El archivo se descarga con su nombre original
+- **🗑️ Eliminar**: Borra el archivo de Dropbox
+  - ⚠️ Pide confirmación antes de eliminar
+  - Esta acción no se puede deshacer
+
+**Subir nuevos archivos**:
+1. Haz clic en **📤 Subir Archivo**
+2. Selecciona el archivo de tu ordenador
+3. El archivo se sube a Dropbox con el formato: `{NombreProveedor}_{NombreArchivo}`
+4. Haz clic en **🔄 Actualizar** para ver el nuevo archivo en la lista
+
+💡 **Tipos de archivos comunes**:
+- Facturas de abono del proveedor (.pdf)
+- Albaranes de envío (.pdf)
+- Emails de comunicación (.eml, .pdf)
+- Fotos de productos (.jpg, .png)
+- Hojas de cálculo (.xlsx)
+
+⚠️ **Importante**: 
+- Los archivos deben estar en la carpeta `/RMP` de Dropbox
+- El nombre del archivo debe empezar con el nombre del proveedor para aparecer aquí
+- Necesitas tener Dropbox configurado correctamente
+
+#### 📜 Pestaña "Historial"
+
+Muestra un registro cronológico de todas las acciones realizadas con el proveedor:
+
+**Información del historial**:
+- 📅 Fecha y hora del evento
+- 👤 Usuario que realizó la acción
+- 🏷️ Estado relacionado (si aplica)
+- 📝 Descripción del evento
+
+**Eventos registrados automáticamente**:
+- Cambios de estado del proveedor
+- Exportaciones a Excel
+- Modificaciones de datos
+
+**Añadir comentarios manualmente**:
+1. Escribe tu comentario en el cuadro de texto inferior
+2. Haz clic en **💬 Añadir Comentario**
+3. El comentario aparecerá inmediatamente en el historial
+
+💡 **Usos del historial**:
+- Seguimiento de comunicaciones con el proveedor
+- Registro de incidencias
+- Notas sobre acuerdos o condiciones especiales
+- Documentar llamadas telefónicas
+
+**Ejemplo de comentario útil**:
+```
+Llamada con el proveedor - Confirmaron recepción de 5 artículos.
+Enviarán factura de abono la próxima semana. Referencia: FA2025-123
+```
+
+#### ✓ Pestaña "Tareas"
+
+Gestiona las tareas y recordatorios relacionados con el proveedor:
+
+**Ver tareas existentes**:
+- **Listado de tareas**: Título, descripción, fecha de vencimiento y estado
+- **Filtrar por estado**: Usa el desplegable para ver solo tareas pendientes, en progreso o completadas
+- **Código de colores**:
+  - 🟠 **Pendiente**: Tarea por hacer
+  - 🔵 **En Progreso**: Tarea en curso
+  - 🟢 **Completado**: Tarea finalizada
+
+**Crear nueva tarea**:
+1. Haz clic en **➕ Nueva Tarea**
+2. Completa el formulario:
+   - **Título** ⚠️ *Obligatorio*: Nombre corto de la tarea
+   - **Descripción**: Detalles adicionales
+   - **Fecha de vencimiento**: Formato DD/MM/AAAA (opcional)
+3. Haz clic en **Guardar**
+
+**Gestionar tareas**:
+- **Cambiar estado**: Usa el desplegable en cada tarea para cambiar su estado
+- **🗑️ Eliminar**: Borra la tarea (pide confirmación)
+
+💡 **Ejemplos de tareas útiles**:
+- "Llamar al proveedor para confirmar recepción"
+- "Enviar albarán firmado al email del proveedor"
+- "Revisar factura de abono cuando llegue"
+- "Hacer seguimiento del envío - tracking XYZ123"
+
+**Diferencia con tareas de expedientes**:
+- Las tareas de proveedores son globales al proveedor
+- Las tareas de expedientes son específicas de un RMA concreto
+
+### Encabezado de la Ventana
+
+En la parte superior de la ventana de detalle del proveedor verás:
+
+- **Nombre del Proveedor**: Siempre visible
+- **Estado del Proveedor**: Menú desplegable con opciones:
+  - "" (Vacío)
+  - En Progreso
+  - Enviado
+  - Completado
+  - Exportado
+  
+Al cambiar el estado:
+- Se guarda automáticamente
+- Se registra en el historial
+- Se actualiza en la lista principal
+
+### Flujo de Trabajo Recomendado
+
+1. **Crear/Recibir expedientes** con el mismo proveedor
+2. **Abrir la ficha del proveedor** (botón RMP)
+3. **Revisar expedientes** en la pestaña General
+4. **Exportar a Excel** cuando tengas varios expedientes listos
+5. **Subir documentos** del proveedor a la pestaña Adjuntos
+6. **Crear tareas** para hacer seguimiento
+7. **Actualizar estado** conforme avanza el proceso:
+   - `En Progreso`: Estás preparando el envío
+   - `Enviado`: Ya enviaste los artículos al proveedor
+   - `Completado`: El proveedor procesó todo
+   - `Exportado`: Ya generaste el Excel final
+8. **Registrar factura** cuando llegue en Contabilidad
+9. **Añadir comentarios** al historial con información relevante
+
+### Preguntas Frecuentes - Proveedores
+
+**P: ¿Por qué no veo archivos en la pestaña Adjuntos?**  
+R: Los archivos deben estar en Dropbox, en la carpeta `/RMP`, y el nombre del archivo debe empezar con el nombre exacto del proveedor.
+
+**P: ¿Puedo editar un expediente desde la ventana de proveedor?**  
+R: Sí, haz clic en "Editar" o doble clic en el expediente. Se abrirá en una ventana independiente y la ventana del proveedor permanecerá abierta.
+
+**P: ¿Se sincronizan las tareas de proveedores con las de expedientes?**  
+R: No, son independientes. Las tareas de proveedores son para gestión global, las de expedientes para cada RMA específico.
+
+**P: ¿Cómo sé si tengo tareas pendientes de un proveedor?**  
+R: Cuando abras la ventana del proveedor y vayas a la pestaña Tareas, verás el contador de tareas por estado.
 
 ---
 
