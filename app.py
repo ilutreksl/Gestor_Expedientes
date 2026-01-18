@@ -11891,7 +11891,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     estado_actual=estado_actual,
                     factura_actual=factura_actual,
                     connect_db_func=connect_db,
-                    cargar_proveedores_func=cargar_proveedores
+                    cargar_proveedores_func=cargar_proveedores,
+                    usar_dropbox_func=usar_dropbox,
+                    get_dropbox_client_func=get_dropbox_client
                 )
             except Exception as e:
                 logger.error(f"Error abriendo ventana de proveedor {proveedor_nombre}: {e}", exc_info=True)

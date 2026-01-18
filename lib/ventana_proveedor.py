@@ -32,7 +32,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
     """Ventana detallada de proveedor con pestañas organizadas."""
     
     def __init__(self, parent, proveedor_nombre, estado_actual='', factura_actual='', 
-                 connect_db_func=None, cargar_proveedores_func=None):
+                 connect_db_func=None, cargar_proveedores_func=None,
+                 usar_dropbox_func=None, get_dropbox_client_func=None):
         super().__init__(parent)
         
         self.parent_app = parent
@@ -41,6 +42,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
         self.factura_actual = factura_actual
         self.connect_db = connect_db_func
         self.cargar_proveedores = cargar_proveedores_func
+        self.usar_dropbox = usar_dropbox_func
+        self.get_dropbox_client = get_dropbox_client_func
         self.username = getattr(parent, 'username', 'unknown')
         
         # Configurar ventana
@@ -345,14 +348,10 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
     def _subir_excel_dropbox(self, file_path, safe_name):
         """Sube el archivo Excel a Dropbox si está configurado."""
         try:
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-            from app import usar_dropbox, get_dropbox_client
-            if usar_dropbox():
+            if self.usar_dropbox and self.usar_dropbox():
                 import dropbox
                 dropbox_path = f"/RMP/{safe_name}.xlsx"
-                dbx = get_dropbox_client()
+                dbx = self.get_dropbox_client()
                 with open(file_path, 'rb') as f:
                     dbx.files_upload(
                         f.read(),
@@ -469,11 +468,6 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             eliminar_adjunto_proveedor, visualizar_adjunto_proveedor,
             subir_adjunto_proveedor, formatear_tamaño
         )
-        # Importar funciones de Dropbox desde el módulo principal
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from app import usar_dropbox, get_dropbox_client
         
         self.adjuntos_funcs = {
             'listar': listar_adjuntos_proveedor,
@@ -482,8 +476,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             'visualizar': visualizar_adjunto_proveedor,
             'subir': subir_adjunto_proveedor,
             'formatear': formatear_tamaño,
-            'get_client': get_dropbox_client,
-            'usar': usar_dropbox
+            'get_client': self.get_dropbox_client,
+            'usar': self.usar_dropbox
         }
         
         # Botón subir
