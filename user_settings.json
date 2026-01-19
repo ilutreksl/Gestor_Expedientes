@@ -70,8 +70,9 @@
       "show_tooltips": true,
       "compact_mode": true,
       "icon_size": 24,
-      "theme": "themes/BH_rime.json",
-      "appearance_mode": "light"
+      "theme": "themes/teal_corporate.json",
+      "appearance_mode": "light",
+      "mostrar_aviso": true
     }
   }
 }
