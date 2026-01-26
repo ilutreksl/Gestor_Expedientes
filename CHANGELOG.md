@@ -1,6 +1,7 @@
-Cambio V.1.0.16
+Cambio V.1.0.17
 
 - Añadido boton "Descargar" en la pestaña de adjuntos de la ficha de expedientes.
+- Se an recortado los botones de los adjuntos a solo iconos para dejar mas espacio al titulo del archivo.
 
 
 Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:

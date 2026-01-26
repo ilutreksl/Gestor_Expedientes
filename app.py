@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.16"
+APP_VERSION = "v1.0.17"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8815,43 +8815,50 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # Etiqueta del nombre del archivo
             ctk.CTkLabel(item_frame, text=nombre, width=250, anchor='w').pack(side='left', padx=5)
 
-            # Botón Visualizar (solo lectura)
-            ctk.CTkButton(
-                item_frame, 
-                text="👁️ Ver", 
-                width=70, 
-                command=lambda r=ruta: self.abrir_adjunto(r)
-            ).pack(side='right', padx=2)
-
-            # Botón Editar (descarga, edita y resube)
-            if usar_dropbox():  # Solo mostrar editar en modo Dropbox
-                ctk.CTkButton(
-                    item_frame, 
-                    text="� Editar", 
-                    width=70,
-                    fg_color="#2B7A0B",
-                    hover_color="#1F5F08",
-                    command=lambda r=ruta, aid=adjunto_id: self.editar_adjunto(r, aid)
-                ).pack(side='right', padx=2)
-
-            # Botón Descargar
-            ctk.CTkButton(
-                item_frame, 
-                text="⬇️ Descargar", 
-                width=90,
-                command=lambda r=ruta: self.descargar_adjunto_guardar(r)
-            ).pack(side='right', padx=2)
-
             # Botón Eliminar
-            # El comando usa lambda para pasar el ID del adjunto y la ruta
-            ctk.CTkButton(
+            btn_eliminar = ctk.CTkButton(
                 item_frame, 
-                text="🗑️ Eliminar", 
-                width=80, 
+                text="🗑️", 
+                width=35, 
                 fg_color="red", 
                 hover_color="darkred",
                 command=lambda aid=adjunto_id, r=ruta: self.confirmar_eliminar_adjunto(aid, r)
-            ).pack(side='right', padx=5)
+            )
+            btn_eliminar.pack(side='right', padx=2)
+            Tooltip(btn_eliminar, "Eliminar archivo")
+
+            # Botón Descargar
+            btn_descargar = ctk.CTkButton(
+                item_frame, 
+                text="⬇️", 
+                width=35,
+                command=lambda r=ruta: self.descargar_adjunto_guardar(r)
+            )
+            btn_descargar.pack(side='right', padx=2)
+            Tooltip(btn_descargar, "Descargar archivo")
+
+            # Botón Editar (descarga, edita y resube)
+            if usar_dropbox():  # Solo mostrar editar en modo Dropbox
+                btn_editar = ctk.CTkButton(
+                    item_frame, 
+                    text="✏️", 
+                    width=35,
+                    fg_color="#2B7A0B",
+                    hover_color="#1F5F08",
+                    command=lambda r=ruta, aid=adjunto_id: self.editar_adjunto(r, aid)
+                )
+                btn_editar.pack(side='right', padx=2)
+                Tooltip(btn_editar, "Editar archivo")
+
+            # Botón Visualizar (solo lectura)
+            btn_ver = ctk.CTkButton(
+                item_frame, 
+                text="👁️", 
+                width=35, 
+                command=lambda r=ruta: self.abrir_adjunto(r)
+            )
+            btn_ver.pack(side='right', padx=2)
+            Tooltip(btn_ver, "Visualizar archivo")
             
         # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
     def abrir_adjunto(self, ruta_relativa):
