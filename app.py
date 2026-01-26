@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.17"
+APP_VERSION = "v1.0.19"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -852,7 +852,16 @@ class LoginApp(ctk.CTk):
         
         # Configuraciones básicas de la ventana
         self.title("Gestión RMA - Login")
-        self.geometry("400x300")
+        
+        # Centrar la ventana en la pantalla
+        window_width = 400
+        window_height = 300
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        center_x = int((screen_width - window_width) / 2)
+        center_y = int((screen_height - window_height) / 2)
+        self.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
+        
         self.resizable(False, False)
         
         # Agregar icono personalizado de ILUTREK
@@ -1269,7 +1278,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
     
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""
-        self.master.destroy()
+        from lib.confirmacion_cierre import confirmar_cierre_aplicacion
+        
+        if confirmar_cierre_aplicacion(self):
+            self.master.destroy()
 
     def limpiar_contenido(self):
         """Limpia todos los widgets del marco de contenido principal."""
@@ -1971,34 +1983,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                     font=ctk.CTkFont(size=10),
                                     anchor="w")
             fila_label.pack(fill="x", padx=10, pady=1)
-        
-        # Separador simple
-        separador = ctk.CTkLabel(self.stats_frame, text="─" * 25, 
-                               font=ctk.CTkFont(size=8))
-        separador.pack(pady=(8, 4))
-        
-        # Título de artículos problemáticos simplificado
-        periodo_texto = self.combo_periodo.get()
-        titulo_problematicos = ctk.CTkLabel(self.stats_frame, 
-                                          text=f"🔴 Problemáticos ({periodo_texto})", 
-                                          font=ctk.CTkFont(size=10, weight="bold"))
-        titulo_problematicos.pack(pady=(0, 4))
-        
-        # Lista simple de artículos problemáticos (solo top 5 para mejor rendimiento)
-        if articulos_problematicos:
-            for i, articulo in enumerate(articulos_problematicos[:5], 1):
-                # Texto simple sin marcos complejos
-                problema_texto = f"{i}. {articulo['referencia_articulo'][:15]}... ({articulo['problemas']})"
-                problema_label = ctk.CTkLabel(self.stats_frame, 
-                                            text=problema_texto, 
-                                            font=ctk.CTkFont(size=9),
-                                            anchor="w")
-                problema_label.pack(fill="x", padx=10, pady=1)
-        else:
-            no_datos_label = ctk.CTkLabel(self.stats_frame, 
-                                        text="Sin datos", 
-                                        font=ctk.CTkFont(size=9))
-            no_datos_label.pack(pady=2)
         
         # Botón de actualización simple
         btn_actualizar = ctk.CTkButton(self.stats_frame, 
@@ -4745,7 +4729,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.cargar_lista_tareas_rma = lambda: None
         
         # --- Cabecera ---
-        titulo_texto = "EDITAR EXPEDIENTE" if es_edicion else "CREAR NUEVO EXPEDIENTE"
+        # Obtener información para el título
+        if es_edicion:
+            # Consultar el código RMA y nombre del cliente desde la base de datos
+            conn = connect_db()
+            cur = conn.cursor()
+            cur.execute("SELECT codigo_rma, cliente FROM rma_maestro WHERE id = ?", (rma_id,))
+            row = cur.fetchone()
+            conn.close()
+            
+            if row:
+                codigo_rma_mostrar = row[0]
+                nombre_cliente = row[1] or "Sin cliente"
+                titulo_texto = f"{codigo_rma_mostrar} - {nombre_cliente}"
+            else:
+                codigo_rma_mostrar = "DESCONOCIDO"
+                titulo_texto = "EXPEDIENTE DESCONOCIDO"
+        else:
+            codigo_rma_mostrar = self.obtener_siguiente_rma()
+            titulo_texto = "CREAR NUEVO EXPEDIENTE"
+        
         header_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
         header_frame.grid_columnconfigure(0, weight=1)
@@ -4755,6 +4758,16 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # --------------------------------------------------------------------------
 
         ctk.CTkLabel(header_frame, text=titulo_texto, font=ctk.CTkFont(size=24, weight="bold")).grid(row=0, column=0, sticky="w")
+        
+        # Añadir advertencia de número temporal para nuevos expedientes
+        if not es_edicion:
+            ctk.CTkLabel(header_frame, 
+                        text=f"⚠️ Número temporal: {codigo_rma_mostrar}. El número definitivo se asignará al guardar.",
+                        font=ctk.CTkFont(size=12),
+                        text_color="orange").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        
+        # Crear label para compatibilidad con código existente (no se muestra visualmente)
+        self.lbl_codigo_rma = ctk.CTkLabel(header_frame, text=f"Nº EXPEDIENTE: {codigo_rma_mostrar}")
         
         # --------------------------------------------------------------------------
         # 2. DISEÑO DE 2 COLUMNAS: Layout principal  (Fila 1)
@@ -4771,49 +4784,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Ajustar peso de la fila principal
         self.content_frame.grid_rowconfigure(1, weight=1)
 
-        # ========== COLUMNA IZQUIERDA: Nombre expediente + Pestañas ==========
+        # ========== COLUMNA IZQUIERDA: Pestañas ==========
         left_column = ctk.CTkFrame(main_layout_frame, fg_color="transparent")
         left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        left_column.grid_rowconfigure(1, weight=1)  # Las pestañas se expanden
-        
-        # A) NÚMERO DE EXPEDIENTE (en la columna izquierda, arriba)
-        codigo_frame = ctk.CTkFrame(left_column, fg_color="transparent")
-        codigo_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        
-        if es_edicion:
-            # Consultar el código RMA real desde la base de datos
-            conn = connect_db()
-            cur = conn.cursor()
-            cur.execute("SELECT codigo_rma FROM rma_maestro WHERE id = ?", (rma_id,))
-            row = cur.fetchone()
-            conn.close()
-            codigo_rma_mostrar = row[0] if row else "(Desconocido)"
-            texto_expediente = f"Nº EXPEDIENTE: {codigo_rma_mostrar}"
-            color_texto = "grey30"
-        else:
-            codigo_rma_temporal = self.obtener_siguiente_rma()
-            texto_expediente = f"Nº EXPEDIENTE: {codigo_rma_temporal} (Temporal)"
-            color_texto = "orange"  # Color naranja para indicar que es temporal
-        
-        self.lbl_codigo_rma = ctk.CTkLabel(codigo_frame, text=texto_expediente, 
-                     font=ctk.CTkFont(size=18, weight="bold"), 
-                     text_color=color_texto)
-        self.lbl_codigo_rma.pack(anchor="w") 
-        
-        # Añadir texto explicativo para números temporales
-        if not es_edicion:
-            self.lbl_explicacion = ctk.CTkLabel(codigo_frame, 
-                         text="⚠️ Este número es temporal. El número definitivo se asignará al guardar.", 
-                         font=ctk.CTkFont(size=10),
-                         text_color="gray50")
-            self.lbl_explicacion.pack(anchor="w", pady=(0, 5))
+        left_column.grid_rowconfigure(0, weight=1)  # Las pestañas se expanden
         
         # Guardar si es modo edición para usar en el guardado
         self.es_modo_edicion = es_edicion 
         
-        # 3. Vista con pestañas (Tabview) para el formulario y el historial - EN COLUMNA IZQUIERDA
+        # Vista con pestañas (Tabview) para el formulario y el historial - EN COLUMNA IZQUIERDA
         self.tabview = ctk.CTkTabview(left_column)
-        self.tabview.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        self.tabview.grid(row=0, column=0, sticky="nsew", pady=(15, 10))
         
         # ========== COLUMNA DERECHA: Comentarios + Precio Total + Tiempos ==========
         right_column = ctk.CTkFrame(main_layout_frame, fg_color="transparent", width=450)

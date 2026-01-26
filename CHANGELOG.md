@@ -1,7 +1,13 @@
-Cambio V.1.0.17
+Cambio V.1.0.19
 
+- Modificado titulos de la ventana de expedientes.
 - Añadido boton "Descargar" en la pestaña de adjuntos de la ficha de expedientes.
-- Se an recortado los botones de los adjuntos a solo iconos para dejar mas espacio al titulo del archivo.
+- Se han recortado los botones de los adjuntos a solo iconos para dejar mas espacio al titulo del archivo.
+- Cambios visuales:
+    * Ventana de Login centrada a la pantalla.
+    * Añadido padding de 15px entre el titulo y las pestañas en la ventana de expedientes.
+    * Eliminada estadisticas de articulos problematicos de la ventana principal.
+    * Añadida confirmacion de cierre de la aplicacion.
 
 
 Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:
