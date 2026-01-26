@@ -1,4 +1,4 @@
-Cambio V.1.0.19
+Cambio V.1.0.20
 
 - Modificado titulos de la ventana de expedientes.
 - Añadido boton "Descargar" en la pestaña de adjuntos de la ficha de expedientes.
@@ -8,6 +8,7 @@ Cambio V.1.0.19
     * Añadido padding de 15px entre el titulo y las pestañas en la ventana de expedientes.
     * Eliminada estadisticas de articulos problematicos de la ventana principal.
     * Añadida confirmacion de cierre de la aplicacion.
+- Las referencias de los articulos en los expedientes, siempre se guardan en mayusculas.
 
 
 Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:

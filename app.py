@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.19"
+APP_VERSION = "v1.0.20"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5904,7 +5904,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         from lib.articulo_depreciacion import validar_porcentaje_depreciacion
         
         try:
-            referencia = self.art_ref.get()
+            # Convertir referencia a mayúsculas siempre
+            referencia = self.art_ref.get().strip().upper()
             # Permitir decimales en las cantidades
             cant_doc = float(self.art_cant_doc.get().replace(',', '.') or 0.0)
             cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
