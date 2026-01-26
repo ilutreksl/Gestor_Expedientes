@@ -1,5 +1,6 @@
-Cambio V.1.0.20
+Cambio V.1.0.21
 
+- Añadida en la columna de estadisticas, el almacenamiento de las nubes utilizadas por la aplicacion.
 - Modificado titulos de la ventana de expedientes.
 - Añadido boton "Descargar" en la pestaña de adjuntos de la ficha de expedientes.
 - Se han recortado los botones de los adjuntos a solo iconos para dejar mas espacio al titulo del archivo.

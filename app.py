@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.20"
+APP_VERSION = "v1.0.21"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1950,6 +1950,177 @@ class VentanaPrincipal(ctk.CTkToplevel):
             print(f"Error obteniendo artículos problemáticos: {e}")
             return []
     
+    def actualizar_almacenamiento(self):
+        """Actualiza la información de almacenamiento en un thread separado."""
+        import threading
+        
+        # Verificar que el frame existe y es válido
+        if not hasattr(self, 'storage_info_frame') or not self.storage_info_frame.winfo_exists():
+            logger.warning("storage_info_frame no existe, creándolo...")
+            self.storage_info_frame = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
+            self.storage_info_frame.pack(fill="x", pady=(4, 0))
+        
+        # Limpiar frame de storage
+        for widget in self.storage_info_frame.winfo_children():
+            widget.destroy()
+        
+        # Mostrar mensaje de carga
+        loading_label = ctk.CTkLabel(self.storage_info_frame, 
+                                    text="⏳ Consultando almacenamiento...", 
+                                    font=ctk.CTkFont(size=9),
+                                    text_color="gray")
+        loading_label.pack(pady=4)
+        
+        # Ejecutar en thread separado para no bloquear UI
+        def cargar_storage():
+            try:
+                self.mostrar_uso_almacenamiento()
+            except Exception as e:
+                logger.error(f"Error actualizando almacenamiento: {e}")
+                # Limpiar y mostrar error
+                self.master.after(0, lambda: self._mostrar_error_storage())
+        
+        thread = threading.Thread(target=cargar_storage, daemon=True)
+        thread.start()
+    
+    def _mostrar_error_storage(self):
+        """Muestra mensaje de error en el panel de storage."""
+        for widget in self.storage_info_frame.winfo_children():
+            widget.destroy()
+        error_label = ctk.CTkLabel(self.storage_info_frame, 
+                                  text="⚠️ Error al cargar storage", 
+                                  font=ctk.CTkFont(size=9),
+                                  text_color="orange")
+        error_label.pack(pady=2)
+    
+    def mostrar_uso_almacenamiento(self):
+        """Muestra el uso de almacenamiento de Dropbox, Backblaze B2 y Turso."""
+        try:
+            from lib.uso_almacenamiento import obtener_todos_los_usos
+            
+            # Obtener información de almacenamiento
+            # Pasamos el cliente de Dropbox si existe
+            dropbox_client = None
+            if hasattr(self, 'usar_dropbox') and self.usar_dropbox():
+                try:
+                    dropbox_client = self.get_dropbox_client()
+                except:
+                    pass
+            
+            usos = obtener_todos_los_usos(dropbox_client)
+            
+            # Actualizar UI desde el thread principal
+            self.master.after(0, lambda: self._actualizar_ui_storage(usos))
+            
+        except Exception as e:
+            logger.error(f"Error mostrando uso de almacenamiento: {e}")
+            self.master.after(0, lambda: self._mostrar_error_storage())
+    
+    def _actualizar_ui_storage(self, usos):
+        """Actualiza la UI con la información de storage (debe ejecutarse en thread principal)."""
+        try:
+            # Limpiar frame
+            for widget in self.storage_info_frame.winfo_children():
+                widget.destroy()
+            
+            # Separador
+            separador = ctk.CTkLabel(self.storage_info_frame, text="─" * 25, 
+                                   font=ctk.CTkFont(size=8),
+                                   wraplength=180)
+            separador.pack(pady=(4, 4))
+            
+            # Título
+            titulo_storage = ctk.CTkLabel(self.storage_info_frame, 
+                                         text="☁️ Almacenamiento", 
+                                         font=ctk.CTkFont(size=10, weight="bold"),
+                                         wraplength=180)
+            titulo_storage.pack(pady=(0, 6))
+            
+            # Mostrar Dropbox
+            dropbox_info = usos.get('dropbox', {})
+            if dropbox_info.get('error'):
+                dropbox_texto = f"Dropbox: {dropbox_info['error']}"
+            else:
+                usado_mb = dropbox_info.get('usado_mb', 0)
+                total_mb = dropbox_info.get('total_mb', 0)
+                tipo = dropbox_info.get('tipo_cuenta', 'N/A')
+                
+                # Mostrar en MB si es < 1GB, en GB si es >= 1GB
+                if usado_mb < 1024:
+                    usado_texto = f"{usado_mb:.1f}MB"
+                else:
+                    usado_texto = f"{usado_mb / 1024:.2f}GB"
+                
+                total_gb = total_mb / 1024
+                dropbox_texto = f"Dropbox: {usado_texto} / {total_gb:.0f}GB ({tipo})"
+            
+            lbl_dropbox = ctk.CTkLabel(self.storage_info_frame, 
+                                      text=dropbox_texto, 
+                                      font=ctk.CTkFont(size=9),
+                                      anchor="w",
+                                      wraplength=180)
+            lbl_dropbox.pack(fill="x", padx=10, pady=2)
+            
+            # Mostrar Backblaze B2
+            b2_info = usos.get('backblaze', {})
+            if b2_info.get('error'):
+                b2_texto = f"Backblaze: {b2_info['error']}"
+            else:
+                usado_mb = b2_info.get('usado_mb', 0)
+                total_mb = b2_info.get('total_mb')
+                tipo = b2_info.get('tipo_cuenta', 'N/A')
+                
+                # Mostrar en MB si es < 1GB, en GB si es >= 1GB
+                if usado_mb < 1024:
+                    usado_texto = f"{usado_mb:.1f}MB"
+                else:
+                    usado_texto = f"{usado_mb / 1024:.2f}GB"
+                
+                if total_mb and total_mb > 0:
+                    total_gb = total_mb / 1024
+                    b2_texto = f"Backblaze: {usado_texto} / {total_gb:.0f}GB ({tipo})"
+                else:
+                    b2_texto = f"Backblaze: {usado_texto} / Ilimitado ({tipo})"
+            
+            lbl_b2 = ctk.CTkLabel(self.storage_info_frame, 
+                                 text=b2_texto, 
+                                 font=ctk.CTkFont(size=9),
+                                 anchor="w",
+                                 wraplength=180)
+            lbl_b2.pack(fill="x", padx=10, pady=2)
+            
+            # Mostrar Turso
+            turso_info = usos.get('turso', {})
+            if turso_info.get('error'):
+                # No mostrar Turso si hay error (evitar ruido)
+                pass
+            else:
+                usado_mb = turso_info.get('usado_mb')
+                total_mb = turso_info.get('total_mb', 0)
+                tipo = turso_info.get('tipo_cuenta', 'N/A')
+                
+                total_gb = total_mb / 1024
+                
+                if usado_mb is not None:
+                    # Mostrar en MB si es < 1GB, en GB si es >= 1GB
+                    if usado_mb < 1024:
+                        usado_texto = f"{usado_mb:.1f}MB"
+                    else:
+                        usado_texto = f"{usado_mb / 1024:.2f}GB"
+                    turso_texto = f"Turso: {usado_texto} / {total_gb:.0f}GB ({tipo})"
+                else:
+                    turso_texto = f"Turso: N/A / {total_gb:.0f}GB ({tipo})"
+                
+                lbl_turso = ctk.CTkLabel(self.storage_info_frame, 
+                                        text=turso_texto, 
+                                        font=ctk.CTkFont(size=9),
+                                        anchor="w",
+                                        wraplength=180)
+                lbl_turso.pack(fill="x", padx=10, pady=2)
+            
+        except Exception as e:
+            logger.error(f"Error actualizando UI de storage: {e}")
+    
     def crear_interfaz_estadisticas(self, stats, articulos_problematicos):
         """Crea la interfaz visual para mostrar las estadísticas de forma simple y rápida."""
         # Verificar que el frame exista y esté limpio
@@ -1963,7 +2134,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Título del año
         año_label = ctk.CTkLabel(self.stats_frame, 
                                 text=f"Expedientes {self.combo_año_dashboard.get()}", 
-                                font=ctk.CTkFont(size=12, weight="bold"))
+                                font=ctk.CTkFont(size=12, weight="bold"),
+                                wraplength=180)
         año_label.pack(pady=(8, 12))
         
         # Lista simple de estadísticas sin colores complejos
@@ -1981,16 +2153,32 @@ class VentanaPrincipal(ctk.CTkToplevel):
             fila_label = ctk.CTkLabel(self.stats_frame, 
                                     text=texto, 
                                     font=ctk.CTkFont(size=10),
-                                    anchor="w")
+                                    anchor="w",
+                                    wraplength=180)
             fila_label.pack(fill="x", padx=10, pady=1)
         
-        # Botón de actualización simple
-        btn_actualizar = ctk.CTkButton(self.stats_frame, 
-                                     text="� Actualizar",
+        # Botones de actualización
+        botones_frame = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
+        botones_frame.pack(pady=(10, 8))
+        
+        btn_actualizar = ctk.CTkButton(botones_frame, 
+                                     text="🔄 Stats",
                                      command=self.actualizar_dashboard,
-                                     width=80, height=25,
-                                     font=ctk.CTkFont(size=10))
-        btn_actualizar.pack(pady=(10, 8))
+                                     width=70, height=25,
+                                     font=ctk.CTkFont(size=9))
+        btn_actualizar.pack(side="left", padx=2)
+        
+        btn_storage = ctk.CTkButton(botones_frame, 
+                                   text="☁️ Storage",
+                                   command=self.actualizar_almacenamiento,
+                                   width=70, height=25,
+                                   font=ctk.CTkFont(size=9))
+        btn_storage.pack(side="left", padx=2)
+        
+        # Frame para información de almacenamiento (inicialmente vacío)
+        if not hasattr(self, 'storage_info_frame'):
+            self.storage_info_frame = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
+            self.storage_info_frame.pack(fill="x", pady=(4, 0))
     
     
     # ----------------------------------------------------------------------
@@ -2724,7 +2912,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         # Configurar layout principal con dos columnas
         self.content_frame.grid_columnconfigure(0, weight=3, minsize=800)  # Lista principal
-        self.content_frame.grid_columnconfigure(1, weight=0, minsize=200)  # Dashboard (ancho fijo)
+        self.content_frame.grid_columnconfigure(1, weight=0, minsize=200, uniform="dashboard")  # Dashboard (ancho fijo absoluto)
         self.content_frame.grid_rowconfigure(0, weight=1)
         
         # === COLUMNA IZQUIERDA: LISTA Y FILTROS ===
@@ -2858,6 +3046,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Frame para las estadísticas
         self.stats_frame = ctk.CTkFrame(dashboard_column)
         self.stats_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.stats_frame.pack_propagate(True)  # Permitir que el contenido se ajuste verticalmente
         
         # Cargar datos iniciales - con filtro del año actual por defecto para optimizar rendimiento
         año_actual = str(datetime.datetime.now().year)
