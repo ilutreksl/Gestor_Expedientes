@@ -1,3 +1,8 @@
+Cambio V.1.0.16
+
+- Añadido boton "Descargar" en la pestaña de adjuntos de la ficha de expedientes.
+
+
 Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:
 
 - Añadido filtros y busqueda en el historial de cada expediente.

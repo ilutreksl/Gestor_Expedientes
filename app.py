@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.15"
+APP_VERSION = "v1.0.16"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8834,6 +8834,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     command=lambda r=ruta, aid=adjunto_id: self.editar_adjunto(r, aid)
                 ).pack(side='right', padx=2)
 
+            # Botón Descargar
+            ctk.CTkButton(
+                item_frame, 
+                text="⬇️ Descargar", 
+                width=90,
+                command=lambda r=ruta: self.descargar_adjunto_guardar(r)
+            ).pack(side='right', padx=2)
+
             # Botón Eliminar
             # El comando usa lambda para pasar el ID del adjunto y la ruta
             ctk.CTkButton(
@@ -9238,9 +9246,22 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             else:
                 print(f"Error eliminando archivo de Dropbox: {e}")
                 return False
-        except Exception as e:
-            print(f"Error eliminando archivo de Dropbox: {e}")
-            return False
+    
+    def descargar_adjunto_guardar(self, ruta_relativa):
+        """
+        Descarga un archivo adjunto y permite al usuario guardarlo donde quiera.
+        Llama a la función de rma_utils.py para manejar la lógica.
+        """
+        from lib.rma_utils import descargar_adjunto
+        
+        descargar_adjunto(
+            ruta_relativa=ruta_relativa,
+            usar_dropbox_fn=usar_dropbox,
+            get_dropbox_client_fn=get_dropbox_client,
+            normalizar_ruta_dropbox_fn=normalizar_ruta_dropbox,
+            dropbox_root_folder=DROPBOX_ROOT_FOLDER,
+            adjuntos_root_dir=ADJUNTOS_ROOT_DIR
+        )
     
     def _eliminar_archivo_local(self, ruta_relativa):
         """

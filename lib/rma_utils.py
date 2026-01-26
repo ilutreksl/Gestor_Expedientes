@@ -243,3 +243,96 @@ def obtener_promedio_cliente(cliente, conn):
         'promedio_r_p': promedio(tiempos_r_p),
         'promedio_p_c': promedio(tiempos_p_c)
     }
+
+
+def descargar_adjunto(ruta_relativa, usar_dropbox_fn, get_dropbox_client_fn, normalizar_ruta_dropbox_fn, dropbox_root_folder, adjuntos_root_dir):
+    """
+    Descarga un archivo adjunto y permite al usuario guardarlo donde quiera.
+    
+    Args:
+        ruta_relativa (str): Ruta relativa del archivo
+        usar_dropbox_fn (callable): Función que determina si se usa Dropbox
+        get_dropbox_client_fn (callable): Función que retorna el cliente de Dropbox
+        normalizar_ruta_dropbox_fn (callable): Función para normalizar rutas de Dropbox
+        dropbox_root_folder (str): Carpeta raíz en Dropbox
+        adjuntos_root_dir (str): Directorio raíz de adjuntos local
+    
+    Returns:
+        bool: True si la descarga fue exitosa, False en caso contrario
+    """
+    import os
+    from tkinter import filedialog, messagebox
+    
+    logger.info(f"Iniciando descarga de adjunto: {ruta_relativa}")
+    
+    # Obtener nombre del archivo
+    nombre_archivo = os.path.basename(ruta_relativa)
+    
+    # Preguntar al usuario dónde guardar el archivo
+    ruta_destino = filedialog.asksaveasfilename(
+        defaultextension=os.path.splitext(nombre_archivo)[1],
+        initialfile=nombre_archivo,
+        title="Guardar archivo como",
+        filetypes=[("Todos los archivos", "*.*")]
+    )
+    
+    if not ruta_destino:
+        logger.info("Descarga cancelada por el usuario")
+        return False
+    
+    try:
+        if usar_dropbox_fn():
+            # Descargar desde Dropbox
+            logger.info(f"Descargando archivo desde Dropbox: {ruta_relativa}")
+            dbx = get_dropbox_client_fn()
+            if not dbx:
+                logger.error("No se pudo obtener el cliente de Dropbox")
+                messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+                return False
+            
+            # Construir ruta en Dropbox
+            ruta_dropbox = normalizar_ruta_dropbox_fn(f"{dropbox_root_folder}/{ruta_relativa}")
+            
+            try:
+                # Descargar archivo de Dropbox
+                metadata, response = dbx.files_download(ruta_dropbox)
+                
+                # Guardar en la ubicación elegida
+                with open(ruta_destino, 'wb') as f:
+                    f.write(response.content)
+                
+                logger.info(f"Archivo descargado exitosamente desde Dropbox a: {ruta_destino}")
+                messagebox.showinfo("Descarga completa", f"Archivo guardado en:\n{ruta_destino}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error descargando archivo desde Dropbox: {e}")
+                error_msg = str(e)
+                if "not_found" in error_msg.lower() or "path_not_found" in error_msg.lower():
+                    messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+                else:
+                    messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+                return False
+        else:
+            # Copiar desde almacenamiento local
+            logger.info(f"Copiando archivo desde almacenamiento local: {ruta_relativa}")
+            import shutil
+            
+            ruta_origen = os.path.join(adjuntos_root_dir, ruta_relativa)
+            
+            if not os.path.exists(ruta_origen):
+                logger.error(f"Archivo no encontrado en almacenamiento local: {ruta_origen}")
+                messagebox.showerror("Error", f"Archivo no encontrado: {ruta_origen}")
+                return False
+            
+            # Copiar archivo
+            shutil.copy2(ruta_origen, ruta_destino)
+            
+            logger.info(f"Archivo copiado exitosamente a: {ruta_destino}")
+            messagebox.showinfo("Descarga completa", f"Archivo guardado en:\n{ruta_destino}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error inesperado descargando archivo: {e}")
+        messagebox.showerror("Error", f"No se pudo descargar el archivo: {e}")
+        return False
