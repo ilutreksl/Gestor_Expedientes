@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.25"
+APP_VERSION = "v1.0.26"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1193,8 +1193,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Configurar atajos de teclado globales
         self.bind_all("<Control-f>", lambda e: self.mostrar_busqueda_global())
         self.bind_all("<Control-F>", lambda e: self.mostrar_busqueda_global())
-        self.bind_all("<Control-n>", lambda e: self.mostrar_nuevo_rma())
-        self.bind_all("<Control-N>", lambda e: self.mostrar_nuevo_rma())
+        self.bind_all("<Control-n>", lambda e: self._abrir_editor_rma())
+        self.bind_all("<Control-N>", lambda e: self._abrir_editor_rma())
         # Refrescar listado con F5 (como en muchas aplicaciones)
         try:
             self.bind_all("<F5>", lambda e: self.aplicar_filtros_rma())
