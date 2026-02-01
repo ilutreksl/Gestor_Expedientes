@@ -1,5 +1,5 @@
 """
-Módulo para gestionar adjuntos de proveedores RMP en Dropbox.
+Módulo para gestionar adjuntos de proveedores RMP en Backblaze B2.
 Proporciona funcionalidades para listar, descargar, eliminar y visualizar archivos.
 """
 
@@ -8,93 +8,88 @@ import os
 import tempfile
 import subprocess
 from tkinter import filedialog, messagebox
+from b2sdk.exception import B2Error
 
 logger = logging.getLogger("GestorExpedientes")
 
 
-def listar_adjuntos_proveedor(proveedor_nombre, get_dropbox_client_func, usar_dropbox_func):
+def listar_adjuntos_proveedor(proveedor_nombre, get_b2_client_func, usar_b2_func):
     """
-    Lista todos los archivos de un proveedor en la carpeta RMP de Dropbox.
+    Lista todos los archivos de un proveedor en la carpeta RMP de Backblaze B2.
     
     Args:
         proveedor_nombre: Nombre del proveedor
-        get_dropbox_client_func: Función para obtener cliente de Dropbox
-        usar_dropbox_func: Función para verificar si Dropbox está habilitado
+        get_b2_client_func: Función para obtener cliente de B2 (retorna tupla b2_api, bucket)
+        usar_b2_func: Función para verificar si B2 está habilitado
         
     Returns:
         list: Lista de diccionarios con información de archivos
               [{'nombre': str, 'path': str, 'tamaño': int, 'modificado': str}, ...]
     """
     try:
-        if not usar_dropbox_func():
-            logger.warning("Dropbox no está configurado para listar adjuntos de proveedor")
+        if not usar_b2_func():
+            logger.warning("Backblaze B2 no está configurado para listar adjuntos de proveedor")
             return []
         
-        dbx = get_dropbox_client_func()
-        if not dbx:
-            logger.error("No se pudo obtener cliente de Dropbox")
+        b2_api, bucket = get_b2_client_func()
+        if not b2_api or not bucket:
+            logger.error("No se pudo obtener cliente de Backblaze B2")
             return []
         
-        # Buscar archivos en /RMP/ que empiecen con el nombre del proveedor
+        # Buscar archivos en RMP/ que empiecen con el nombre del proveedor
         # Limpiar nombre del proveedor para comparación
         proveedor_limpio = proveedor_nombre.strip().lower()
         
         try:
-            # Listar todos los archivos en /RMP/
-            resultado = dbx.files_list_folder('/RMP')
+            # Listar todos los archivos en RMP/
             archivos = []
             
-            for entry in resultado.entries:
-                # Verificar si es un archivo (no carpeta)
-                if hasattr(entry, 'name'):
-                    nombre_archivo = entry.name
-                    # Verificar si el nombre del archivo empieza con el nombre del proveedor
-                    if nombre_archivo.lower().startswith(proveedor_limpio):
-                        archivo_info = {
-                            'nombre': nombre_archivo,
-                            'path': entry.path_display,
-                            'tamaño': getattr(entry, 'size', 0),
-                            'modificado': getattr(entry, 'server_modified', None)
-                        }
-                        archivos.append(archivo_info)
+            for file_version_info, _ in bucket.ls(folder_to_list='RMP/', latest_only=True):
+                nombre_archivo = os.path.basename(file_version_info.file_name)
+                # Verificar si el nombre del archivo empieza con el nombre del proveedor
+                if nombre_archivo.lower().startswith(proveedor_limpio):
+                    archivo_info = {
+                        'nombre': nombre_archivo,
+                        'path': file_version_info.file_name,
+                        'tamaño': file_version_info.size,
+                        'modificado': file_version_info.upload_timestamp
+                    }
+                    archivos.append(archivo_info)
             
             logger.info(f"Listados {len(archivos)} adjuntos para proveedor {proveedor_nombre}")
             return archivos
             
-        except Exception as e:
-            if 'not_found' in str(e):
-                logger.info(f"Carpeta /RMP no encontrada en Dropbox")
-                return []
-            else:
-                raise
+        except B2Error as e:
+            logger.error(f"Error listando archivos en B2: {e}")
+            return []
         
     except Exception as e:
         logger.error(f"Error listando adjuntos de proveedor {proveedor_nombre}: {e}", exc_info=True)
         return []
 
 
-def descargar_adjunto_proveedor(dropbox_path, get_dropbox_client_func, usar_dropbox_func):
+def descargar_adjunto_proveedor(b2_path, get_b2_client_func, usar_b2_func):
     """
-    Descarga un archivo de Dropbox y lo guarda en la ubicación elegida por el usuario.
+    Descarga un archivo de Backblaze B2 y lo guarda en la ubicación elegida por el usuario.
     
     Args:
-        dropbox_path: Ruta del archivo en Dropbox
-        get_dropbox_client_func: Función para obtener cliente de Dropbox
-        usar_dropbox_func: Función para verificar si Dropbox está habilitado
+        b2_path: Ruta del archivo en B2
+        get_b2_client_func: Función para obtener cliente de B2
+        usar_b2_func: Función para verificar si B2 está habilitado
         
     Returns:
         tuple: (bool, str) - (éxito, mensaje/ruta)
     """
     try:
-        if not usar_dropbox_func():
-            return False, "Dropbox no está configurado"
+        if not usar_b2_func():
+            return False, "Backblaze B2 no está configurado"
         
-        dbx = get_dropbox_client_func()
-        if not dbx:
-            return False, "No se pudo conectar a Dropbox"
+        b2_api, bucket = get_b2_client_func()
+        if not b2_api or not bucket:
+            return False, "No se pudo conectar a Backblaze B2"
         
         # Obtener nombre del archivo
-        nombre_archivo = os.path.basename(dropbox_path)
+        nombre_archivo = os.path.basename(b2_path)
         
         # Pedir ubicación de descarga
         ruta_descarga = filedialog.asksaveasfilename(
@@ -106,81 +101,96 @@ def descargar_adjunto_proveedor(dropbox_path, get_dropbox_client_func, usar_drop
         if not ruta_descarga:
             return False, "Descarga cancelada"
         
-        # Descargar archivo
-        metadata, response = dbx.files_download(dropbox_path)
+        # Descargar archivo desde B2
+        downloaded_file = bucket.download_file_by_name(b2_path)
+        downloaded_file.save_to(ruta_descarga)
         
-        with open(ruta_descarga, 'wb') as f:
-            f.write(response.content)
-        
-        logger.info(f"Archivo descargado: {dropbox_path} -> {ruta_descarga}")
+        logger.info(f"Archivo descargado: {b2_path} -> {ruta_descarga}")
         return True, ruta_descarga
         
+    except B2Error as e:
+        logger.error(f"Error descargando archivo {b2_path} desde B2: {e}", exc_info=True)
+        return False, f"Error B2: {str(e)}"
     except Exception as e:
-        logger.error(f"Error descargando archivo {dropbox_path}: {e}", exc_info=True)
+        logger.error(f"Error descargando archivo {b2_path}: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
-def eliminar_adjunto_proveedor(dropbox_path, get_dropbox_client_func, usar_dropbox_func):
+def eliminar_adjunto_proveedor(b2_path, get_b2_client_func, usar_b2_func):
     """
-    Elimina un archivo de Dropbox.
+    Elimina un archivo de Backblaze B2.
     
     Args:
-        dropbox_path: Ruta del archivo en Dropbox
-        get_dropbox_client_func: Función para obtener cliente de Dropbox
-        usar_dropbox_func: Función para verificar si Dropbox está habilitado
+        b2_path: Ruta del archivo en B2
+        get_b2_client_func: Función para obtener cliente de B2
+        usar_b2_func: Función para verificar si B2 está habilitado
         
     Returns:
         tuple: (bool, str) - (éxito, mensaje)
     """
     try:
-        if not usar_dropbox_func():
-            return False, "Dropbox no está configurado"
+        if not usar_b2_func():
+            return False, "Backblaze B2 no está configurado"
         
-        dbx = get_dropbox_client_func()
-        if not dbx:
-            return False, "No se pudo conectar a Dropbox"
+        b2_api, bucket = get_b2_client_func()
+        if not b2_api or not bucket:
+            return False, "No se pudo conectar a Backblaze B2"
+        
+        # Listar archivo para obtener file_id
+        file_id = None
+        for file_version_info, _ in bucket.ls(b2_path, latest_only=True):
+            if file_version_info.file_name == b2_path:
+                file_id = file_version_info.id_
+                break
+        
+        if not file_id:
+            return False, "Archivo no encontrado en B2"
         
         # Eliminar archivo
-        dbx.files_delete_v2(dropbox_path)
+        b2_api.delete_file_version(file_id, b2_path)
         
-        logger.info(f"Archivo eliminado de Dropbox: {dropbox_path}")
+        logger.info(f"Archivo eliminado de Backblaze B2: {b2_path}")
         return True, "Archivo eliminado correctamente"
         
+    except B2Error as e:
+        logger.error(f"Error eliminando archivo {b2_path} de B2: {e}", exc_info=True)
+        return False, f"Error B2: {str(e)}"
     except Exception as e:
-        logger.error(f"Error eliminando archivo {dropbox_path}: {e}", exc_info=True)
+        logger.error(f"Error eliminando archivo {b2_path}: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
-def visualizar_adjunto_proveedor(dropbox_path, get_dropbox_client_func, usar_dropbox_func):
+def visualizar_adjunto_proveedor(b2_path, get_b2_client_func, usar_b2_func):
     """
-    Descarga temporalmente y abre un archivo de Dropbox.
+    Descarga temporalmente y abre un archivo de Backblaze B2.
     
     Args:
-        dropbox_path: Ruta del archivo en Dropbox
-        get_dropbox_client_func: Función para obtener cliente de Dropbox
-        usar_dropbox_func: Función para verificar si Dropbox está habilitado
+        b2_path: Ruta del archivo en B2
+        get_b2_client_func: Función para obtener cliente de B2
+        usar_b2_func: Función para verificar si B2 está habilitado
         
     Returns:
         tuple: (bool, str) - (éxito, mensaje)
     """
     try:
-        if not usar_dropbox_func():
-            return False, "Dropbox no está configurado"
+        if not usar_b2_func():
+            return False, "Backblaze B2 no está configurado"
         
-        dbx = get_dropbox_client_func()
-        if not dbx:
-            return False, "No se pudo conectar a Dropbox"
+        b2_api, bucket = get_b2_client_func()
+        if not b2_api or not bucket:
+            return False, "No se pudo conectar a Backblaze B2"
         
         # Obtener nombre y extensión del archivo
-        nombre_archivo = os.path.basename(dropbox_path)
+        nombre_archivo = os.path.basename(b2_path)
         _, extension = os.path.splitext(nombre_archivo)
         
         # Crear archivo temporal
         with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp_file:
-            # Descargar archivo
-            metadata, response = dbx.files_download(dropbox_path)
-            tmp_file.write(response.content)
             tmp_path = tmp_file.name
+        
+        # Descargar archivo desde B2
+        downloaded_file = bucket.download_file_by_name(b2_path)
+        downloaded_file.save_to(tmp_path)
         
         # Abrir archivo con aplicación predeterminada
         if os.name == 'nt':  # Windows
@@ -188,29 +198,32 @@ def visualizar_adjunto_proveedor(dropbox_path, get_dropbox_client_func, usar_dro
         elif os.name == 'posix':  # macOS/Linux
             subprocess.call(['open', tmp_path])
         
-        logger.info(f"Archivo abierto para visualización: {dropbox_path}")
+        logger.info(f"Archivo abierto para visualización: {b2_path}")
         return True, "Archivo abierto correctamente"
         
+    except B2Error as e:
+        logger.error(f"Error visualizando archivo {b2_path} desde B2: {e}", exc_info=True)
+        return False, f"Error B2: {str(e)}"
     except Exception as e:
-        logger.error(f"Error visualizando archivo {dropbox_path}: {e}", exc_info=True)
+        logger.error(f"Error visualizando archivo {b2_path}: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
-def subir_adjunto_proveedor(proveedor_nombre, get_dropbox_client_func, usar_dropbox_func):
+def subir_adjunto_proveedor(proveedor_nombre, get_b2_client_func, usar_b2_func):
     """
-    Permite al usuario seleccionar y subir un archivo a Dropbox.
+    Permite al usuario seleccionar y subir un archivo a Backblaze B2.
     
     Args:
         proveedor_nombre: Nombre del proveedor
-        get_dropbox_client_func: Función para obtener cliente de Dropbox
-        usar_dropbox_func: Función para verificar si Dropbox está habilitado
+        get_b2_client_func: Función para obtener cliente de B2
+        usar_b2_func: Función para verificar si B2 está habilitado
         
     Returns:
         tuple: (bool, str) - (éxito, mensaje)
     """
     try:
-        if not usar_dropbox_func():
-            return False, "Dropbox no está configurado"
+        if not usar_b2_func():
+            return False, "Backblaze B2 no está configurado"
         
         # Pedir archivo local
         archivo_local = filedialog.askopenfilename(
@@ -220,32 +233,32 @@ def subir_adjunto_proveedor(proveedor_nombre, get_dropbox_client_func, usar_drop
         if not archivo_local:
             return False, "Selección cancelada"
         
-        dbx = get_dropbox_client_func()
-        if not dbx:
-            return False, "No se pudo conectar a Dropbox"
+        b2_api, bucket = get_b2_client_func()
+        if not b2_api or not bucket:
+            return False, "No se pudo conectar a Backblaze B2"
         
         # Obtener nombre del archivo
         nombre_archivo = os.path.basename(archivo_local)
         
-        # Construir ruta en Dropbox
-        # Formato: /RMP/{nombre_proveedor}_{nombre_archivo}
+        # Construir ruta en B2
+        # Formato: RMP/{nombre_proveedor}_{nombre_archivo}
         safe_proveedor = ''.join(c for c in proveedor_nombre if c.isalnum() or c in (' ', '-', '_')).strip()
         safe_proveedor = safe_proveedor.replace(' ', '_')
         
-        dropbox_path = f"/RMP/{safe_proveedor}_{nombre_archivo}"
+        b2_path = f"RMP/{safe_proveedor}_{nombre_archivo}"
         
-        # Subir archivo
-        with open(archivo_local, 'rb') as f:
-            import dropbox
-            dbx.files_upload(
-                f.read(),
-                dropbox_path,
-                mode=dropbox.files.WriteMode('overwrite')
-            )
+        # Subir archivo a B2
+        bucket.upload_local_file(
+            local_file=archivo_local,
+            file_name=b2_path
+        )
         
-        logger.info(f"Archivo subido a Dropbox: {dropbox_path}")
+        logger.info(f"Archivo subido a Backblaze B2: {b2_path}")
         return True, f"Archivo '{nombre_archivo}' subido correctamente"
         
+    except B2Error as e:
+        logger.error(f"Error subiendo archivo para proveedor {proveedor_nombre} a B2: {e}", exc_info=True)
+        return False, f"Error B2: {str(e)}"
     except Exception as e:
         logger.error(f"Error subiendo archivo para proveedor {proveedor_nombre}: {e}", exc_info=True)
         return False, f"Error: {str(e)}"
@@ -266,3 +279,4 @@ def formatear_tamaño(bytes):
             return f"{bytes:.1f} {unidad}"
         bytes /= 1024.0
     return f"{bytes:.1f} TB"
+

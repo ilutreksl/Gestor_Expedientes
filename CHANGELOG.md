@@ -1,4 +1,7 @@
-Cambio V.1.0.21
+- Migracion de Dropbox a Backblaze B2 (1.0.22)
+
+
+Cambio V.1.0.21 - ✨ Últimas mejoras implementadas:
 
 - Añadida en la columna de estadisticas, el almacenamiento de las nubes utilizadas por la aplicacion.
 - Modificado titulos de la ventana de expedientes.
@@ -12,7 +15,7 @@ Cambio V.1.0.21
 - Las referencias de los articulos en los expedientes, siempre se guardan en mayusculas.
 
 
-Cambio V.1.0.15 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.15
 
 - Añadido filtros y busqueda en el historial de cada expediente.
 - Mejorada la ventana de RMP. Ahora separada por ventanas y añadidas las funciones de gestion de adjuntos y treas.

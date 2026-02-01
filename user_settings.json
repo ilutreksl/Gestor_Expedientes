@@ -15,7 +15,13 @@
       "icon_size": 24,
       "theme": "themes/BH_rime.json",
       "appearance_mode": "light",
+      "mostrar_aviso": true,
       "historial_busquedas": [
+        {
+          "termino": "carlos",
+          "filtros": {},
+          "fecha": "2026-01-30T14:35:57.266352"
+        },
         {
           "termino": "068_d6543",
           "filtros": {},
@@ -30,11 +36,6 @@
           "termino": "al25/7595",
           "filtros": {},
           "fecha": "2025-12-12T15:15:28.479203"
-        },
-        {
-          "termino": "carlos",
-          "filtros": {},
-          "fecha": "2025-11-05T10:03:15.493727"
         },
         {
           "termino": "cliente test",

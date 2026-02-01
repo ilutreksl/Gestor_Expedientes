@@ -114,30 +114,25 @@ ctk.CTkToplevel.destroy = _safe_destroy
 import threading
 import tempfile
 
-# Importaciones para Dropbox
-import dropbox
-from dropbox.exceptions import ApiError, AuthError
+# Importaciones para Backblaze B2
 try:
-    from dropbox_config import (
-        DROPBOX_ACCESS_TOKEN, DROPBOX_ROOT_FOLDER, 
-        DROPBOX_APP_KEY, DROPBOX_APP_SECRET
-    )
-    # Intentar importar refresh token si existe
-    try:
-        from dropbox_config import DROPBOX_REFRESH_TOKEN
-    except ImportError:
-        DROPBOX_REFRESH_TOKEN = None
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+    from b2sdk.v2.exception import B2Error, NonExistentBucket
+    B2_DISPONIBLE = True
 except ImportError:
-    print("ADVERTENCIA: No se pudo cargar dropbox_config.py. El sistema de adjuntos usará almacenamiento local.")
-    DROPBOX_ACCESS_TOKEN = None
-    DROPBOX_REFRESH_TOKEN = None
-    DROPBOX_APP_KEY = None
-    DROPBOX_APP_SECRET = None
-    DROPBOX_ROOT_FOLDER = "/Adjuntos_RMA"
+    print("ADVERTENCIA: b2sdk no está instalado. Instala con: pip install b2sdk")
+    B2_DISPONIBLE = False
 
-# Variables globales para cache de cliente de Dropbox
-_dropbox_client_cache = None
-_last_token_check = 0
+# Cargar credenciales de B2 desde variables de entorno
+B2_KEY_ID = os.getenv("B2_KEY_ID")
+B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
+B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME", "gestion-expedientes-app-b2")
+B2_ROOT_FOLDER = "Adjuntos_RMA"  # Prefijo en bucket para adjuntos de RMA
+
+# Variables globales para cache de cliente de B2
+_b2_api_cache = None
+_b2_bucket_cache = None
+_last_b2_check = 0
 
 # ================================
 # FUNCIONES DE COMPRESIÓN DE IMÁGENES
@@ -328,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.21"
+APP_VERSION = "v1.0.22"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -659,84 +654,74 @@ def optimize_database():
 ADJUNTOS_ROOT_DIR = "Adjuntos_RMA" # Carpeta principal para guardar todos los archivos adjuntos
 # -----------------------------
 
-# --- CONFIGURACIÓN Y FUNCIONES PARA DROPBOX ---
-def get_dropbox_client():
+# --- CONFIGURACIÓN Y FUNCIONES PARA BACKBLAZE B2 ---
+def get_b2_client():
     """
-    Crea y retorna un cliente de Dropbox con manejo automático de tokens expirados.
-    Intenta usar refresh token si está disponible, sino usa access token temporal.
-    Retorna None si no está configurado o hay error irrecuperable.
+    Crea y retorna un cliente de Backblaze B2 con caché.
+    Retorna: (B2Api, Bucket) o (None, None) si no está configurado o hay error.
     """
-    global _dropbox_client_cache, _last_token_check
+    global _b2_api_cache, _b2_bucket_cache, _last_b2_check
     import time
     
-    # Cache del cliente para evitar múltiples verificaciones
+    # Cache del cliente para evitar múltiples autenticaciones
     current_time = time.time()
-    if _dropbox_client_cache and (current_time - _last_token_check < 300):  # Cache por 5 minutos
-        return _dropbox_client_cache
+    if _b2_api_cache and _b2_bucket_cache and (current_time - _last_b2_check < 300):  # Cache por 5 minutos
+        return _b2_api_cache, _b2_bucket_cache
     
-    # Verificar si tenemos las credenciales básicas
-    if not DROPBOX_APP_KEY or not DROPBOX_APP_SECRET:
-        print("DROPBOX: App key y app secret requeridos")
-        return None
+    # Verificar si b2sdk está disponible
+    if not B2_DISPONIBLE:
+        print("B2: SDK no disponible")
+        return None, None
     
-    # Método 1: Intentar usar refresh token (permanente)
-    if DROPBOX_REFRESH_TOKEN:
-        try:
-            dbx = dropbox.Dropbox(
-                oauth2_refresh_token=DROPBOX_REFRESH_TOKEN,
-                app_key=DROPBOX_APP_KEY,
-                app_secret=DROPBOX_APP_SECRET
-            )
-            # Verificar que funciona
-            dbx.users_get_current_account()
-            _dropbox_client_cache = dbx
-            _last_token_check = current_time
-            print("DROPBOX: Conectado usando refresh token")
-            return dbx
-        except (AuthError, ApiError) as e:
-            print(f"DROPBOX: Error con refresh token: {e}")
-        except Exception as e:
-            print(f"DROPBOX: Error inesperado con refresh token: {e}")
+    # Verificar credenciales
+    if not B2_KEY_ID or not B2_APPLICATION_KEY:
+        print("B2: Credenciales no configuradas en .env")
+        return None, None
     
-    # Método 2: Intentar usar access token temporal (4 horas)
-    if DROPBOX_ACCESS_TOKEN and DROPBOX_ACCESS_TOKEN != "tu_access_token_aqui":
-        try:
-            dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-            # Verificar que funciona
-            dbx.users_get_current_account()
-            _dropbox_client_cache = dbx
-            _last_token_check = current_time
-            print("DROPBOX: Conectado usando access token temporal")
-            return dbx
-        except AuthError as e:
-            if 'expired_access_token' in str(e):
-                print("DROPBOX: Token de acceso expirado. Necesitas generar uno nuevo.")
-                print("DROPBOX: Ve a https://www.dropbox.com/developers/apps > Settings > OAuth 2 > Generate access token")
-            else:
-                print(f"DROPBOX: Error de autenticación: {e}")
-        except (ApiError) as e:
-            print(f"DROPBOX: Error de API: {e}")
-        except Exception as e:
-            print(f"DROPBOX: Error inesperado: {e}")
-    
-    # Si llegamos aquí, no pudimos conectar
-    print("DROPBOX: No se pudo establecer conexión. Sistema funcionará en modo local.")
-    _dropbox_client_cache = None
-    _last_token_check = current_time
-    return None
+    try:
+        # Crear API de B2
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        
+        # Autorizar cuenta
+        b2_api.authorize_account("production", B2_KEY_ID, B2_APPLICATION_KEY)
+        
+        # Obtener bucket
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
+        
+        # Guardar en cache
+        _b2_api_cache = b2_api
+        _b2_bucket_cache = bucket
+        _last_b2_check = current_time
+        
+        print(f"B2: Conectado al bucket '{B2_BUCKET_NAME}'")
+        return b2_api, bucket
+        
+    except NonExistentBucket:
+        print(f"B2: Bucket '{B2_BUCKET_NAME}' no existe")
+        return None, None
+    except B2Error as e:
+        print(f"B2: Error de autenticación: {e}")
+        return None, None
+    except Exception as e:
+        print(f"B2: Error inesperado: {e}")
+        return None, None
 
-def usar_dropbox():
+def usar_b2():
     """
-    Determina si se debe usar Dropbox o almacenamiento local.
+    Determina si se debe usar Backblaze B2 o almacenamiento local.
     """
-    return get_dropbox_client() is not None
+    b2_api, bucket = get_b2_client()
+    return b2_api is not None and bucket is not None
 
-def normalizar_ruta_dropbox(ruta):
+def normalizar_ruta_b2(ruta):
     """
-    Normaliza una ruta para Dropbox (debe empezar con /).
+    Normaliza una ruta para B2 (sin "/" inicial, usar forward slashes).
     """
-    if not ruta.startswith('/'):
-        ruta = '/' + ruta
+    # Eliminar "/" inicial si existe
+    if ruta.startswith('/'):
+        ruta = ruta[1:]
+    # Reemplazar backslashes por forward slashes
     return ruta.replace('\\', '/')
 
 # ------------------------------------------------
@@ -1994,20 +1979,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
         error_label.pack(pady=2)
     
     def mostrar_uso_almacenamiento(self):
-        """Muestra el uso de almacenamiento de Dropbox, Backblaze B2 y Turso."""
+        """Muestra el uso de almacenamiento de Backblaze B2 y Turso."""
         try:
             from lib.uso_almacenamiento import obtener_todos_los_usos
             
-            # Obtener información de almacenamiento
-            # Pasamos el cliente de Dropbox si existe
-            dropbox_client = None
-            if hasattr(self, 'usar_dropbox') and self.usar_dropbox():
-                try:
-                    dropbox_client = self.get_dropbox_client()
-                except:
-                    pass
-            
-            usos = obtener_todos_los_usos(dropbox_client)
+            # Obtener información de almacenamiento (no necesita parámetros ahora)
+            usos = obtener_todos_los_usos()
             
             # Actualizar UI desde el thread principal
             self.master.after(0, lambda: self._actualizar_ui_storage(usos))
@@ -2036,35 +2013,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                          wraplength=180)
             titulo_storage.pack(pady=(0, 6))
             
-            # Mostrar Dropbox
-            dropbox_info = usos.get('dropbox', {})
-            if dropbox_info.get('error'):
-                dropbox_texto = f"Dropbox: {dropbox_info['error']}"
-            else:
-                usado_mb = dropbox_info.get('usado_mb', 0)
-                total_mb = dropbox_info.get('total_mb', 0)
-                tipo = dropbox_info.get('tipo_cuenta', 'N/A')
-                
-                # Mostrar en MB si es < 1GB, en GB si es >= 1GB
-                if usado_mb < 1024:
-                    usado_texto = f"{usado_mb:.1f}MB"
-                else:
-                    usado_texto = f"{usado_mb / 1024:.2f}GB"
-                
-                total_gb = total_mb / 1024
-                dropbox_texto = f"Dropbox: {usado_texto} / {total_gb:.0f}GB ({tipo})"
-            
-            lbl_dropbox = ctk.CTkLabel(self.storage_info_frame, 
-                                      text=dropbox_texto, 
-                                      font=ctk.CTkFont(size=9),
-                                      anchor="w",
-                                      wraplength=180)
-            lbl_dropbox.pack(fill="x", padx=10, pady=2)
-            
             # Mostrar Backblaze B2
             b2_info = usos.get('backblaze', {})
             if b2_info.get('error'):
-                b2_texto = f"Backblaze: {b2_info['error']}"
+                b2_texto = f"Backblaze B2: {b2_info['error']}"
             else:
                 usado_mb = b2_info.get('usado_mb', 0)
                 total_mb = b2_info.get('total_mb')
@@ -2078,9 +2030,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 
                 if total_mb and total_mb > 0:
                     total_gb = total_mb / 1024
-                    b2_texto = f"Backblaze: {usado_texto} / {total_gb:.0f}GB ({tipo})"
+                    b2_texto = f"Backblaze B2: {usado_texto} / {total_gb:.0f}GB ({tipo})"
                 else:
-                    b2_texto = f"Backblaze: {usado_texto} / Ilimitado ({tipo})"
+                    b2_texto = f"Backblaze B2: {usado_texto} / Ilimitado ({tipo})"
             
             lbl_b2 = ctk.CTkLabel(self.storage_info_frame, 
                                  text=b2_texto, 
@@ -5044,8 +4996,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Nueva pestaña para información técnica — por si en el futuro añadimos más campos técnicos
         info_tecnica_tab = self.tabview.add("🔧 Información Técnica")
         # Determinar título de la pestaña según el modo de almacenamiento
-        if usar_dropbox():
-            adjuntos_tab = self.tabview.add("📎 Adjuntos (Dropbox)")
+        if usar_b2():
+            adjuntos_tab = self.tabview.add("📎 Adjuntos (Backblaze B2)")
         else:
             adjuntos_tab = self.tabview.add("📎 Adjuntos (Local)")
         historial_tab = self.tabview.add("📜 Historial de Cambios")
@@ -7138,11 +7090,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         return datos_maestro
 
     def autorrellena_pdf(self):
-        """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda en Dropbox.
+        """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda en Backblaze B2.
 
         Busca 'Plantilla_SOLICITUD RMA.pdf' en la carpeta plantillas/. Si no existe, abre
         un diálogo para seleccionar la plantilla. Luego llama a la función de librería
-        para rellenar el PDF y lo sube a Dropbox como adjunto.
+        para rellenar el PDF y lo sube a Backblaze B2 como adjunto.
         """
         # Validaciones
         if not hasattr(self, 'current_rma_id') or not self.current_rma_id:
@@ -7202,19 +7154,25 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Preparar nombres de archivo
         nombre_base = f"{codigo_rma}_SOLICITUD RMA.pdf"
         
-        # Si el archivo ya existe en Dropbox, añadimos timestamp para evitar sobrescribir
+        # Si el archivo ya existe en Backblaze B2, añadimos timestamp para evitar sobrescribir
         nombre_salida = nombre_base
-        if usar_dropbox():
-            # Verificar si ya existe en Dropbox
-            dbx = get_dropbox_client()
-            if dbx:
+        if usar_b2():
+            # Verificar si ya existe en Backblaze B2
+            b2_api, bucket = get_b2_client()
+            if b2_api and bucket:
                 try:
-                    ruta_check = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{codigo_rma}/{nombre_base}")
-                    dbx.files_get_metadata(ruta_check)
-                    # Si llegamos aquí, el archivo existe, añadir timestamp
-                    fecha_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                    nombre_salida = f"{codigo_rma}_SOLICITUD RMA_{fecha_str}.pdf"
-                except:
+                    ruta_check = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{codigo_rma}/{nombre_base}")
+                    # Intentar listar el archivo específico
+                    file_found = False
+                    for file_version_info, _ in bucket.ls(ruta_check, latest_only=True):
+                        file_found = True
+                        break
+                    
+                    if file_found:
+                        # El archivo existe, añadir timestamp
+                        fecha_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                        nombre_salida = f"{codigo_rma}_SOLICITUD RMA_{fecha_str}.pdf"
+                except B2Error:
                     # El archivo no existe, podemos usar el nombre base
                     pass
 
@@ -7314,10 +7272,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             return
 
         # Decidir dónde guardar (Dropbox o local)
-        if usar_dropbox():
-            # Subir a Dropbox
-            exito, ruta_relativa = self._subir_archivo_dropbox(temp_pdf_path, codigo_rma, nombre_salida)
-            tipo_almacenamiento = 'dropbox'
+        if usar_b2():
+            # Subir a Backblaze B2
+            exito, ruta_relativa = self._subir_archivo_b2(temp_pdf_path, codigo_rma, nombre_salida)
+            tipo_almacenamiento = 'backblaze'
             ubicacion_desc = "Dropbox"
         else:
             # Guardar localmente (fallback)
@@ -7376,7 +7334,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 self.current_rma_id,
                 datetime.datetime.now().isoformat(),
                 self.username,
-                f"Generada Solicitud RMA: {nombre_salida} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})"
+                f"Generada Solicitud RMA: {nombre_salida} ({'☁️ Backblaze B2' if usar_b2() else '💾 Local'})"
             ))
 
             conn.commit()
@@ -7396,8 +7354,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 pass
                 
             # Feedback al usuario personalizado según ubicación
-            if usar_dropbox():
-                messagebox.showinfo("Éxito", f"✅ Solicitud PDF '{nombre_salida}' generada y subida a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+            if usar_b2():
+                messagebox.showinfo("Éxito", f"✅ Solicitud PDF '{nombre_salida}' generada y subida a Backblaze B2 correctamente.\n\n📁 Ubicación: {ruta_relativa}")
             else:
                 messagebox.showinfo("Éxito", f"✅ Solicitud PDF '{nombre_salida}' generada y guardada localmente.")
                 
@@ -8236,7 +8194,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
             conn.commit()
             if getattr(self, '_usar_tipo_almacenamiento', False):
-                print("✓ Sistema de adjuntos configurado con esquema nuevo (Dropbox/Local tracking)")
+                print("✓ Sistema de adjuntos configurado con esquema nuevo (Backblaze B2/Local tracking)")
             else:
                 print("✓ Sistema de adjuntos configurado con esquema clásico (compatible)")
         except sqlite3.Error as e:
@@ -8292,49 +8250,31 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
     
     def crear_carpeta_adjuntos_rma(self, codigo_rma):
         """
-        Crea la carpeta específica para el RMA en Dropbox o localmente.
-        Retorna la ruta (para Dropbox será la ruta remota, para local será la ruta física).
+        Crea la carpeta específica para el RMA en Backblaze B2 o localmente.
+        Retorna la ruta (para B2 será el prefijo, para local será la ruta física).
         """
-        if usar_dropbox():
-            return self._crear_carpeta_dropbox(codigo_rma)
+        if usar_b2():
+            return self._crear_carpeta_b2(codigo_rma)
         else:
             return self._crear_carpeta_local(codigo_rma)
     
-    def _crear_carpeta_dropbox(self, codigo_rma):
-        """Crea una carpeta en Dropbox para el RMA."""
-        dbx = get_dropbox_client()
-        if not dbx:
-            # Fallback a almacenamiento local si Dropbox falla
-            print("Dropbox no disponible, usando almacenamiento local")
+    def _crear_carpeta_b2(self, codigo_rma):
+        """Crea una carpeta (prefijo) en Backblaze B2 para el RMA."""
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            # Fallback a almacenamiento local si B2 falla
+            print("B2 no disponible, usando almacenamiento local")
             return self._crear_carpeta_local(codigo_rma)
         
-        # Ruta en Dropbox: /Adjuntos_RMA/RMA25001
-        carpeta_rma = f"{DROPBOX_ROOT_FOLDER}/{codigo_rma}"
-        carpeta_rma = normalizar_ruta_dropbox(carpeta_rma)
+        # Ruta en B2: Adjuntos_RMA/RMA25001
+        # B2 no requiere crear carpetas explícitamente, usa prefijos en nombres de archivo
+        carpeta_rma = f"{B2_ROOT_FOLDER}/{codigo_rma}"
+        carpeta_rma = normalizar_ruta_b2(carpeta_rma)
         
-        try:
-            # Verificar si la carpeta ya existe
-            dbx.files_get_metadata(carpeta_rma)
-            print(f"Carpeta Dropbox ya existe: {carpeta_rma}")
-        except ApiError as e:
-            # Verificar si el error es porque la carpeta no existe
-            error_details = str(e)
-            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
-                # La carpeta no existe, crearla
-                try:
-                    dbx.files_create_folder_v2(carpeta_rma)
-                    print(f"Carpeta Dropbox creada: {carpeta_rma}")
-                except ApiError as create_error:
-                    print(f"Error creando carpeta en Dropbox: {create_error}")
-                    # Fallback a almacenamiento local
-                    return self._crear_carpeta_local(codigo_rma)
-            else:
-                print(f"Error verificando carpeta Dropbox: {e}")
-                return self._crear_carpeta_local(codigo_rma)
-        except Exception as e:
-            print(f"Error inesperado verificando carpeta Dropbox: {e}")
-            return self._crear_carpeta_local(codigo_rma)
+        print(f"Prefijo B2 configurado para RMA: {carpeta_rma}")
         
+        # En B2 no necesitamos crear carpetas, solo retornamos el prefijo
+        # Los archivos se crearán con este prefijo automáticamente
         return carpeta_rma
     
     def _crear_carpeta_local(self, codigo_rma):
@@ -8363,8 +8303,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # LÓGICA DE ABRIR CARPETA (Modo Informe)
         # -----------------------------------------------------------------
         if modo_abrir_carpeta:
-            if usar_dropbox():
-                self._abrir_carpeta_dropbox(codigo_rma)
+            if usar_b2():
+                self._abrir_carpeta_b2(codigo_rma)
             else:
                 self._abrir_carpeta_local(codigo_rma)
             return
@@ -8424,8 +8364,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 print(f"📁 Procesando archivo: {nombre_original}")
             
             # Subir archivo (Dropbox o local) con compresión automática para imágenes
-            if usar_dropbox():
-                exito, ruta_relativa = self._subir_archivo_dropbox(filepath, codigo_rma, nombre_original, ventana_progreso_general)
+            if usar_b2():
+                exito, ruta_relativa = self._subir_archivo_b2(filepath, codigo_rma, nombre_original, ventana_progreso_general)
             else:
                 exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_original)
             
@@ -8439,7 +8379,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             try:
                 if getattr(self, '_usar_tipo_almacenamiento', False):
                     # Usar esquema nuevo con tipo_almacenamiento
-                    tipo_almacenamiento = 'dropbox' if usar_dropbox() else 'local'
+                    tipo_almacenamiento = 'backblaze' if usar_b2() else 'local'
                     cursor.execute("""
                         INSERT INTO rma_adjuntos (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento) 
                         VALUES (?, ?, ?, ?, ?, ?)
@@ -8529,13 +8469,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         if archivos_exitosos > 0:
             self.cargar_lista_adjuntos(self.current_rma_id)
     
-    def _abrir_carpeta_dropbox(self, codigo_rma):
-        """Maneja la apertura de carpeta en modo Dropbox."""
-        # Para Dropbox, podemos abrir el URL web o crear una carpeta local temporal
-        messagebox.showinfo("Dropbox", 
-            f"Los adjuntos están almacenados en Dropbox.\n"
-            f"Carpeta: {DROPBOX_ROOT_FOLDER}/{codigo_rma}\n\n"
-            f"Para acceder, ve a tu Dropbox web o aplicación.")
+    def _abrir_carpeta_b2(self, codigo_rma):
+        """Maneja la apertura de carpeta en modo Backblaze B2."""
+        # Para B2, mostrar información ya que no hay carpeta física local
+        messagebox.showinfo("Backblaze B2", 
+            f"Los adjuntos están almacenados en Backblaze B2.\n"
+            f"Bucket: {B2_BUCKET_NAME}\n"
+            f"Prefijo: {B2_ROOT_FOLDER}/{codigo_rma}\n\n"
+            f"Para acceder, usa la consola web de Backblaze B2 o descarga los archivos desde la pestaña de Adjuntos.")
     
     def _abrir_carpeta_local(self, codigo_rma):
         """Maneja la apertura de carpeta en modo local (implementación original)."""
@@ -8551,14 +8492,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta:\n{ruta_destino_base}\nError: {e}")
     
-    def _subir_archivo_dropbox(self, filepath, codigo_rma, nombre_archivo, ventana_progreso_externa=None):
+    def _subir_archivo_b2(self, filepath, codigo_rma, nombre_archivo, ventana_progreso_externa=None):
         """
-        Sube un archivo a Dropbox con compresión inteligente para imágenes.
+        Sube un archivo a Backblaze B2 con compresión inteligente para imágenes.
         Retorna: (éxito: bool, ruta_relativa: str)
         """
-        dbx = get_dropbox_client()
-        if not dbx:
-            messagebox.showerror("Error", "No se puede conectar con Dropbox. Usando almacenamiento local.")
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            messagebox.showerror("Error", "No se puede conectar con Backblaze B2. Usando almacenamiento local.")
             return self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
         
         archivo_a_subir = filepath
@@ -8724,22 +8665,20 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     except:
                         pass
         
-        # ===== SUBIDA A DROPBOX =====
-        # Crear la carpeta si no existe
+        # ===== SUBIDA A BACKBLAZE B2 =====
+        # Crear el prefijo (carpeta virtual) si no existe
         ruta_carpeta = self.crear_carpeta_adjuntos_rma(codigo_rma)
         
-        # Ruta completa en Dropbox
-        ruta_dropbox = f"{ruta_carpeta}/{nombre_archivo_final}"
-        ruta_dropbox = normalizar_ruta_dropbox(ruta_dropbox)
+        # Ruta completa en B2 (file_name completo con prefijo)
+        ruta_b2 = f"{ruta_carpeta}/{nombre_archivo_final}"
+        ruta_b2 = normalizar_ruta_b2(ruta_b2)
         
         try:
             # Leer el archivo (original o comprimido) y subirlo
-            with open(archivo_a_subir, 'rb') as f:
-                dbx.files_upload(
-                    f.read(), 
-                    ruta_dropbox, 
-                    mode=dropbox.files.WriteMode('overwrite')
-                )
+            bucket.upload_local_file(
+                local_file=archivo_a_subir,
+                file_name=ruta_b2
+            )
             
             # Limpiar archivo temporal si existe
             if archivo_temporal:
@@ -8759,7 +8698,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     os.unlink(archivo_temporal)
                 except:
                     pass
-            messagebox.showerror("Error Dropbox", f"No se pudo subir el archivo a Dropbox: {e}")
+            messagebox.showerror("Error Backblaze B2", f"No se pudo subir el archivo a Backblaze B2: {e}")
             return False, ""
     
     def _subir_archivo_local(self, filepath, codigo_rma, nombre_archivo):
@@ -8931,12 +8870,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
     
     def _limpiar_archivo_subido(self, ruta_relativa):
         """Intenta eliminar un archivo subido si falla la inserción en BD."""
-        if usar_dropbox():
-            dbx = get_dropbox_client()
-            if dbx:
+        if usar_b2():
+            b2_api, bucket = get_b2_client()
+            if b2_api and bucket:
                 try:
-                    ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
-                    dbx.files_delete_v2(ruta_dropbox)
+                    ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
+                    # Listar versiones del archivo para obtener file_id
+                    file_versions = bucket.ls(ruta_b2, latest_only=True, recursive=False)
+                    for file_version, _ in file_versions:
+                        if file_version.file_name == ruta_b2:
+                            b2_api.delete_file_version(file_version.id_, file_version.file_name)
+                            break
                 except:
                     pass  # No importa si falla la limpieza
         else:
@@ -9009,7 +8953,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             Tooltip(btn_descargar, "Descargar archivo")
 
             # Botón Editar (descarga, edita y resube)
-            if usar_dropbox():  # Solo mostrar editar en modo Dropbox
+            if usar_b2():  # Solo mostrar editar en modo Dropbox
                 btn_editar = ctk.CTkButton(
                     item_frame, 
                     text="✏️", 
@@ -9033,31 +8977,31 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
         # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
     def abrir_adjunto(self, ruta_relativa):
-        """Abre el archivo adjunto desde Dropbox o almacenamiento local."""
-        if usar_dropbox():
-            self._abrir_adjunto_dropbox(ruta_relativa)
+        """Abre el archivo adjunto desde Backblaze B2 o almacenamiento local."""
+        if usar_b2():
+            self._abrir_adjunto_b2(ruta_relativa)
         else:
             self._abrir_adjunto_local(ruta_relativa)
     
-    def _abrir_adjunto_dropbox(self, ruta_relativa):
-        """Descarga temporalmente un archivo de Dropbox y lo abre."""
-        dbx = get_dropbox_client()
-        if not dbx:
-            messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+    def _abrir_adjunto_b2(self, ruta_relativa):
+        """Descarga temporalmente un archivo de Backblaze B2 y lo abre."""
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
             return
         
-        # Construir ruta en Dropbox
-        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        # Construir ruta en B2
+        ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
         
         try:
             # Crear archivo temporal
             nombre_archivo = os.path.basename(ruta_relativa)
             with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{nombre_archivo}") as temp_file:
                 temp_path = temp_file.name
-                
-                # Descargar archivo de Dropbox
-                metadata, response = dbx.files_download(ruta_dropbox)
-                temp_file.write(response.content)
+            
+            # Descargar archivo de B2
+            downloaded_file = bucket.download_file_by_name(ruta_b2)
+            downloaded_file.save_to(temp_path)
             
             # Abrir archivo temporal
             self._abrir_archivo_sistema(temp_path)
@@ -9073,14 +9017,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # Limpiar después de 60 segundos (suficiente tiempo para que se abra)
             threading.Timer(60.0, limpiar_temp).start()
             
-        except ApiError as e:
-            error_details = str(e)
-            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
-                messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+        except B2Error as e:
+            if "file_not_found" in str(e).lower() or "not_found" in str(e).lower():
+                messagebox.showerror("Error", f"Archivo no encontrado en Backblaze B2: {ruta_relativa}")
             else:
-                messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+                messagebox.showerror("Error", f"Error descargando de Backblaze B2: {e}")
         except Exception as e:
-            messagebox.showerror("Error", f"Error procesando archivo de Dropbox: {e}")
+            messagebox.showerror("Error", f"Error procesando archivo de Backblaze B2: {e}")
     
     def _abrir_adjunto_local(self, ruta_relativa):
         """Abre un archivo del almacenamiento local (implementación original)."""
@@ -9118,19 +9061,19 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
     
     def editar_adjunto(self, ruta_relativa, adjunto_id):
         """
-        Descarga un archivo de Dropbox, permite editarlo y lo resube automáticamente.
+        Descarga un archivo de Backblaze B2, permite editarlo y lo resube automáticamente.
         """
-        if not usar_dropbox():
-            messagebox.showinfo("Información", "La función de editar solo está disponible con archivos de Dropbox.")
+        if not usar_b2():
+            messagebox.showinfo("Información", "La función de editar solo está disponible con archivos de Backblaze B2.")
             return
             
-        dbx = get_dropbox_client()
-        if not dbx:
-            messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
             return
             
-        # Construir ruta en Dropbox
-        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        # Construir ruta en Backblaze B2
+        ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
         nombre_archivo = os.path.basename(ruta_relativa)
         
         try:
@@ -9138,11 +9081,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             temp_dir = tempfile.mkdtemp(prefix="dropbox_edit_")
             temp_path = os.path.join(temp_dir, nombre_archivo)
             
-            # 2. Descargar archivo de Dropbox
+            # 2. Descargar archivo de Backblaze B2
             print(f"Descargando {nombre_archivo} para edición...")
-            metadata, response = dbx.files_download(ruta_dropbox)
-            with open(temp_path, 'wb') as temp_file:
-                temp_file.write(response.content)
+            downloaded_file = bucket.download_file_by_name(ruta_b2)
+            downloaded_file.save_to(temp_path)
             
             # 3. Mostrar diálogo informativo
             respuesta = messagebox.askyesno(
@@ -9152,7 +9094,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 f"• El archivo se descargará temporalmente\n"
                 f"• Podrás editarlo con el programa predeterminado\n"
                 f"• Cuando GUARDES y CIERRES el programa, se resubirá automáticamente\n"
-                f"• Los cambios se sincronizarán con Dropbox\n\n"
+                f"• Los cambios se sincronizarán con Backblaze B2\n\n"
                 f"¿Continuar?"
             )
             
@@ -9172,18 +9114,18 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self._abrir_archivo_sistema(temp_path)
             
             # 6. Crear diálogo de seguimiento
-            self._crear_dialogo_seguimiento_edicion(temp_path, ruta_dropbox, tiempo_inicial, temp_dir, nombre_archivo)
+            self._crear_dialogo_seguimiento_edicion(temp_path, ruta_b2, tiempo_inicial, temp_dir, nombre_archivo)
             
-        except ApiError as e:
+        except B2Error as e:
             error_details = str(e)
             if "not_found" in error_details.lower():
-                messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+                messagebox.showerror("Error", f"Archivo no encontrado en Backblaze B2: {ruta_relativa}")
             else:
-                messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+                messagebox.showerror("Error", f"Error descargando de Backblaze B2: {e}")
         except Exception as e:
             messagebox.showerror("Error", f"Error procesando archivo para edición: {e}")
 
-    def _crear_dialogo_seguimiento_edicion(self, temp_path, ruta_dropbox, tiempo_inicial, temp_dir, nombre_archivo):
+    def _crear_dialogo_seguimiento_edicion(self, temp_path, ruta_b2, tiempo_inicial, temp_dir, nombre_archivo):
         """Crea un diálogo para hacer seguimiento del proceso de edición."""
         
         # Crear ventana de seguimiento
@@ -9227,7 +9169,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Botón para subir cambios
         self.btn_subir = ctk.CTkButton(botones_frame, text="⬆️ Subir cambios", 
                                       state="disabled",
-                                      command=lambda: self._subir_cambios_editados(temp_path, ruta_dropbox, temp_dir, dialogo))
+                                      command=lambda: self._subir_cambios_editados(temp_path, ruta_b2, temp_dir, dialogo))
         self.btn_subir.pack(side="left", padx=10, pady=10)
         
         # Botón cancelar
@@ -9256,7 +9198,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 # ¡Cambios detectados!
                 dialogo.cambios_detectados = True
                 self.estado_label.configure(
-                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Dropbox ahora.",
+                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Backblaze B2 ahora.",
                     text_color="green"
                 )
                 self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
@@ -9279,7 +9221,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
             if tiempo_actual > tiempo_inicial:
                 self.estado_label.configure(
-                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Dropbox.",
+                    text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Backblaze B2.",
                     text_color="green"
                 )
                 self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
@@ -9291,24 +9233,23 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         except Exception as e:
             self.estado_label.configure(text=f"❌ Error verificando cambios: {e}", text_color="red")
 
-    def _subir_cambios_editados(self, temp_path, ruta_dropbox, temp_dir, dialogo):
-        """Sube los cambios editados de vuelta a Dropbox."""
+    def _subir_cambios_editados(self, temp_path, ruta_b2, temp_dir, dialogo):
+        """Sube los cambios editados de vuelta a Backblaze B2."""
         try:
             if not os.path.exists(temp_path):
                 messagebox.showerror("Error", "Archivo temporal no encontrado.")
                 return
                 
-            dbx = get_dropbox_client()
-            if not dbx:
-                messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+            b2_api, bucket = get_b2_client()
+            if not b2_api or not bucket:
+                messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
                 return
             
-            # Leer archivo modificado
-            with open(temp_path, 'rb') as archivo:
-                contenido = archivo.read()
-            
-            # Subir a Dropbox (sobrescribir)
-            dbx.files_upload(contenido, ruta_dropbox, mode=dropbox.files.WriteMode('overwrite'))
+            # Subir a Backblaze B2 (sobrescribir automáticamente)
+            bucket.upload_local_file(
+                local_file=temp_path,
+                file_name=ruta_b2
+            )
             
             # Limpiar archivos temporales
             try:
@@ -9319,10 +9260,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
             # Cerrar diálogo y mostrar éxito
             dialogo.destroy()
-            messagebox.showinfo("Éxito", "¡Archivo editado y sincronizado con Dropbox correctamente!")
+            messagebox.showinfo("Éxito", "¡Archivo editado y sincronizado con Backblaze B2 correctamente!")
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error subiendo cambios a Dropbox: {e}")
+            messagebox.showerror("Error", f"Error subiendo cambios a Backblaze B2: {e}")
 
     def _cancelar_edicion(self, temp_path, temp_dir, dialogo):
         """Cancela la edición y limpia archivos temporales."""
@@ -9366,8 +9307,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         try:
             # 1. Eliminar archivo físico primero
-            if usar_dropbox():
-                exito_archivo = self._eliminar_archivo_dropbox(ruta_relativa)
+            if usar_b2():
+                exito_archivo = self._eliminar_archivo_b2(ruta_relativa)
             else:
                 exito_archivo = self._eliminar_archivo_local(ruta_relativa)
             
@@ -9401,29 +9342,31 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             except Exception:
                 pass
     
-    def _eliminar_archivo_dropbox(self, ruta_relativa):
+    def _eliminar_archivo_b2(self, ruta_relativa):
         """
-        Elimina un archivo de Dropbox.
+        Elimina un archivo de Backblaze B2.
         Retorna True si fue exitoso, False si hubo error.
         """
-        dbx = get_dropbox_client()
-        if not dbx:
-            print("No se puede conectar con Dropbox para eliminar archivo")
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            print("No se puede conectar con Backblaze B2 para eliminar archivo")
             return False
         
-        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+        ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
         
         try:
-            dbx.files_delete_v2(ruta_dropbox)
+            # Listar versiones del archivo para obtener file_id
+            file_versions = bucket.ls(ruta_b2, latest_only=True, recursive=False)
+            for file_version, _ in file_versions:
+                if file_version.file_name == ruta_b2:
+                    b2_api.delete_file_version(file_version.id_, file_version.file_name)
+                    return True
+            # Si no se encontró, considerarlo ya eliminado
+            print(f"Archivo no encontrado en Backblaze B2 (ya eliminado?): {ruta_b2}")
             return True
-        except ApiError as e:
-            error_details = str(e)
-            if "not_found" in error_details.lower() or "path_not_found" in error_details.lower():
-                print(f"Archivo no encontrado en Dropbox (ya eliminado?): {ruta_dropbox}")
-                return True  # Considerarlo exitoso si ya no existe
-            else:
-                print(f"Error eliminando archivo de Dropbox: {e}")
-                return False
+        except B2Error as e:
+            print(f"Error eliminando archivo de Backblaze B2: {e}")
+            return False
     
     def descargar_adjunto_guardar(self, ruta_relativa):
         """
@@ -9434,10 +9377,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         descargar_adjunto(
             ruta_relativa=ruta_relativa,
-            usar_dropbox_fn=usar_dropbox,
-            get_dropbox_client_fn=get_dropbox_client,
-            normalizar_ruta_dropbox_fn=normalizar_ruta_dropbox,
-            dropbox_root_folder=DROPBOX_ROOT_FOLDER,
+            usar_b2_fn=usar_b2,
+            get_b2_client_fn=get_b2_client,
+            normalizar_ruta_b2_fn=normalizar_ruta_b2,
+            b2_root_folder=B2_ROOT_FOLDER,
             adjuntos_root_dir=ADJUNTOS_ROOT_DIR
         )
     
@@ -9465,7 +9408,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
     def generar_informe_dinamico(self):
         """
-        Genera un informe dinámico usando python-docx, lo guarda en Dropbox 
+        Genera un informe dinámico usando python-docx, lo guarda en Backblaze B2 
         y lo registra en la base de datos.
         """
         # 1. Validaciones y Obtención de Datos
@@ -9585,16 +9528,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # 4.1. Aplicar reemplazos preservando formato
             reemplazar_texto_preservando_formato(document, mapeo)
             
-            # 5. Guardar temporalmente para subirlo a Dropbox
+            # 5. Guardar temporalmente para subirlo a Backblaze B2
             temp_dir = tempfile.mkdtemp(prefix="informe_rma_")
             temp_file_path = os.path.join(temp_dir, nombre_archivo_final)
             document.save(temp_file_path)
             
             # 6. Decidir dónde guardar (Dropbox o local)
-            if usar_dropbox():
-                # Subir a Dropbox
-                exito, ruta_relativa = self._subir_archivo_dropbox(temp_file_path, codigo_rma, nombre_archivo_final)
-                tipo_almacenamiento = 'dropbox'
+            if usar_b2():
+                # Subir a Backblaze B2
+                exito, ruta_relativa = self._subir_archivo_b2(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'backblaze'
                 ubicacion_desc = "Dropbox"
             else:
                 # Guardar localmente (fallback)
@@ -9651,7 +9594,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 """, (
                     self.current_rma_id, 
                     datetime.datetime.now().isoformat(),
-                    f"Generado documento de Informe: {nombre_archivo_final} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})", 
+                    f"Generado documento de Informe: {nombre_archivo_final} ({'☁️ Backblaze B2' if usar_b2() else '💾 Local'})", 
                     self.username
                 ))
                 
@@ -9667,8 +9610,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     pass
                 
                 # Mensaje personalizado según donde se guardó
-                if usar_dropbox():
-                    messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y subido a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+                if usar_b2():
+                    messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y subido a Backblaze B2 correctamente.\n\n📁 Ubicación: {ruta_relativa}")
                 else:
                     messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y guardado localmente.")
                 
@@ -9686,7 +9629,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
     def generar_reposicion_devolucion(self):
         """
         Genera el documento de Reposición/Devolución usando la plantilla
-        "Reposicion_RMA.docx", lo guarda en Dropbox y lo registra como adjunto.
+        "Reposicion_RMA.docx", lo guarda en Backblaze B2 y lo registra como adjunto.
         """
         # 1. Validaciones y Obtención de Datos
         if not self.current_rma_id:
@@ -9737,16 +9680,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     if clave in p.text:
                         p.text = p.text.replace(clave, valor_a_insertar)
             
-            # 6. Guardar temporalmente para subirlo a Dropbox
+            # 6. Guardar temporalmente para subirlo a Backblaze B2
             temp_dir = tempfile.mkdtemp(prefix="reposicion_rma_")
             temp_file_path = os.path.join(temp_dir, nombre_archivo_final)
             document.save(temp_file_path)
             
             # 7. Decidir dónde guardar (Dropbox o local)
-            if usar_dropbox():
-                # Subir a Dropbox
-                exito, ruta_relativa = self._subir_archivo_dropbox(temp_file_path, codigo_rma, nombre_archivo_final)
-                tipo_almacenamiento = 'dropbox'
+            if usar_b2():
+                # Subir a Backblaze B2
+                exito, ruta_relativa = self._subir_archivo_b2(temp_file_path, codigo_rma, nombre_archivo_final)
+                tipo_almacenamiento = 'backblaze'
                 ubicacion_desc = "Dropbox"
             else:
                 # Guardar localmente (fallback)
@@ -9803,7 +9746,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 """, (
                     self.current_rma_id, 
                     datetime.datetime.now().isoformat(),
-                    f"Generado documento de Reposición/Devolución: {nombre_archivo_final} ({'☁️ Dropbox' if usar_dropbox() else '💾 Local'})", 
+                    f"Generado documento de Reposición/Devolución: {nombre_archivo_final} ({'☁️ Backblaze B2' if usar_b2() else '💾 Local'})", 
                     self.username
                 ))
                 
@@ -9819,8 +9762,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     pass
                 
                 # Mensaje personalizado según donde se guardó
-                if usar_dropbox():
-                    messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y subido a Dropbox correctamente.\n\n📁 Ubicación: {ruta_relativa}")
+                if usar_b2():
+                    messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y subido a Backblaze B2 correctamente.\n\n📁 Ubicación: {ruta_relativa}")
                 else:
                     messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y guardado localmente.")
                 
@@ -12091,8 +12034,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     factura_actual=factura_actual,
                     connect_db_func=connect_db,
                     cargar_proveedores_func=cargar_proveedores,
-                    usar_dropbox_func=usar_dropbox,
-                    get_dropbox_client_func=get_dropbox_client
+                    usar_b2_func=usar_b2,
+                    get_b2_client_func=get_b2_client
                 )
             except Exception as e:
                 logger.error(f"Error abriendo ventana de proveedor {proveedor_nombre}: {e}", exc_info=True)
@@ -12324,27 +12267,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
                     messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
 
-                    # Subir archivo a Dropbox
-                    if usar_dropbox():
+                    # Subir archivo a Backblaze B2
+                    if usar_b2():
                         try:
-                            # Crear ruta en Dropbox: /RMP/{nombre_proveedor}.xlsx
-                            dropbox_path = f"/RMP/{safe_name}.xlsx"
+                            # Crear ruta en Backblaze B2: RMP/{nombre_proveedor}.xlsx
+                            b2_path = f"RMP/{safe_name}.xlsx"
                             
-                            dbx_client = get_dropbox_client()
-                            with open(file_path, 'rb') as f:
-                                # Subir archivo a Dropbox (sobreescribir si existe)
-                                dbx_client.files_upload(
-                                    f.read(),
-                                    dropbox_path,
-                                    mode=dropbox.files.WriteMode('overwrite')
+                            b2_api, bucket = get_b2_client()
+                            if b2_api and bucket:
+                                # Subir archivo a Backblaze B2 (sobreescribir si existe)
+                                bucket.upload_local_file(
+                                    local_file=file_path,
+                                    file_name=b2_path
                                 )
-                            
-                            print(f"✅ Excel RMP subido a Dropbox: {dropbox_path}")
-                            # Opcional: mostrar confirmación al usuario
-                            # messagebox.showinfo('Dropbox', f'Archivo también guardado en Dropbox: {dropbox_path}')
+                                
+                                print(f"✅ Excel RMP subido a Backblaze B2: {b2_path}")
+                                # Opcional: mostrar confirmación al usuario
+                                # messagebox.showinfo('Backblaze B2', f'Archivo también guardado en Backblaze B2: {b2_path}')
                             
                         except Exception as e:
-                            print(f"⚠️ Error subiendo Excel RMP a Dropbox: {e}")
+                            print(f"⚠️ Error subiendo Excel RMP a Backblaze B2: {e}")
                             # No mostrar error al usuario para no interrumpir el flujo
                     else:
                         print("ℹ️ Dropbox no configurado, Excel solo guardado localmente")
@@ -14852,8 +14794,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     )
                     info_label.pack(side="left", padx=(0, 10), pady=10, fill="x", expand=True)
                     
-                    # Indicador de ubicación (Dropbox/Local)
-                    ubicacion = "☁️ Dropbox" if usar_dropbox() else "💾 Local"
+                    # Indicador de ubicación (Backblaze B2/Local)
+                    ubicacion = "☁️ Backblaze B2" if usar_b2() else "💾 Local"
                     ubicacion_label = ctk.CTkLabel(
                         adj_frame,
                         text=ubicacion,
@@ -14962,11 +14904,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # Lista para almacenar rutas temporales de archivos descargados
             archivos_temporales = []
             
-            if adjuntos_seleccionados and usar_dropbox():
-                # Descargar archivos seleccionados de Dropbox
-                dbx = get_dropbox_client()
-                if not dbx:
-                    messagebox.showerror("Error", "No se puede conectar con Dropbox para descargar adjuntos.")
+            if adjuntos_seleccionados and usar_b2():
+                # Descargar archivos seleccionados de Backblaze B2
+                b2_api, bucket = get_b2_client()
+                if not b2_api or not bucket:
+                    messagebox.showerror("Error", "No se puede conectar con Backblaze B2 para descargar adjuntos.")
                     return
                 
                 # Crear directorio temporal
@@ -14974,24 +14916,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 
                 for adjunto_id, ruta_relativa, nombre_archivo in adjuntos_seleccionados:
                     try:
-                        # Construir ruta en Dropbox
-                        ruta_dropbox = normalizar_ruta_dropbox(f"{DROPBOX_ROOT_FOLDER}/{ruta_relativa}")
+                        # Construir ruta en Backblaze B2
+                        ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
                         
                         # Nombre del archivo temporal
                         nombre_archivo_final = nombre_archivo or os.path.basename(ruta_relativa)
                         temp_file_path = os.path.join(temp_dir, nombre_archivo_final)
                         
-                        # Descargar archivo
+                        # Descargar archivo desde B2
                         print(f"Descargando {nombre_archivo_final} para adjuntar al email...")
-                        metadata, response = dbx.files_download(ruta_dropbox)
+                        downloaded_file = bucket.download_file_by_name(ruta_b2)
                         
                         # Guardar en archivo temporal
-                        with open(temp_file_path, 'wb') as temp_file:
-                            temp_file.write(response.content)
+                        downloaded_file.save_to(temp_file_path)
                         
                         archivos_temporales.append(temp_file_path)
                         print(f"✓ Descargado: {nombre_archivo_final}")
                         
+                    except B2Error as e:
+                        print(f"Error descargando {nombre_archivo_final} desde B2: {e}")
+                        messagebox.showwarning("Advertencia", f"No se pudo descargar el archivo '{nombre_archivo_final}': {e}")
                     except Exception as e:
                         print(f"Error descargando {nombre_archivo_final}: {e}")
                         messagebox.showwarning("Advertencia", f"No se pudo descargar el archivo '{nombre_archivo_final}': {e}")
@@ -19245,45 +19189,22 @@ if __name__ == "__main__":
                 pass
             time.sleep(0.3)
         
-        # Verificar conexión a Dropbox
+        # Verificar conexión a Backblaze B2
         try:
-            sub.config(text="Verificando conexión a Dropbox...")
+            sub.config(text="Verificando conexión a Backblaze B2...")
             splash.update()
         except Exception:
             pass
         
-        dropbox_connected = False
+        # La verificación de B2 se hará cuando se use por primera vez
+        # mediante la función usar_b2() que cachea la conexión
+        
         try:
-            if DROPBOX_APP_KEY and DROPBOX_APP_SECRET:
-                if DROPBOX_REFRESH_TOKEN:
-                    dbx_test = dropbox.Dropbox(
-                        oauth2_refresh_token=DROPBOX_REFRESH_TOKEN,
-                        app_key=DROPBOX_APP_KEY,
-                        app_secret=DROPBOX_APP_SECRET
-                    )
-                    dbx_test.users_get_current_account()
-                    dropbox_connected = True
-                elif DROPBOX_ACCESS_TOKEN and DROPBOX_ACCESS_TOKEN != "tu_access_token_aqui":
-                    dbx_test = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-                    dbx_test.users_get_current_account()
-                    dropbox_connected = True
+            sub.config(text="Configuración de almacenamiento lista")
+            splash.update()
         except Exception:
             pass
-        
-        if dropbox_connected:
-            try:
-                sub.config(text="☁️ Dropbox conectado correctamente")
-                splash.update()
-            except Exception:
-                pass
-            time.sleep(0.3)
-        else:
-            try:
-                sub.config(text="📁 Dropbox no disponible - Usando almacenamiento local")
-                splash.update()
-            except Exception:
-                pass
-            time.sleep(0.3)
+        time.sleep(0.3)
         
         # Iniciar optimización en un hilo daemon
         t = threading.Thread(target=optimize_database, daemon=True)

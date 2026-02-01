@@ -1,6 +1,6 @@
 """
 Módulo para consultar el uso de almacenamiento de los servicios en la nube
-Obtiene información de Dropbox, Backblaze B2 y Turso
+Obtiene información de Backblaze B2 y Turso
 """
 
 import os
@@ -67,8 +67,6 @@ def obtener_uso_dropbox(dropbox_client=None):
         }
         tipo_cuenta = tipo_cuenta_map.get(account_type._tag, account_type._tag.upper())
         
-        logger.info(f"Dropbox: {usado_mb:.1f}MB / {total_gb:.1f}GB ({tipo_cuenta})")
-        
         return {
             'usado_mb': usado_mb,
             'total_mb': total_mb,
@@ -80,6 +78,10 @@ def obtener_uso_dropbox(dropbox_client=None):
         logger.error(f"Error obteniendo uso de Dropbox: {e}")
         return {'error': str(e)}
 
+'''
+# Función obtener_uso_dropbox() eliminada
+# Ya no usamos Dropbox, solo Backblaze B2
+'''
 
 def obtener_uso_backblaze():
     """
@@ -335,16 +337,12 @@ def obtener_uso_turso():
         }
 
 
-def obtener_todos_los_usos(dropbox_client=None):
+def obtener_todos_los_usos():
     """
     Obtiene el uso de almacenamiento de todos los servicios.
     
-    Args:
-        dropbox_client: Cliente de Dropbox ya autenticado (opcional)
-    
     Returns:
         dict: {
-            'dropbox': dict,
             'backblaze': dict,
             'turso': dict
         }
@@ -352,7 +350,6 @@ def obtener_todos_los_usos(dropbox_client=None):
     logger.info("Consultando uso de almacenamiento de todos los servicios...")
     
     resultado = {
-        'dropbox': obtener_uso_dropbox(dropbox_client),
         'backblaze': obtener_uso_backblaze(),
         'turso': obtener_uso_turso()
     }

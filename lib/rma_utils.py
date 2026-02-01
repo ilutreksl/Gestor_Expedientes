@@ -245,16 +245,16 @@ def obtener_promedio_cliente(cliente, conn):
     }
 
 
-def descargar_adjunto(ruta_relativa, usar_dropbox_fn, get_dropbox_client_fn, normalizar_ruta_dropbox_fn, dropbox_root_folder, adjuntos_root_dir):
+def descargar_adjunto(ruta_relativa, usar_b2_fn, get_b2_client_fn, normalizar_ruta_b2_fn, b2_root_folder, adjuntos_root_dir):
     """
     Descarga un archivo adjunto y permite al usuario guardarlo donde quiera.
     
     Args:
         ruta_relativa (str): Ruta relativa del archivo
-        usar_dropbox_fn (callable): Función que determina si se usa Dropbox
-        get_dropbox_client_fn (callable): Función que retorna el cliente de Dropbox
-        normalizar_ruta_dropbox_fn (callable): Función para normalizar rutas de Dropbox
-        dropbox_root_folder (str): Carpeta raíz en Dropbox
+        usar_b2_fn (callable): Función que determina si se usa Backblaze B2
+        get_b2_client_fn (callable): Función que retorna el cliente de B2 (tupla b2_api, bucket)
+        normalizar_ruta_b2_fn (callable): Función para normalizar rutas de B2
+        b2_root_folder (str): Carpeta raíz en B2
         adjuntos_root_dir (str): Directorio raíz de adjuntos local
     
     Returns:
@@ -262,6 +262,7 @@ def descargar_adjunto(ruta_relativa, usar_dropbox_fn, get_dropbox_client_fn, nor
     """
     import os
     from tkinter import filedialog, messagebox
+    from b2sdk.exception import B2Error
     
     logger.info(f"Iniciando descarga de adjunto: {ruta_relativa}")
     
@@ -281,37 +282,34 @@ def descargar_adjunto(ruta_relativa, usar_dropbox_fn, get_dropbox_client_fn, nor
         return False
     
     try:
-        if usar_dropbox_fn():
-            # Descargar desde Dropbox
-            logger.info(f"Descargando archivo desde Dropbox: {ruta_relativa}")
-            dbx = get_dropbox_client_fn()
-            if not dbx:
-                logger.error("No se pudo obtener el cliente de Dropbox")
-                messagebox.showerror("Error", "No se puede conectar con Dropbox.")
+        if usar_b2_fn():
+            # Descargar desde Backblaze B2
+            logger.info(f"Descargando archivo desde Backblaze B2: {ruta_relativa}")
+            b2_api, bucket = get_b2_client_fn()
+            if not b2_api or not bucket:
+                logger.error("No se pudo obtener el cliente de Backblaze B2")
+                messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
                 return False
             
-            # Construir ruta en Dropbox
-            ruta_dropbox = normalizar_ruta_dropbox_fn(f"{dropbox_root_folder}/{ruta_relativa}")
+            # Construir ruta en B2
+            ruta_b2 = normalizar_ruta_b2_fn(f"{b2_root_folder}/{ruta_relativa}")
             
             try:
-                # Descargar archivo de Dropbox
-                metadata, response = dbx.files_download(ruta_dropbox)
+                # Descargar archivo de B2
+                downloaded_file = bucket.download_file_by_name(ruta_b2)
+                downloaded_file.save_to(ruta_destino)
                 
-                # Guardar en la ubicación elegida
-                with open(ruta_destino, 'wb') as f:
-                    f.write(response.content)
-                
-                logger.info(f"Archivo descargado exitosamente desde Dropbox a: {ruta_destino}")
+                logger.info(f"Archivo descargado exitosamente desde B2 a: {ruta_destino}")
                 messagebox.showinfo("Descarga completa", f"Archivo guardado en:\n{ruta_destino}")
                 return True
                 
-            except Exception as e:
-                logger.error(f"Error descargando archivo desde Dropbox: {e}")
+            except B2Error as e:
+                logger.error(f"Error descargando archivo desde B2: {e}")
                 error_msg = str(e)
-                if "not_found" in error_msg.lower() or "path_not_found" in error_msg.lower():
-                    messagebox.showerror("Error", f"Archivo no encontrado en Dropbox: {ruta_relativa}")
+                if "not_found" in error_msg.lower() or "file_not_found" in error_msg.lower():
+                    messagebox.showerror("Error", f"Archivo no encontrado en Backblaze B2: {ruta_relativa}")
                 else:
-                    messagebox.showerror("Error", f"Error descargando de Dropbox: {e}")
+                    messagebox.showerror("Error", f"Error descargando de Backblaze B2: {e}")
                 return False
         else:
             # Copiar desde almacenamiento local

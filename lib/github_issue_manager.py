@@ -14,20 +14,20 @@ from PIL import Image
 import io
 from lib.logger_config import get_logger
 
-# Importar configuración de Dropbox
+# Importar configuración de Backblaze B2
 try:
-    import dropbox
-    from dropbox.exceptions import AuthError, ApiError
-    import dropbox_config
-    DROPBOX_DISPONIBLE = True
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+    from b2sdk.exception import B2Error
+    import os as os_mod
+    B2_DISPONIBLE = True
 except ImportError:
-    DROPBOX_DISPONIBLE = False
+    B2_DISPONIBLE = False
 
 logger = get_logger()
 
-# Registrar disponibilidad de Dropbox
-if not DROPBOX_DISPONIBLE:
-    logger.warning("Dropbox no disponible para adjuntar imágenes")
+# Registrar disponibilidad de Backblaze B2
+if not B2_DISPONIBLE:
+    logger.warning("Backblaze B2 no disponible para adjuntar imágenes")
 
 
 def renderizar_markdown_simple(textbox, contenido_md):
@@ -106,31 +106,38 @@ def renderizar_markdown_simple(textbox, contenido_md):
         textbox.configure(state="disabled")
 
 
-def subir_imagen_dropbox(ruta_imagen, username):
+def subir_imagen_b2(ruta_imagen, username):
     """
-    Sube una imagen a Dropbox con calidad media y retorna el enlace público.
+    Sube una imagen a Backblaze B2 con calidad media y retorna el enlace público.
     
     Args:
         ruta_imagen: Ruta local de la imagen
         username: Usuario que sube la imagen
         
     Returns:
-        str: URL pública de Dropbox o None si falla
+        str: URL pública de B2 o None si falla
     """
-    if not DROPBOX_DISPONIBLE:
-        logger.error("Dropbox no está disponible")
+    if not B2_DISPONIBLE:
+        logger.error("Backblaze B2 no está disponible")
         return None
     
     try:
-        # Inicializar cliente Dropbox
-        if hasattr(dropbox_config, 'DROPBOX_REFRESH_TOKEN') and dropbox_config.DROPBOX_REFRESH_TOKEN:
-            dbx = dropbox.Dropbox(
-                app_key=dropbox_config.DROPBOX_APP_KEY,
-                app_secret=dropbox_config.DROPBOX_APP_SECRET,
-                oauth2_refresh_token=dropbox_config.DROPBOX_REFRESH_TOKEN
-            )
-        else:
-            dbx = dropbox.Dropbox(dropbox_config.DROPBOX_ACCESS_TOKEN)
+        # Obtener credenciales de B2 desde variables de entorno
+        b2_key_id = os_mod.getenv("B2_KEY_ID")
+        b2_application_key = os_mod.getenv("B2_APPLICATION_KEY")
+        b2_bucket_name = os_mod.getenv("B2_BUCKET_NAME", "gestion-expedientes-app-b2")
+        
+        if not b2_key_id or not b2_application_key:
+            logger.error("Credenciales de B2 no configuradas")
+            return None
+        
+        # Inicializar cliente B2
+        info = InMemoryAccountInfo()
+        b2_api = B2Api(info)
+        b2_api.authorize_account("production", b2_key_id, b2_application_key)
+        
+        # Obtener bucket
+        bucket = b2_api.get_bucket_by_name(b2_bucket_name)
         
         # Reducir calidad de imagen
         img = Image.open(ruta_imagen)
@@ -148,47 +155,42 @@ def subir_imagen_dropbox(ruta_imagen, username):
             new_size = (int(img.width * ratio), int(img.height * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
         
-        # Guardar en memoria con calidad media
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='JPEG', quality=70, optimize=True)
-        img_byte_arr.seek(0)
+        # Guardar en archivo temporal
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            img.save(tmp_file, format='JPEG', quality=70, optimize=True)
+            temp_path = tmp_file.name
         
         # Generar nombre único con timestamp
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        nombre_base = os.path.splitext(os.path.basename(ruta_imagen))[0]
+        nombre_base = os_mod.path.splitext(os_mod.path.basename(ruta_imagen))[0]
         nombre_archivo = f"{timestamp}_{username}_{nombre_base}.jpg"
         
-        # Ruta en Dropbox
-        dropbox_path = f"/Images_Report/{nombre_archivo}"
+        # Ruta en B2
+        b2_path = f"Images_Report/{nombre_archivo}"
         
         # Subir archivo
-        dbx.files_upload(img_byte_arr.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
-        logger.info(f"Imagen subida a Dropbox: {dropbox_path}")
+        bucket.upload_local_file(
+            local_file=temp_path,
+            file_name=b2_path
+        )
+        logger.info(f"Imagen subida a Backblaze B2: {b2_path}")
         
-        # Crear enlace público compartido
-        try:
-            shared_link = dbx.sharing_create_shared_link_with_settings(dropbox_path)
-            url = shared_link.url
-        except ApiError as e:
-            if 'shared_link_already_exists' in str(e):
-                # Si ya existe, obtener el enlace existente
-                links = dbx.sharing_list_shared_links(path=dropbox_path).links
-                if links:
-                    url = links[0].url
-                else:
-                    logger.error("No se pudo obtener enlace compartido")
-                    return None
-            else:
-                raise
+        # Limpiar archivo temporal
+        os_mod.remove(temp_path)
         
-        # Convertir a enlace directo (cambiar ?dl=0 por ?raw=1)
-        url_directo = url.replace('?dl=0', '?raw=1')
-        logger.info(f"Enlace público generado: {url_directo}")
+        # Construir URL pública de B2
+        # Formato: https://f{bucket_id}.backblazeb2.com/file/{bucket_name}/{file_name}
+        download_url = bucket.get_download_url(b2_path)
+        logger.info(f"Enlace público generado: {download_url}")
         
-        return url_directo
+        return download_url
         
+    except B2Error as e:
+        logger.error(f"Error B2 al subir imagen: {e}")
+        return None
     except Exception as e:
-        logger.error(f"Error al subir imagen a Dropbox: {e}")
+        logger.error(f"Error al subir imagen a Backblaze B2: {e}")
         return None
 
 
@@ -529,22 +531,22 @@ def mostrar_formulario_github(ventana_principal):
                 try:
                     nombre_archivo = os.path.basename(ruta_imagen)
                     
-                    # Subir imagen a Dropbox
-                    if DROPBOX_DISPONIBLE:
-                        logger.info(f"Subiendo imagen {idx}/{len(imagenes_seleccionadas)} a Dropbox...")
-                        url_dropbox = subir_imagen_dropbox(ruta_imagen, ventana_principal.username)
+                    # Subir imagen a Backblaze B2
+                    if B2_DISPONIBLE:
+                        logger.info(f"Subiendo imagen {idx}/{len(imagenes_seleccionadas)} a Backblaze B2...")
+                        url_b2 = subir_imagen_b2(ruta_imagen, ventana_principal.username)
                         
-                        if url_dropbox:
+                        if url_b2:
                             # Incluir imagen directamente en el issue (se mostrará inline)
                             cuerpo += f"**Imagen {idx}: {nombre_archivo}**\n\n"
-                            cuerpo += f"![{nombre_archivo}]({url_dropbox})\n\n"
+                            cuerpo += f"![{nombre_archivo}]({url_b2})\n\n"
                             imagenes_subidas += 1
                             logger.info(f"Imagen {idx} subida correctamente")
                         else:
-                            cuerpo += f"{idx}. ⚠️ **{nombre_archivo}** - Error al subir a Dropbox\n"
+                            cuerpo += f"{idx}. ⚠️ **{nombre_archivo}** - Error al subir a Backblaze B2\n"
                             logger.warning(f"No se pudo subir imagen: {nombre_archivo}")
                     else:
-                        # Si Dropbox no está disponible, solo mencionar la imagen
+                        # Si Backblaze B2 no está disponible, solo mencionar la imagen
                         tamaño = os.path.getsize(ruta_imagen)
                         cuerpo += f"{idx}. **{nombre_archivo}** ({tamaño / 1024:.2f} KB)\n"
                         

@@ -33,7 +33,7 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
     
     def __init__(self, parent, proveedor_nombre, estado_actual='', factura_actual='', 
                  connect_db_func=None, cargar_proveedores_func=None,
-                 usar_dropbox_func=None, get_dropbox_client_func=None):
+                 usar_b2_func=None, get_b2_client_func=None):
         super().__init__(parent)
         
         self.parent_app = parent
@@ -42,8 +42,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
         self.factura_actual = factura_actual
         self.connect_db = connect_db_func
         self.cargar_proveedores = cargar_proveedores_func
-        self.usar_dropbox = usar_dropbox_func
-        self.get_dropbox_client = get_dropbox_client_func
+        self.usar_b2 = usar_b2_func
+        self.get_b2_client = get_b2_client_func
         self.username = getattr(parent, 'username', 'unknown')
         
         # Configurar ventana
@@ -335,8 +335,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
             logger.info(f"Expedientes de proveedor {self.proveedor_nombre} exportados a {file_path}")
             
-            # Subir a Dropbox si está habilitado
-            self._subir_excel_dropbox(file_path, safe_name)
+            # Subir a Backblaze B2 si está habilitado
+            self._subir_excel_b2(file_path, safe_name)
             
             # Añadir a historial
             self._registrar_exportacion(len(self.filas_expedientes), file_path)
@@ -345,22 +345,20 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             logger.error(f"Error exportando expedientes de proveedor {self.proveedor_nombre}: {e}", exc_info=True)
             messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
     
-    def _subir_excel_dropbox(self, file_path, safe_name):
-        """Sube el archivo Excel a Dropbox si está configurado."""
+    def _subir_excel_b2(self, file_path, safe_name):
+        """Sube el archivo Excel a Backblaze B2 si está configurado."""
         try:
-            if self.usar_dropbox and self.usar_dropbox():
-                import dropbox
-                dropbox_path = f"/RMP/{safe_name}.xlsx"
-                dbx = self.get_dropbox_client()
-                with open(file_path, 'rb') as f:
-                    dbx.files_upload(
-                        f.read(),
-                        dropbox_path,
-                        mode=dropbox.files.WriteMode('overwrite')
+            if self.usar_b2 and self.usar_b2():
+                b2_path = f"RMP/{safe_name}.xlsx"
+                b2_api, bucket = self.get_b2_client()
+                if b2_api and bucket:
+                    bucket.upload_local_file(
+                        local_file=file_path,
+                        file_name=b2_path
                     )
-                logger.info(f"Excel RMP subido a Dropbox: {dropbox_path}")
+                    logger.info(f"Excel RMP subido a Backblaze B2: {b2_path}")
         except Exception as e:
-            logger.warning(f"Error subiendo Excel RMP a Dropbox: {e}")
+            logger.warning(f"Error subiendo Excel RMP a Backblaze B2: {e}")
     
     def _registrar_exportacion(self, count, file_path):
         """Registra la exportación en el historial del proveedor."""
@@ -459,7 +457,7 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             messagebox.showerror("Error", f"No se pudo guardar la factura: {e}")
     
     def _crear_pestaña_adjuntos(self):
-        """Crea la pestaña de Adjuntos con gestión de archivos en Dropbox."""
+        """Crea la pestaña de Adjuntos con gestión de archivos en Backblaze B2."""
         tab = self.tabview.tab("Adjuntos")
         
         # Importar funciones de adjuntos
@@ -476,8 +474,8 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
             'visualizar': visualizar_adjunto_proveedor,
             'subir': subir_adjunto_proveedor,
             'formatear': formatear_tamaño,
-            'get_client': self.get_dropbox_client,
-            'usar': self.usar_dropbox
+            'get_client': self.get_b2_client,
+            'usar': self.usar_b2
         }
         
         # Botón subir
@@ -486,7 +484,7 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
         btn_subir = ctk.CTkButton(btn_frame, text="📤 Subir Archivo", 
                      command=self._subir_adjunto, width=150)
         btn_subir.pack(side="right")
-        Tooltip(btn_subir, "Sube un nuevo archivo a Dropbox para este proveedor")
+        Tooltip(btn_subir, "Sube un nuevo archivo a Backblaze B2 para este proveedor")
         
         btn_actualizar = ctk.CTkButton(btn_frame, text="🔄 Actualizar", 
                      command=self._cargar_adjuntos, width=120)
