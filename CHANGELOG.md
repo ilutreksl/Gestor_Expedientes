@@ -1,3 +1,5 @@
+- Añadida paginacion a la ventana principal. (1.0.31)
+- La busqueda sencilla de laventana principal, ya no necesita año para buscar en el resto de años. (1.0.31)
 - Añadida restauracion de backups de la BD. (1.0.30)
 - Corregido error al generar informe.docx en la ficha de expedientes, no recogia el valor del numero de albaran. (1.0.29)
 - Añadido paginacion a la ventana de backups para evitar la carga. (1.0.28)

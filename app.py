@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.30"
+APP_VERSION = "v1.0.31"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1127,6 +1127,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.icon_user = None
         self.icon_papel = None
         self.icon_mas = None
+        
+        # Variables de paginación para lista principal
+        self.pagina_actual_lista = 0
+        self.elementos_por_pagina_lista = 25
+        
         # Cargar ajustes de usuario (ya aplicados en LoginApp, solo necesitamos cargarlos aquí)
         try:
             self.user_settings = load_user_settings(self.username)
@@ -2869,6 +2874,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
         lista_column.grid_rowconfigure(0, weight=0)  # Título
         lista_column.grid_rowconfigure(1, weight=0)  # Filtros  
         lista_column.grid_rowconfigure(2, weight=1)  # Listado
+        lista_column.grid_rowconfigure(3, weight=0)  # Paginación
         lista_column.grid_columnconfigure(0, weight=1)
 
         # 1. Título y Botón Crear
@@ -2950,6 +2956,31 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                                      label_text="Pulse F5 para actualizar el listado ; Pinche dos veces sobre el expediente para abrirlo.")
         self.lista_rma_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
         self.lista_rma_frame.grid_columnconfigure(0, weight=1)
+        
+        # 4. Controles de Paginación
+        paginacion_frame = ctk.CTkFrame(lista_column, height=40)
+        paginacion_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 10))
+        paginacion_frame.grid_propagate(False)
+        
+        self.btn_anterior_lista = ctk.CTkButton(paginacion_frame, text="◀ Anterior", width=100, 
+                                               command=self.ir_pagina_anterior_lista)
+        self.btn_anterior_lista.pack(side="left", padx=10, pady=5)
+        
+        self.lbl_pagina_lista = ctk.CTkLabel(paginacion_frame, text="Página 1 de 1")
+        self.lbl_pagina_lista.pack(side="left", padx=20)
+        
+        self.btn_siguiente_lista = ctk.CTkButton(paginacion_frame, text="Siguiente ▶", width=100,
+                                                command=self.ir_pagina_siguiente_lista)
+        self.btn_siguiente_lista.pack(side="left", padx=10, pady=5)
+        
+        # Selector de elementos por página
+        ctk.CTkLabel(paginacion_frame, text="Elementos por página:").pack(side="left", padx=(40, 5))
+        self.elementos_menu_lista = ctk.CTkOptionMenu(paginacion_frame, 
+                                                      values=["10", "25", "50", "100", "200"], 
+                                                      width=80,
+                                                      command=self.cambiar_elementos_por_pagina_lista)
+        self.elementos_menu_lista.set("25")
+        self.elementos_menu_lista.pack(side="left", padx=5)
         
         # === COLUMNA DERECHA: DASHBOARD ===
         dashboard_column = ctk.CTkFrame(self.content_frame, width=200, fg_color=("#f0f0f0", "#2b2b2b"))
@@ -3121,16 +3152,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     sql += " AND estado = ?"
                     params.append(estado_filtro_actual)
             
-                # Aplicar filtro de AÑO
-                año_filtro_actual = self.filtro_año.get() if hasattr(self, 'filtro_año') else año_filtro
-                if año_filtro_actual:
-                    # Extraer los últimos 2 dígitos del año para el formato RMA (ej: 2025 -> "25")
-                    try:
-                        año_corto = str(año_filtro_actual)[-2:]
-                        sql += " AND codigo_rma LIKE ?"
-                        params.append(f"RMA{año_corto}%")
-                    except Exception as e:
-                        print(f"Error aplicando filtro de año: {e}")
+                # Aplicar filtro de AÑO (solo si NO hay búsqueda de texto)
+                if not texto_busqueda:
+                    año_filtro_actual = self.filtro_año.get() if hasattr(self, 'filtro_año') else año_filtro
+                    if año_filtro_actual:
+                        # Extraer los últimos 2 dígitos del año para el formato RMA (ej: 2025 -> "25")
+                        try:
+                            año_corto = str(año_filtro_actual)[-2:]
+                            sql += " AND codigo_rma LIKE ?"
+                            params.append(f"RMA{año_corto}%")
+                        except Exception as e:
+                            print(f"Error aplicando filtro de año: {e}")
                 
                 # Aplicar filtro de BÚSQUEDA por texto
                 if texto_busqueda:
@@ -3144,7 +3176,38 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 sql += " ORDER BY id DESC"
                 try:
                     cursor.execute(sql, tuple(params))
-                    registros = cursor.fetchall()
+                    registros_todos = cursor.fetchall()
+                    
+                    # Aplicar paginación
+                    total_registros = len(registros_todos)
+                    inicio = self.pagina_actual_lista * self.elementos_por_pagina_lista
+                    fin = min(inicio + self.elementos_por_pagina_lista, total_registros)
+                    registros = registros_todos[inicio:fin]
+                    
+                    # Calcular total de páginas
+                    total_paginas = (total_registros + self.elementos_por_pagina_lista - 1) // self.elementos_por_pagina_lista
+                    if total_paginas == 0:
+                        total_paginas = 1
+                    
+                    # Actualizar indicador de página
+                    if hasattr(self, 'lbl_pagina_lista'):
+                        self.lbl_pagina_lista.configure(
+                            text=f"Página {self.pagina_actual_lista + 1} de {total_paginas} ({total_registros} registros)"
+                        )
+                    
+                    # Habilitar/deshabilitar botones de navegación
+                    if hasattr(self, 'btn_anterior_lista'):
+                        if self.pagina_actual_lista > 0:
+                            self.btn_anterior_lista.configure(state="normal")
+                        else:
+                            self.btn_anterior_lista.configure(state="disabled")
+                    
+                    if hasattr(self, 'btn_siguiente_lista'):
+                        if self.pagina_actual_lista < total_paginas - 1:
+                            self.btn_siguiente_lista.configure(state="normal")
+                        else:
+                            self.btn_siguiente_lista.configure(state="disabled")
+                    
                 except Exception as e:
                     print(f"Error ejecutando query principal: {e}")
                     print(f"SQL: {sql}")
@@ -8153,11 +8216,41 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         else:
             return "Pendiente de Autorizacion"
     
+    def ir_pagina_anterior_lista(self):
+        """Navega a la página anterior de la lista de RMA."""
+        if self.pagina_actual_lista > 0:
+            self.pagina_actual_lista -= 1
+            texto_busqueda = self.entry_busqueda.get()
+            estado_filtro = self.filtro_estado.get()
+            año_filtro = self.filtro_año.get()
+            self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
+    
+    def ir_pagina_siguiente_lista(self):
+        """Navega a la página siguiente de la lista de RMA."""
+        # El límite superior se verifica en cargar_lista_rma al habilitar/deshabilitar el botón
+        self.pagina_actual_lista += 1
+        texto_busqueda = self.entry_busqueda.get()
+        estado_filtro = self.filtro_estado.get()
+        año_filtro = self.filtro_año.get()
+        self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
+    
+    def cambiar_elementos_por_pagina_lista(self, valor):
+        """Cambia el número de elementos por página y reinicia a la primera página."""
+        self.elementos_por_pagina_lista = int(valor)
+        self.pagina_actual_lista = 0  # Reiniciar a la primera página
+        texto_busqueda = self.entry_busqueda.get()
+        estado_filtro = self.filtro_estado.get()
+        año_filtro = self.filtro_año.get()
+        self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
+    
     def aplicar_filtros_rma(self):
         """Lee los valores de los filtros y recarga la lista."""
         texto_busqueda = self.entry_busqueda.get()
         estado_filtro = self.filtro_estado.get()
         año_filtro = self.filtro_año.get()
+        
+        # Resetear a la primera página cuando se aplican nuevos filtros
+        self.pagina_actual_lista = 0
         
         self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
     
