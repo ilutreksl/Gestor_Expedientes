@@ -112,8 +112,7 @@ class ExpedientesQuincenaWindow:
             btn_frame,
             text="📊 Exportar Excel",
             command=self.exportar_excel,
-            width=120,
-            fg_color="#10b981"
+            width=120
         ).pack(side="left", padx=5)
         
         # Frame de resultados con scrollbar
@@ -311,8 +310,7 @@ class ExpedientesQuincenaWindow:
                 text=col_nombre,
                 command=lambda c=col_nombre, i=col_idx: self.ordenar_por(c, i),
                 width=col_ancho,
-                height=30,
-                fg_color="#3b82f6"
+                height=30
             )
             btn.pack(side="left", padx=1)
             

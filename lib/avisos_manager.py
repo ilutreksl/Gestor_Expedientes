@@ -182,9 +182,7 @@ class AvisosManager:
             text="✓ Aceptar",
             command=popup.destroy,
             font=ctk.CTkFont(size=14, weight="bold"),
-            height=40,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8"
+            height=40
         )
         close_btn.pack(side="right")
         
@@ -406,9 +404,7 @@ class AvisosManager:
             text="👁️ Vista Previa",
             command=vista_previa,
             font=ctk.CTkFont(size=13),
-            height=35,
-            fg_color="gray",
-            hover_color="#404040"
+            height=35
         )
         btn_preview.pack(side="left", padx=(0, 10))
         
@@ -428,9 +424,7 @@ class AvisosManager:
             text="💾 Guardar Cambios",
             command=guardar,
             font=ctk.CTkFont(size=13, weight="bold"),
-            height=35,
-            fg_color="#16a34a",
-            hover_color="#15803d"
+            height=35
         )
         btn_save.pack(side="right")
         

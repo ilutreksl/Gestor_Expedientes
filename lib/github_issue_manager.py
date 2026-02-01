@@ -249,9 +249,7 @@ def mostrar_ventana_info_issue(ventana_principal, callback_continuar):
         text="❌ Cancelar",
         command=ventana_info.destroy,
         width=120,
-        height=40,
-        fg_color="#8B0000",
-        hover_color="#A52A2A"
+        height=40
     )
     btn_cancelar.pack(side="right", padx=(0, 10))
 

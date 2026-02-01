@@ -72,8 +72,6 @@ def mostrar_estadisticas_resolucion(ventana_principal):
         filtros_frame,
         text="Seleccionar Clientes (Todos)",
         command=lambda: abrir_selector_clientes(clientes, clientes_seleccionados, btn_seleccionar_clientes, cargar_datos_wrapper),
-        fg_color="#6b7280",
-        hover_color="#4b5563",
         width=250
     )
     btn_seleccionar_clientes.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
@@ -366,8 +364,6 @@ def mostrar_estadisticas_resolucion(ventana_principal):
                             command=lambda c=col: ordenar_por_columna(c),
                             width=120,
                             height=30,
-                            fg_color="#2563eb",
-                            hover_color="#1d4ed8",
                             font=header_font
                         )
                         btn.grid(row=0, column=col, padx=10, pady=10, sticky="w")
@@ -864,8 +860,6 @@ def mostrar_estadisticas_resolucion(ventana_principal):
         botones_frame, 
         text="🗑️ Limpiar Fechas", 
         command=lambda: (entry_fecha_desde.delete(0, 'end'), entry_fecha_hasta.delete(0, 'end'), cargar_datos()),
-        fg_color="#6b7280",
-        hover_color="#4b5563",
         width=120
     )
     btn_limpiar.pack(side="left", padx=5)
@@ -874,8 +868,6 @@ def mostrar_estadisticas_resolucion(ventana_principal):
         botones_frame, 
         text="🔍 Aplicar Filtros", 
         command=cargar_datos,
-        fg_color="#3b82f6",
-        hover_color="#2563eb",
         width=140
     )
     btn_aplicar.pack(side="left", padx=5)
@@ -884,8 +876,6 @@ def mostrar_estadisticas_resolucion(ventana_principal):
         botones_frame,
         text="💾 Exportar a Excel",
         command=exportar_a_excel,
-        fg_color="#22c55e",
-        hover_color="#16a34a",
         width=140
     )
     btn_exportar.pack(side="left", padx=5)
@@ -984,7 +974,6 @@ def abrir_selector_clientes(clientes_disponibles, clientes_seleccionados, boton,
         frame_botones,
         text="✓ Seleccionar Todos",
         command=seleccionar_todos,
-        fg_color="#3b82f6",
         width=140
     ).pack(side="left", padx=5)
     
@@ -992,7 +981,6 @@ def abrir_selector_clientes(clientes_disponibles, clientes_seleccionados, boton,
         frame_botones,
         text="✗ Deseleccionar Todos",
         command=deseleccionar_todos,
-        fg_color="#6b7280",
         width=140
     ).pack(side="left", padx=5)
     
@@ -1000,7 +988,6 @@ def abrir_selector_clientes(clientes_disponibles, clientes_seleccionados, boton,
         frame_botones,
         text="Aplicar",
         command=aplicar_seleccion,
-        fg_color="#22c55e",
         width=100
     ).pack(side="right", padx=5)
     

@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.24"
+APP_VERSION = "v1.0.25"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1641,8 +1641,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                                width=100,
                                                height=35,
                                                font=ctk.CTkFont(size=12, weight="bold"),
-                                               fg_color="#ff6b35",
-                                               hover_color="#e55a2b",
                                                command=self.mostrar_menu_admin)
             self.btn_admin_menu.grid(row=fila, column=0, padx=12, pady=8)
             Tooltip(self.btn_admin_menu, "Funciones de Administración")
@@ -2447,7 +2445,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
             ctk.CTkButton(btn_frame, text="Cancelar", command=cancelar).grid(row=0, column=0, padx=6)
             ctk.CTkButton(btn_frame, text="Ver cambios", command=lambda: mostrar_ventana_cambios(dlg)).grid(row=0, column=1, padx=6)
-            ctk.CTkButton(btn_frame, text="Ayuda", command=abrir_ayuda, fg_color="#059669", hover_color="#047857").grid(row=0, column=2, padx=6)
+            ctk.CTkButton(btn_frame, text="Ayuda", command=abrir_ayuda).grid(row=0, column=2, padx=6)
             ctk.CTkButton(btn_frame, text="Guardar", command=guardar).grid(row=0, column=3, padx=6)
 
         except Exception as e:
@@ -2568,11 +2566,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Resetear colores de todos los botones del índice
                 for widget in indice_frame.winfo_children():
                     if isinstance(widget, ctk.CTkButton):
-                        widget.configure(fg_color="#1f538d", hover_color="#14375e")
+                        widget.configure(fg_color=None, hover_color=None)
                 
                 # Destacar el botón clickeado
                 if btn_clickeado:
-                    btn_clickeado.configure(fg_color="#059669", hover_color="#047857")
+                    btn_clickeado.configure(fg_color=None, hover_color=None)
                 
                 logger.debug(f"Manual: mostrando sección '{titulo_seccion}'")
             
@@ -2623,8 +2621,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             btn_abrir = ctk.CTkButton(botones_frame, 
                                      text="📄 Abrir archivo original",
                                      command=abrir_archivo,
-                                     fg_color="#2563eb",
-                                     hover_color="#1d4ed8",
                                      width=180)
             btn_abrir.pack(side="left", padx=5)
             Tooltip(btn_abrir, "Abre el archivo Markdown del manual con tu editor predeterminado")
@@ -2632,8 +2628,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
             btn_cerrar = ctk.CTkButton(botones_frame,
                                       text="Cerrar",
                                       command=cerrar_manual,
-                                      fg_color="#718096",
-                                      hover_color="#4a5568",
                                       width=100)
             btn_cerrar.pack(side="right", padx=5)
             Tooltip(btn_cerrar, "Cierra esta ventana")
@@ -5854,14 +5848,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             btn_cerrar = ctk.CTkButton(btn_action_frame, 
                                        text="✖️ Cerrar", 
                                        font=ctk.CTkFont(size=14, weight="bold"),
-                                       fg_color="gray",
                                        command=ventana_actual.destroy)
         else:
             # Estamos en la ventana principal - volver a la lista
             btn_cerrar = ctk.CTkButton(btn_action_frame, 
                                        text="⬅️ Volver", 
                                        font=ctk.CTkFont(size=14, weight="bold"),
-                                       fg_color="gray",
                                        command=self.mostrar_lista_rma)
         
         btn_cerrar.pack(side="right", padx=(10, 0))
@@ -6724,8 +6716,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             btn_cancelar = ctk.CTkButton(
                 btn_frame,
                 text="✖ Cancelar",
-                fg_color="gray",
-                hover_color="darkgray",
                 font=ctk.CTkFont(size=14),
                 command=ventana_advertencia.destroy,
                 width=150
@@ -6980,8 +6970,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 # Actualizar el botón de guardar a verde para indicar que ya está guardado
                 if hasattr(self, 'btn_guardar_rma'):
                     self.btn_guardar_rma.configure(
-                        text="💾 ACTUALIZAR",
-                        fg_color="green"  # Verde para indicar que ya está guardado
+                        text="💾 ACTUALIZAR"
                     )
                 
                 # Ocultar el texto explicativo ya que ahora es definitivo
@@ -8118,11 +8107,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 ctk.CTkLabel(resultados_frame, text=descripcion, wraplength=500, justify="left").grid(row=row, column=2, padx=5, pady=2, sticky="w")
         
         # Botones de acción
-        btn_aplicar = ctk.CTkButton(botones_frame, text="🔍 Aplicar Filtros", command=aplicar_filtros, fg_color="#2b6cb0", hover_color="#1e4f8a")
+        btn_aplicar = ctk.CTkButton(botones_frame, text="🔍 Aplicar Filtros", command=aplicar_filtros)
         btn_aplicar.pack(side="left", padx=5, pady=5)
         Tooltip(btn_aplicar, "Aplica los filtros seleccionados al historial")
         
-        btn_limpiar = ctk.CTkButton(botones_frame, text="🗑️ Limpiar Filtros", command=limpiar_filtros, fg_color="#718096", hover_color="#4a5568")
+        btn_limpiar = ctk.CTkButton(botones_frame, text="🗑️ Limpiar Filtros", command=limpiar_filtros)
         btn_limpiar.pack(side="left", padx=5, pady=5)
         Tooltip(btn_limpiar, "Limpia todos los filtros y muestra el historial completo")
         
@@ -8958,8 +8947,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     item_frame, 
                     text="✏️", 
                     width=35,
-                    fg_color="#2B7A0B",
-                    hover_color="#1F5F08",
                     command=lambda r=ruta, aid=adjunto_id: self.editar_adjunto(r, aid)
                 )
                 btn_editar.pack(side='right', padx=2)
@@ -9201,7 +9188,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Backblaze B2 ahora.",
                     text_color="green"
                 )
-                self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
+                self.btn_subir.configure(state="normal")
                 dialogo.tiempo_inicial = tiempo_actual  # Actualizar para futuras verificaciones
             
             # Programar próxima verificación
@@ -9224,7 +9211,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     text="✅ ¡Cambios detectados!\nPuedes subir los cambios a Backblaze B2.",
                     text_color="green"
                 )
-                self.btn_subir.configure(state="normal", fg_color="#2E7D32", hover_color="#1B5E20")
+                self.btn_subir.configure(state="normal")
             else:
                 self.estado_label.configure(
                     text="ℹ️ No se detectaron cambios aún.\nGuarda el archivo en tu programa de edición.",
@@ -9901,8 +9888,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                          text="🔢 Generar Número Manual",
                                          width=240,
                                          height=40,
-                                         fg_color="#007bff",
-                                         hover_color="#0056b3",
                                          command=lambda: [menu_window.destroy(), self.mostrar_generar_numero_manual()])
         btn_numero_manual.pack(pady=10)
         
@@ -9911,8 +9896,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                   text="📢 Administrar Avisos",
                                   width=240,
                                   height=40,
-                                  fg_color="#16a34a",
-                                  hover_color="#15803d",
                                   command=lambda: [menu_window.destroy(), self.mostrar_admin_avisos()])
         btn_avisos.pack(pady=10)
         
@@ -9921,8 +9904,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                     text="📋 Gestionar Estados Artículos",
                                     width=240,
                                     height=40,
-                                    fg_color="#8b5cf6",
-                                    hover_color="#7c3aed",
                                     command=lambda: [menu_window.destroy(), self.mostrar_gestor_estados()])
         btn_estados.pack(pady=10)
         
@@ -9931,8 +9912,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                      text="👥 Gestionar Personas",
                                      width=240,
                                      height=40,
-                                     fg_color="#06b6d4",
-                                     hover_color="#0891b2",
                                      command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas()])
         btn_personas.pack(pady=10)
         
@@ -9941,8 +9920,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                                text="👤 Gestionar Personas Recepción",
                                                width=240,
                                                height=40,
-                                               fg_color="#f59e0b",
-                                               hover_color="#d97706",
                                                command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()])
         btn_personas_recepcion.pack(pady=10)
         
@@ -9951,8 +9928,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                       text="📊 Gestionar Resultado Expediente",
                                       width=240,
                                       height=40,
-                                      fg_color="#10b981",
-                                      hover_color="#059669",
                                       command=lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()])
         btn_resultado.pack(pady=10)
         
@@ -9961,8 +9936,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                           text="🏢 Gestionar Tipos de Cliente",
                                           width=240,
                                           height=40,
-                                          fg_color="#ec4899",
-                                          hover_color="#db2777",
                                           command=lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()])
         btn_tipos_cliente.pack(pady=10)
         
@@ -9971,7 +9944,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                   text="❌ Cerrar",
                                   width=240,
                                   height=32,
-                                  fg_color="gray",
                                   command=menu_window.destroy)
         btn_cerrar.pack(pady=(20, 10))
     
@@ -10826,8 +10798,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     btn_edit = ctk.CTkButton(row_frame,
                                              text="✏️",
                                              width=40,
-                                             fg_color="#3b82f6",
-                                             hover_color="#2563eb",
                                              command=lambda t=tipo: editar_tipo(t))
                     btn_edit.pack(side="right", padx=2)
                     
@@ -16660,9 +16630,7 @@ Versión de la App: {APP_VERSION}
         
         ctk.CTkButton(botones_frame, text="📊 Exportar Excel", 
                      command=exportar_a_excel,
-                     width=140, 
-                     fg_color="green", 
-                     hover_color="dark green").pack(side="left", padx=5)
+                     width=140).pack(side="left", padx=5)
         
         # Cargar datos iniciales
         cargar_datos_estadisticas()
@@ -17050,15 +17018,11 @@ Versión de la App: {APP_VERSION}
         
         ctk.CTkButton(botones_frame, 
                      text="✓ Asociar",
-                     command=confirmar_asociacion,
-                     fg_color="green",
-                     hover_color="darkgreen").pack(side="left", padx=5)
+                     command=confirmar_asociacion).pack(side="left", padx=5)
         
         ctk.CTkButton(botones_frame, 
                      text="✗ Cancelar",
-                     command=dlg.destroy,
-                     fg_color="gray",
-                     hover_color="darkgray").pack(side="left", padx=5)
+                     command=dlg.destroy).pack(side="left", padx=5)
     
     def abrir_rma_asociado(self, rma_id):
         """Abre un expediente asociado en una nueva ventana independiente."""
@@ -19111,7 +19075,7 @@ Versión de la App: {APP_VERSION}
                     messagebox.showerror("Error", str(e))
         
         btn_crear = ctk.CTkButton(ventana, text="CREAR", command=crear, 
-                                 fg_color="green", width=150, height=40, state="disabled")
+                                 width=150, height=40, state="disabled")
         btn_crear.pack(pady=20)
         
         ctk.CTkButton(ventana, text="CANCELAR", command=ventana.destroy, width=100).pack()

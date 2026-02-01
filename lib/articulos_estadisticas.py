@@ -82,9 +82,7 @@ def mostrar_estadisticas_articulos(ventana_principal):
     btn_seleccionar_estados = ctk.CTkButton(
         filtros_frame,
         text="Seleccionar Estados (Todos)",
-        command=lambda: abrir_selector_estados(estados_articulos, estados_seleccionados, btn_seleccionar_estados, cargar_datos_wrapper),
-        fg_color="#6b7280",
-        hover_color="#4b5563"
+        command=lambda: abrir_selector_estados(estados_articulos, estados_seleccionados, btn_seleccionar_estados, cargar_datos_wrapper)
     )
     btn_seleccionar_estados.grid(row=0, column=3, padx=10, pady=5, sticky="ew")
     
@@ -390,8 +388,6 @@ def mostrar_estadisticas_articulos(ventana_principal):
         filtros_frame, 
         text="🗑️ Limpiar Fechas", 
         command=lambda: (entry_fecha_desde.delete(0, 'end'), entry_fecha_hasta.delete(0, 'end'), cargar_datos()),
-        fg_color="#6b7280",
-        hover_color="#4b5563",
         width=120
     )
     btn_limpiar.grid(row=2, column=0, padx=10, pady=10)
@@ -401,8 +397,6 @@ def mostrar_estadisticas_articulos(ventana_principal):
         filtros_frame, 
         text="🔍 Aplicar Filtros", 
         command=cargar_datos,
-        fg_color="#3b82f6",
-        hover_color="#2563eb",
         width=140
     )
     btn_aplicar.grid(row=2, column=1, padx=10, pady=10)
@@ -412,8 +406,6 @@ def mostrar_estadisticas_articulos(ventana_principal):
         filtros_frame, 
         text="📊 Comparativa con Ventas", 
         command=lambda: abrir_ventana_comparativa(ventana_principal),
-        fg_color="#8b5cf6",
-        hover_color="#7c3aed",
         width=180
     )
     btn_comparativa.grid(row=2, column=2, columnspan=2, padx=10, pady=10)
@@ -423,8 +415,6 @@ def mostrar_estadisticas_articulos(ventana_principal):
         filtros_frame,
         text="💾 Exportar a Excel",
         command=exportar_a_excel,
-        fg_color="#22c55e",
-        hover_color="#16a34a",
         width=140
     )
     btn_exportar.grid(row=2, column=4, columnspan=2, padx=10, pady=10)
@@ -523,7 +513,6 @@ def abrir_selector_estados(estados_disponibles, estados_seleccionados, boton, ca
         frame_botones,
         text="✓ Seleccionar Todos",
         command=seleccionar_todos,
-        fg_color="#3b82f6",
         width=140
     ).pack(side="left", padx=5)
     
@@ -531,7 +520,6 @@ def abrir_selector_estados(estados_disponibles, estados_seleccionados, boton, ca
         frame_botones,
         text="✗ Deseleccionar Todos",
         command=deseleccionar_todos,
-        fg_color="#6b7280",
         width=140
     ).pack(side="left", padx=5)
     
@@ -539,7 +527,6 @@ def abrir_selector_estados(estados_disponibles, estados_seleccionados, boton, ca
         frame_botones,
         text="Aplicar",
         command=aplicar_seleccion,
-        fg_color="#22c55e",
         width=100
     ).pack(side="right", padx=5)
     

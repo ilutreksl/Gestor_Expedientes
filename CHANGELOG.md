@@ -1,3 +1,4 @@
+- Cambiado color de botones no importantes, para que los gestione el color del tema en vigor. (1.0.25)
 - Cambiado color del Header de las fichas de los RMP. (1.0.24)
 - Corregido error de import de B2. (1.0.24)
 - Modificado ubicacion de los backups de Turso a la nueva estructura de carpeta de B2. (1.0.23)

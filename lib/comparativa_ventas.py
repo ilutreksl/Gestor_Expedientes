@@ -74,8 +74,6 @@ class VentanaComparativaVentas(ctk.CTkToplevel):
             botones_frame,
             text="📁 Importar Excel de Ventas",
             command=self._importar_excel,
-            fg_color="#3b82f6",
-            hover_color="#2563eb",
             width=200
         )
         self.btn_importar.pack(side="left", padx=5)
@@ -84,8 +82,6 @@ class VentanaComparativaVentas(ctk.CTkToplevel):
             botones_frame,
             text="🔄 Calcular Comparativa",
             command=self._calcular_comparativa,
-            fg_color="#22c55e",
-            hover_color="#16a34a",
             width=200,
             state="disabled"
         )
@@ -95,8 +91,6 @@ class VentanaComparativaVentas(ctk.CTkToplevel):
             botones_frame,
             text="💾 Exportar Resultados",
             command=self._exportar_resultados,
-            fg_color="#8b5cf6",
-            hover_color="#7c3aed",
             width=200,
             state="disabled"
         )

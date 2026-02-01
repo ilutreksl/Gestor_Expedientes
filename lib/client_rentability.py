@@ -395,7 +395,7 @@ def mostrar_rentabilidad_clientes(app):
         except Exception as e:
             messagebox.showerror('Exportar', f'Error al exportar: {e}')
 
-    ctk.CTkButton(btn_frame, text='Exportar a Excel', fg_color='#2d8cff', command=export_results).pack(side='left', padx=8)
+    ctk.CTkButton(btn_frame, text='Exportar a Excel', command=export_results).pack(side='left', padx=8)
 
     # Cargar inicialmente
     cargar_datos()

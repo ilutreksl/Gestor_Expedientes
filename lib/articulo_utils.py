@@ -58,9 +58,7 @@ class VentanaEstadosArticulo(ctk.CTkToplevel):
             command=lambda: self.imprimir_resultados(),
             width=40,
             height=40,
-            font=ctk.CTkFont(size=20),
-            fg_color="#2196F3",
-            hover_color="#1976D2"
+            font=ctk.CTkFont(size=20)
         )
         btn_imprimir.grid(row=0, column=1, padx=5, sticky="e")
         

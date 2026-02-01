@@ -967,8 +967,6 @@ def mostrar_estadisticas_anuales(ventana_principal):
         selector_frame,
         text="📥 Exportar Excel",
         command=exportar_individual_excel,
-        fg_color="#4CAF50",
-        hover_color="#45a049",
         width=140
     )
     
@@ -977,8 +975,6 @@ def mostrar_estadisticas_anuales(ventana_principal):
         selector_frame,
         text="📥 Exportar Excel",
         command=exportar_comparativa_excel,
-        fg_color="#4CAF50",
-        hover_color="#45a049",
         width=140
     )
     
@@ -987,8 +983,6 @@ def mostrar_estadisticas_anuales(ventana_principal):
         selector_frame,
         text="📊 Cargar Estadísticas",
         command=cargar_estadisticas,
-        fg_color="#2196F3",
-        hover_color="#1976D2",
         width=180
     )
     btn_cargar.pack(side="left", padx=10)
