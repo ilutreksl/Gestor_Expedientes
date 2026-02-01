@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.27"
+APP_VERSION = "v1.0.28"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -15183,6 +15183,10 @@ Versión de la App: {APP_VERSION}
             archivos_actuales = []
             orden_actual = {"columna": "fecha", "ascendente": False}  # Por defecto: fecha descendente
             
+            # Variables de paginación
+            pagina_actual = 0
+            elementos_por_pagina = 10  # Mostrar 10 archivos por página
+            
             # Frame principal
             main_frame = ctk.CTkFrame(ventana)
             main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -15260,9 +15264,30 @@ Versión de la App: {APP_VERSION}
             scroll_frame = ctk.CTkScrollableFrame(lista_frame)
             scroll_frame.pack(fill="both", expand=True, padx=2, pady=2)
             
+            # ===== PAGINACIÓN =====
+            paginacion_frame = ctk.CTkFrame(main_frame, height=40)
+            paginacion_frame.pack(fill="x", padx=5, pady=(5, 2))
+            paginacion_frame.pack_propagate(False)
+            
+            btn_anterior = ctk.CTkButton(paginacion_frame, text="◀ Anterior", width=100, state="disabled")
+            btn_anterior.pack(side="left", padx=10, pady=5)
+            
+            lbl_pagina = ctk.CTkLabel(paginacion_frame, text="Página 1 de 1")
+            lbl_pagina.pack(side="left", padx=20)
+            
+            btn_siguiente = ctk.CTkButton(paginacion_frame, text="Siguiente ▶", width=100, state="disabled")
+            btn_siguiente.pack(side="left", padx=10, pady=5)
+            
+            # Selector de elementos por página
+            ctk.CTkLabel(paginacion_frame, text="Elementos por página:").pack(side="left", padx=(40, 5))
+            elementos_menu = ctk.CTkOptionMenu(paginacion_frame, values=["10", "20", "50", "100", "200"], 
+                                               width=80, command=lambda val: cambiar_elementos_por_pagina(val))
+            elementos_menu.set("10")
+            elementos_menu.pack(side="left", padx=5)
+            
             # ===== PARTE INFERIOR: INFORMACIÓN =====
             info_frame = ctk.CTkFrame(main_frame, height=40)
-            info_frame.pack(fill="x", padx=5, pady=(5, 5))
+            info_frame.pack(fill="x", padx=5, pady=(2, 5))
             info_frame.pack_propagate(False)
             
             lbl_info = ctk.CTkLabel(info_frame, text="Total: 0 archivos | Espacio: 0 B")
@@ -15292,6 +15317,7 @@ Versión de la App: {APP_VERSION}
             
             def ordenar_por(columna):
                 """Ordena la lista por la columna especificada"""
+                nonlocal pagina_actual
                 # Si es la misma columna, invertir el orden
                 if orden_actual["columna"] == columna:
                     orden_actual["ascendente"] = not orden_actual["ascendente"]
@@ -15300,6 +15326,8 @@ Versión de la App: {APP_VERSION}
                     orden_actual["columna"] = columna
                     orden_actual["ascendente"] = True if columna == "nombre" else False
                 
+                # Reiniciar a la primera página cuando se cambia el orden
+                pagina_actual = 0
                 actualizar_indicadores_orden()
                 mostrar_archivos()
                 logger.info(f"Lista ordenada por {columna} ({'ascendente' if orden_actual['ascendente'] else 'descendente'})")
@@ -15345,7 +15373,9 @@ Versión de la App: {APP_VERSION}
                 mostrar_archivos()
             
             def mostrar_archivos():
-                """Muestra los archivos filtrados y ordenados en la lista"""
+                """Muestra los archivos filtrados y ordenados en la lista con paginación"""
+                nonlocal pagina_actual
+                
                 # Limpiar lista actual
                 for widget in scroll_frame.winfo_children():
                     widget.destroy()
@@ -15382,15 +15412,36 @@ Versión de la App: {APP_VERSION}
                 elif orden_actual["columna"] == "fecha":
                     archivos_filtrados.sort(key=lambda x: x['uploadTimestamp'], reverse=not orden_actual["ascendente"])
                 
-                # Mostrar archivos (todos de golpe, ya ordenados y filtrados)
-                if not archivos_filtrados:
+                # Calcular paginación
+                total_archivos = len(archivos_filtrados)
+                total_paginas = max(1, (total_archivos + elementos_por_pagina - 1) // elementos_por_pagina)
+                
+                # Asegurar que la página actual esté en rango válido
+                if pagina_actual >= total_paginas:
+                    pagina_actual = max(0, total_paginas - 1)
+                
+                # Calcular índices de inicio y fin para la página actual
+                inicio = pagina_actual * elementos_por_pagina
+                fin = min(inicio + elementos_por_pagina, total_archivos)
+                
+                archivos_pagina = archivos_filtrados[inicio:fin]
+                
+                # Mostrar archivos de la página actual
+                if not archivos_pagina:
                     lbl_vacio = ctk.CTkLabel(scroll_frame, text="No hay archivos que coincidan con los filtros", 
                                              text_color="gray")
                     lbl_vacio.pack(pady=20)
                 else:
-                    # Crear todas las filas de una vez
-                    for archivo in archivos_filtrados:
+                    # Crear filas solo para la página actual
+                    for archivo in archivos_pagina:
                         crear_fila_archivo(archivo)
+                
+                # Actualizar controles de paginación
+                lbl_pagina.configure(text=f"Página {pagina_actual + 1} de {total_paginas} ({inicio + 1}-{fin} de {total_archivos})")
+                
+                # Habilitar/deshabilitar botones de navegación
+                btn_anterior.configure(state="normal" if pagina_actual > 0 else "disabled")
+                btn_siguiente.configure(state="normal" if pagina_actual < total_paginas - 1 else "disabled")
                 
                 # Actualizar información
                 total_tamano = sum(a['contentLength'] for a in archivos_filtrados)
@@ -15560,14 +15611,45 @@ Versión de la App: {APP_VERSION}
                     messagebox.showerror("Error", f"Error al crear backup:\n{msg}")
                     actualizar_estado(f"Error: {msg}", "red")
             
+            def ir_pagina_anterior():
+                """Navega a la página anterior"""
+                nonlocal pagina_actual
+                if pagina_actual > 0:
+                    pagina_actual -= 1
+                    mostrar_archivos()
+            
+            def ir_pagina_siguiente():
+                """Navega a la página siguiente"""
+                nonlocal pagina_actual
+                # Calcular total de páginas
+                total_archivos = len(archivos_actuales)
+                total_paginas = max(1, (total_archivos + elementos_por_pagina - 1) // elementos_por_pagina)
+                if pagina_actual < total_paginas - 1:
+                    pagina_actual += 1
+                    mostrar_archivos()
+            
+            def cambiar_elementos_por_pagina(valor):
+                """Cambia la cantidad de elementos mostrados por página"""
+                nonlocal elementos_por_pagina, pagina_actual
+                elementos_por_pagina = int(valor)
+                pagina_actual = 0  # Reiniciar a la primera página
+                mostrar_archivos()
+            
             # Conectar botones
             btn_actualizar.configure(command=lambda: threading.Thread(target=cargar_archivos, daemon=True).start())
             btn_crear_backup.configure(command=crear_backup)
+            btn_anterior.configure(command=ir_pagina_anterior)
+            btn_siguiente.configure(command=ir_pagina_siguiente)
             
-            # Conectar filtros para actualizar al cambiar
-            entry_busqueda.bind("<KeyRelease>", lambda e: mostrar_archivos())
-            filtro_tipo.configure(command=lambda _: mostrar_archivos())
-            filtro_ubicacion.configure(command=lambda _: mostrar_archivos())
+            # Conectar filtros para actualizar al cambiar (reiniciando a la primera página)
+            def aplicar_filtros_y_reiniciar(*args):
+                nonlocal pagina_actual
+                pagina_actual = 0
+                mostrar_archivos()
+            
+            entry_busqueda.bind("<KeyRelease>", lambda e: aplicar_filtros_y_reiniciar())
+            filtro_tipo.configure(command=lambda _: aplicar_filtros_y_reiniciar())
+            filtro_ubicacion.configure(command=lambda _: aplicar_filtros_y_reiniciar())
             
             # Cargar archivos inicialmente en un hilo
             threading.Thread(target=cargar_archivos, daemon=True).start()
