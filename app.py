@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.31"
+APP_VERSION = "v1.0.32"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -3424,6 +3424,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         rf.bind("<Leave>", _on_leave)
                         rf.bind("<Button-1>", _seleccionar_fila)  # Clic simple para seleccionar
                         rf.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))  # Doble clic para abrir
+                        rf.bind("<Button-3>", lambda e, rid=rma_id, cod=codigo_rma: self.mostrar_menu_contextual_expediente(e, rid, cod))  # Clic derecho
                         # Mostrar cursor 'hand2' para indicar que la fila es clicable
                         try:
                             rf.configure(cursor="hand2")
@@ -3440,6 +3441,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             try:
                                 w.bind("<Button-1>", _seleccionar_fila)  # Clic simple para seleccionar
                                 w.bind("<Double-Button-1>", lambda e=None, r=rma_id: self._abrir_editor_rma(rma_id=r))  # Doble clic para abrir
+                                w.bind("<Button-3>", lambda e, rid=rma_id, cod=codigo_rma: self.mostrar_menu_contextual_expediente(e, rid, cod))  # Clic derecho
                             except Exception:
                                 pass
             
@@ -8253,6 +8255,229 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         self.pagina_actual_lista = 0
         
         self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
+    
+    def mostrar_menu_contextual_expediente(self, event, rma_id, codigo_rma):
+        """
+        Muestra el menú contextual al hacer clic derecho en un expediente.
+        
+        Args:
+            event: Evento del clic derecho
+            rma_id (int): ID del expediente
+            codigo_rma (str): Código del expediente (ej: RMA25001)
+        """
+        from lib.rma_utils import obtener_estados_disponibles
+        
+        # Crear menú contextual
+        menu = tk.Menu(self, tearoff=0)
+        
+        # Submenu para cambiar estado
+        menu_estados = tk.Menu(menu, tearoff=0)
+        estados = obtener_estados_disponibles()
+        
+        for estado in estados:
+            menu_estados.add_command(
+                label=estado,
+                command=lambda e=estado: self.confirmar_cambio_estado(rma_id, codigo_rma, e)
+            )
+        
+        menu.add_cascade(label="🔄 Cambiar Estado", menu=menu_estados)
+        
+        # Mostrar el menú en la posición del cursor
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def confirmar_cambio_estado(self, rma_id, codigo_rma, nuevo_estado):
+        """
+        Muestra ventana de confirmación antes de cambiar el estado del expediente.
+        
+        Args:
+            rma_id (int): ID del expediente
+            codigo_rma (str): Código del expediente
+            nuevo_estado (str): Estado al que se va a cambiar
+        """
+        from datetime import datetime
+        import customtkinter as ctk
+        from CTkDatePicker import CTkDatePicker
+        
+        # Crear ventana de confirmación
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Confirmar Cambio de Estado")
+        ventana.geometry("500x350")
+        ventana.resizable(False, False)
+        
+        # Centrar la ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(ventana)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Título
+        ctk.CTkLabel(
+            main_frame,
+            text=f"Cambiar Estado de {codigo_rma}",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(0, 20))
+        
+        # Información del cambio
+        info_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        info_frame.pack(fill="x", pady=10)
+        
+        fecha_actual = datetime.now().strftime('%Y-%m-%d')
+        
+        ctk.CTkLabel(
+            info_frame,
+            text=f"Nuevo Estado:",
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ctk.CTkLabel(
+            info_frame,
+            text=nuevo_estado
+        ).grid(row=0, column=1, sticky="w", padx=5, pady=5, columnspan=2)
+        
+        ctk.CTkLabel(
+            info_frame,
+            text=f"Fecha:",
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        
+        # Frame para el selector de fecha y botón Hoy
+        fecha_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        fecha_frame.grid(row=1, column=1, sticky="w", padx=5, pady=5, columnspan=2)
+        
+        # Selector de fecha (CTkDatePicker)
+        date_picker = CTkDatePicker(fecha_frame, width=180)
+        
+        # Aplicar formato de fecha según preferencia del usuario
+        try:
+            pref = getattr(self, 'user_settings', {}).get('date_format', 'YYYY-MM-DD')
+            fmt_map = {
+                'YYYY-MM-DD': '%Y-%m-%d',
+                'DD/MM/YYYY': '%d/%m/%Y',
+                'MM/DD/YYYY': '%m/%d/%Y'
+            }
+            widget_fmt = fmt_map.get(pref, '%Y-%m-%d')
+            date_picker.set_date_format(widget_fmt)
+        except Exception:
+            # Fallback seguro
+            try:
+                date_picker.set_date_format('%Y-%m-%d')
+            except Exception:
+                pass
+        
+        date_picker.pack(side="left", padx=(0, 5))
+        
+        # Botón Hoy
+        def establecer_hoy():
+            date_picker.set_date(datetime.now())
+        
+        btn_hoy = ctk.CTkButton(
+            fecha_frame,
+            text="Hoy",
+            width=60,
+            command=establecer_hoy
+        )
+        btn_hoy.pack(side="left")
+        
+        # Deshabilitar selector de fecha si no es admin o Dpto Tecnico
+        es_privilegiado = self.username in ["admin", "Dpto Tecnico"]
+        if not es_privilegiado:
+            date_picker.configure(state="disabled")
+            btn_hoy.configure(state="disabled")
+        
+        ctk.CTkLabel(
+            info_frame,
+            text=f"Usuario:",
+            font=ctk.CTkFont(weight="bold")
+        ).grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        
+        # Obtener lista de usuarios disponibles
+        usuarios_disponibles = [self.username]
+        try:
+            conn, cursor = self.master.conectar_db()
+            if conn:
+                cursor.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+                usuarios_disponibles = [row[0] for row in cursor.fetchall()]
+                conn.close()
+        except Exception as e:
+            print(f"Error obteniendo usuarios: {e}")
+        
+        # Desplegable para el usuario (editable para admin y Dpto Tecnico)
+        usuario_menu = ctk.CTkOptionMenu(
+            info_frame,
+            values=usuarios_disponibles,
+            width=180
+        )
+        usuario_menu.set(self.username)
+        usuario_menu.grid(row=2, column=1, sticky="w", padx=5, pady=5, columnspan=2)
+        
+        # Deshabilitar usuario si no es admin o Dpto Tecnico
+        if not es_privilegiado:
+            usuario_menu.configure(state="disabled")
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        botones_frame.pack(side="bottom", pady=20)
+        
+        def ejecutar_cambio():
+            from lib.rma_utils import cambiar_estado_expediente
+            
+            # Obtener fecha del date_picker usando parse_date_to_iso para coherencia
+            try:
+                fecha_obj = date_picker.get_date()
+                # parse_date_to_iso espera un string o un objeto datetime
+                if isinstance(fecha_obj, str):
+                    fecha = parse_date_to_iso(fecha_obj)
+                else:
+                    # Es un objeto datetime, convertir a string ISO
+                    fecha = fecha_obj.strftime('%Y-%m-%d')
+            except Exception as e:
+                print(f"Error obteniendo fecha del picker: {e}")
+                fecha = datetime.now().strftime('%Y-%m-%d')
+            
+            usuario = usuario_menu.get()
+            
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                messagebox.showerror("Error", "No se pudo conectar a la base de datos")
+                ventana.destroy()
+                return
+            
+            exito = cambiar_estado_expediente(conn, rma_id, nuevo_estado, usuario, fecha)
+            conn.close()
+            
+            if exito:
+                messagebox.showinfo(
+                    "Éxito",
+                    f"Estado de {codigo_rma} cambiado a '{nuevo_estado}'"
+                )
+                ventana.destroy()
+                # Recargar la lista
+                self.aplicar_filtros_rma()
+            else:
+                messagebox.showerror(
+                    "Error",
+                    "No se pudo cambiar el estado del expediente"
+                )
+        
+        ctk.CTkButton(
+            botones_frame,
+            text="✓ Aceptar",
+            command=ejecutar_cambio,
+            width=120
+        ).pack(side="left", padx=10)
+        
+        ctk.CTkButton(
+            botones_frame,
+            text="✗ Cancelar",
+            command=ventana.destroy,
+            width=120,
+            fg_color="#e74c3c",
+            hover_color="#c0392b"
+        ).pack(side="left", padx=10)
     
     def crear_tabla_adjuntos(self):
         """Crea la tabla rma_adjuntos si no existe."""

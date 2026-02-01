@@ -1,3 +1,6 @@
+Cambio V.1.0.32 - ✨ Últimas mejoras implementadas:
+
+- Funciones con el boton derecho del raton: Cambio de estado de los expedientes. (1.0.32)
 - Añadida paginacion a la ventana principal. (1.0.31)
 - La busqueda sencilla de laventana principal, ya no necesita año para buscar en el resto de años. (1.0.31)
 - Añadida restauracion de backups de la BD. (1.0.30)
@@ -12,7 +15,7 @@
 - Migracion de Dropbox a Backblaze B2 (1.0.22)
 
 
-Cambio V.1.0.21 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.21
 
 - Añadida en la columna de estadisticas, el almacenamiento de las nubes utilizadas por la aplicacion.
 - Modificado titulos de la ventana de expedientes.

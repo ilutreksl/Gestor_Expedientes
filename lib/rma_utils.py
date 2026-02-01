@@ -334,3 +334,78 @@ def descargar_adjunto(ruta_relativa, usar_b2_fn, get_b2_client_fn, normalizar_ru
         logger.error(f"Error inesperado descargando archivo: {e}")
         messagebox.showerror("Error", f"No se pudo descargar el archivo: {e}")
         return False
+
+
+def obtener_estados_disponibles():
+    """
+    Obtiene la lista de estados disponibles para expedientes RMA.
+    Excluye 'Completado' (requiere proceso completo) y 'gestion'.
+    
+    Returns:
+        list: Lista de estados disponibles
+    """
+    estados = [
+        "Autorizado",
+        "Recibido", 
+        "En Proceso"
+    ]
+    logger.debug(f"Estados disponibles obtenidos: {estados}")
+    return estados
+
+
+def cambiar_estado_expediente(conn, rma_id, nuevo_estado, usuario, fecha=None):
+    """
+    Cambia el estado de un expediente RMA y registra la fecha correspondiente.
+    
+    Args:
+        conn: Conexión a la base de datos
+        rma_id (int): ID del expediente RMA
+        nuevo_estado (str): Nuevo estado a aplicar
+        usuario (str): Usuario que realiza el cambio
+        fecha (str, optional): Fecha del cambio. Si es None, usa la fecha actual.
+    
+    Returns:
+        bool: True si el cambio fue exitoso, False en caso contrario
+    """
+    from datetime import datetime
+    
+    if fecha is None:
+        fecha = datetime.now().strftime('%Y-%m-%d')
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Actualizar el estado
+        cursor.execute("""
+            UPDATE rma_maestro 
+            SET estado = ?
+            WHERE id = ?
+        """, (nuevo_estado, rma_id))
+        
+        # Actualizar la fecha correspondiente según el estado
+        campo_fecha = None
+        if nuevo_estado == "Autorizado":
+            campo_fecha = "fecha_autorizacion"
+        elif nuevo_estado == "Recibido":
+            campo_fecha = "fecha_recepcion"
+        elif nuevo_estado == "En Proceso":
+            campo_fecha = "fecha_proceso"
+        elif nuevo_estado == "Completado":
+            campo_fecha = "fecha_gestion"
+        
+        if campo_fecha:
+            cursor.execute(f"""
+                UPDATE rma_maestro 
+                SET {campo_fecha} = ?
+                WHERE id = ?
+            """, (fecha, rma_id))
+        
+        conn.commit()
+        
+        logger.info(f"Estado del expediente RMA ID {rma_id} cambiado a '{nuevo_estado}' por usuario '{usuario}' con fecha {fecha}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error al cambiar estado del expediente RMA ID {rma_id}: {e}")
+        conn.rollback()
+        return False

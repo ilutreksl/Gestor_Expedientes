@@ -12,6 +12,7 @@
 2. [Inicio de Sesión](#inicio-de-sesión)
 3. [Pantalla Principal (Dashboard)](#pantalla-principal-dashboard)
 4. [Trabajar con Expedientes RMA](#trabajar-con-expedientes-rma)
+   - [Menú Contextual (Clic Derecho)](#menú-contextual-clic-derecho)
 5. [Gestión de Clientes](#gestión-de-clientes)
 6. [Gestión de Proveedores RMP](#gestión-de-proveedores-rmp)
 7. [Búsqueda de Expedientes](#búsqueda-de-expedientes)
@@ -235,6 +236,71 @@ Usa los controles superiores para filtrar:
 
 - **Un clic**: Selecciona la fila (se marca con color)
 - **Doble clic**: Abre el expediente para verlo completo
+
+### Menú Contextual (Clic Derecho)
+
+Puedes realizar acciones rápidas haciendo **clic derecho** sobre cualquier expediente en la lista.
+
+#### ¿Cómo usar el menú contextual?
+
+1. **Posiciona el cursor** sobre el expediente deseado en la lista
+2. **Haz clic con el botón derecho del ratón**
+3. Se abrirá un menú con opciones disponibles
+
+#### Opciones disponibles
+
+**🔄 Cambiar Estado**
+
+Esta opción permite cambiar rápidamente el estado de un expediente sin necesidad de abrirlo en el editor completo.
+
+**Estados disponibles:**
+- **Autorizado**: El expediente ha sido autorizado
+- **Recibido**: El material ha sido recibido
+- **En Proceso**: El expediente está siendo procesado
+
+⚠️ **Nota**: El estado "Completado" no está disponible en el menú contextual porque completar un expediente requiere realizar varias validaciones y procesos. Para marcar un expediente como completado, debes hacerlo desde el editor completo del expediente.
+
+**Proceso de cambio de estado:**
+
+1. Selecciona **"🔄 Cambiar Estado"** en el menú contextual
+2. Elige el nuevo estado del submenú
+3. Aparecerá una ventana de confirmación mostrando:
+   - **Nuevo Estado**: El estado seleccionado
+   - **Fecha**: Selector de fecha con botón "Hoy" (editable para admin y Dpto Técnico)
+   - **Usuario**: Desplegable con usuarios disponibles (editable para admin y Dpto Técnico)
+4. Haz clic en **"✓ Aceptar"** para confirmar o **"✗ Cancelar"** para abortar
+
+**Permisos especiales:**
+- Los usuarios **admin** y **Dpto Tecnico** pueden:
+  - ✏️ Editar la fecha del cambio
+  - ✏️ Cambiar el usuario que aparece como responsable del cambio
+- El resto de usuarios:
+  - 🔒 Solo pueden usar la fecha actual
+  - 🔒 Solo pueden usar su propio nombre de usuario
+
+**💡 Ventajas del menú contextual:**
+- ⚡ **Rapidez**: Cambio de estado en 2 clics
+- 📝 **Registro automático**: Se actualiza la fecha correspondiente
+- 🔍 **Confirmación visual**: Ventana clara antes de aplicar el cambio
+- ♻️ **Actualización inmediata**: La lista se recarga automáticamente
+
+**Ejemplo práctico:**
+
+Imagina que necesitas autorizar el expediente RMA25020:
+
+1. Haz clic derecho sobre RMA25020
+2. Selecciona "🔄 Cambiar Estado" → "Autorizado"
+3. En la ventana de confirmación verás:
+   - Nuevo Estado: **Autorizado**
+   - Fecha: Selector con la fecha actual (puedes cambiarla con el calendario o usar el botón "Hoy")
+   - Usuario: Desplegable con **tu_usuario** seleccionado
+4. Haz clic en "✓ Aceptar"
+5. El expediente cambia a "Autorizado" y se actualiza la fecha de autorización
+
+⚠️ **Nota importante**: Al cambiar de estado, se actualiza automáticamente la fecha correspondiente en la base de datos:
+- **Autorizado** → Actualiza `fecha_autorizacion`
+- **Recibido** → Actualiza `fecha_recepcion`
+- **En Proceso** → Actualiza `fecha_proceso`
 
 ### Eliminar un Expediente
 
