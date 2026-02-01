@@ -298,59 +298,91 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
                 })
             
             df = pd.DataFrame(data)
-            base_dir = os.path.join(os.path.dirname(__file__), '..', 'Adjuntos_RMA')
-            rmp_dir = os.path.join(base_dir, 'RMP')
-            os.makedirs(rmp_dir, exist_ok=True)
             
             safe_name = ''.join(c for c in self.proveedor_nombre if c.isalnum() or c in (' ', '-', '_')).rstrip()
             safe_name = safe_name.replace(' ', '_')
-            file_path = os.path.join(rmp_dir, f"{safe_name}.xlsx")
             
-            if os.path.exists(file_path):
-                if not messagebox.askyesno('Exportar', f'El archivo {os.path.basename(file_path)} ya existe. ¿Desea sobreescribirlo?'):
-                    return
+            # Intentar subir directamente a B2
+            usar_b2_disponible = self.usar_b2 and self.usar_b2()
+            subido_a_b2 = False
+            file_path = None
             
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Expedientes')
-                workbook = writer.book
-                worksheet = writer.sheets['Expedientes']
-                from openpyxl.utils import get_column_letter
-                for i, col in enumerate(df.columns):
-                    if df.empty:
-                        max_len = len(str(col))
-                    else:
-                        col_max = df[col].astype(str).map(len).max()
-                        max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
-                    adjusted_width = min(max_len + 2, 60)
-                    worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
+            if usar_b2_disponible:
+                try:
+                    # Crear archivo temporal para subir a B2
+                    import tempfile
+                    temp_dir = tempfile.gettempdir()
+                    file_path = os.path.join(temp_dir, f"{safe_name}.xlsx")
+                    
+                    with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Expedientes')
+                        workbook = writer.book
+                        worksheet = writer.sheets['Expedientes']
+                        from openpyxl.utils import get_column_letter
+                        for i, col in enumerate(df.columns):
+                            if df.empty:
+                                max_len = len(str(col))
+                            else:
+                                col_max = df[col].astype(str).map(len).max()
+                                max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
+                            adjusted_width = min(max_len + 2, 60)
+                            worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
+                    
+                    # Subir a B2
+                    b2_path = f"RMP/{safe_name}.xlsx"
+                    b2_api, bucket = self.get_b2_client()
+                    if b2_api and bucket:
+                        bucket.upload_local_file(
+                            local_file=file_path,
+                            file_name=b2_path
+                        )
+                        subido_a_b2 = True
+                        logger.info(f"Excel RMP subido a Backblaze B2: {b2_path}")
+                        messagebox.showinfo('Exportar', f'Exportado correctamente a Backblaze B2: {safe_name}.xlsx')
+                        
+                        # Eliminar archivo temporal
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                except Exception as e:
+                    logger.warning(f"Error subiendo a B2, guardando localmente: {e}")
+                    usar_b2_disponible = False
             
-            messagebox.showinfo('Exportar', f'Exportado correctamente: {file_path}')
-            logger.info(f"Expedientes de proveedor {self.proveedor_nombre} exportados a {file_path}")
-            
-            # Subir a Backblaze B2 si está habilitado
-            self._subir_excel_b2(file_path, safe_name)
+            # Si B2 no está disponible o falló, guardar localmente
+            if not subido_a_b2:
+                base_dir = os.path.join(os.path.dirname(__file__), '..', 'Adjuntos_RMA')
+                rmp_dir = os.path.join(base_dir, 'RMP')
+                os.makedirs(rmp_dir, exist_ok=True)
+                file_path = os.path.join(rmp_dir, f"{safe_name}.xlsx")
+                
+                if os.path.exists(file_path):
+                    if not messagebox.askyesno('Exportar', f'El archivo {os.path.basename(file_path)} ya existe. ¿Desea sobreescribirlo?'):
+                        return
+                
+                with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Expedientes')
+                    workbook = writer.book
+                    worksheet = writer.sheets['Expedientes']
+                    from openpyxl.utils import get_column_letter
+                    for i, col in enumerate(df.columns):
+                        if df.empty:
+                            max_len = len(str(col))
+                        else:
+                            col_max = df[col].astype(str).map(len).max()
+                            max_len = max(int(col_max) if col_max is not None else 0, len(str(col)))
+                        adjusted_width = min(max_len + 2, 60)
+                        worksheet.column_dimensions[get_column_letter(i+1)].width = adjusted_width
+                
+                messagebox.showinfo('Exportar', f'Exportado correctamente (local): {file_path}')
+                logger.info(f"Expedientes de proveedor {self.proveedor_nombre} exportados localmente a {file_path}")
             
             # Añadir a historial
-            self._registrar_exportacion(len(self.filas_expedientes), file_path)
+            self._registrar_exportacion(len(self.filas_expedientes), file_path if file_path else f"{safe_name}.xlsx")
             
         except Exception as e:
             logger.error(f"Error exportando expedientes de proveedor {self.proveedor_nombre}: {e}", exc_info=True)
             messagebox.showerror('Exportar', f'Error exportando a Excel: {e}')
-    
-    def _subir_excel_b2(self, file_path, safe_name):
-        """Sube el archivo Excel a Backblaze B2 si está configurado."""
-        try:
-            if self.usar_b2 and self.usar_b2():
-                b2_path = f"RMP/{safe_name}.xlsx"
-                b2_api, bucket = self.get_b2_client()
-                if b2_api and bucket:
-                    bucket.upload_local_file(
-                        local_file=file_path,
-                        file_name=b2_path
-                    )
-                    logger.info(f"Excel RMP subido a Backblaze B2: {b2_path}")
-        except Exception as e:
-            logger.warning(f"Error subiendo Excel RMP a Backblaze B2: {e}")
     
     def _registrar_exportacion(self, count, file_path):
         """Registra la exportación en el historial del proveedor."""

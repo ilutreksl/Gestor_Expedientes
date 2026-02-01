@@ -1,3 +1,4 @@
+- Corregido error cuando se generaba el excel de los RMP, lo guardaba tanto en local como en la nube.
 - Corregido error con el atajo rapido Ctrl+N, abria la anterior ventana de expedientes. (1.0.26)
 - Cambiado color de botones no importantes, para que los gestione el color del tema en vigor. (1.0.25)
 - Cambiado color del Header de las fichas de los RMP. (1.0.24)
