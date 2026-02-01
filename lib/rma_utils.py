@@ -262,7 +262,7 @@ def descargar_adjunto(ruta_relativa, usar_b2_fn, get_b2_client_fn, normalizar_ru
     """
     import os
     from tkinter import filedialog, messagebox
-    from b2sdk.exception import B2Error
+    from b2sdk.v2.exception import B2Error
     
     logger.info(f"Iniciando descarga de adjunto: {ruta_relativa}")
     

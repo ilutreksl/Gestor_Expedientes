@@ -17,7 +17,7 @@ from lib.logger_config import get_logger
 # Importar configuración de Backblaze B2
 try:
     from b2sdk.v2 import B2Api, InMemoryAccountInfo
-    from b2sdk.exception import B2Error
+    from b2sdk.v2.exception import B2Error
     import os as os_mod
     B2_DISPONIBLE = True
 except ImportError:

@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.23"
+APP_VERSION = "v1.0.24"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -12075,7 +12075,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             cont.pack(fill="both", expand=True, padx=12, pady=12)
 
             # ===== SECCIÓN 1: ENCABEZADO CON INFORMACIÓN DEL PROVEEDOR =====
-            header_frame = ctk.CTkFrame(cont, fg_color="#4A90E2", corner_radius=8)
+            # Usar el color primario del tema activo en lugar de azul fijo
+            header_frame = ctk.CTkFrame(cont, corner_radius=8)
             header_frame.pack(fill="x", pady=(0,10))
             header_frame.grid_columnconfigure(0, weight=1)
             header_frame.grid_columnconfigure(1, weight=1)
@@ -12094,10 +12095,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             estado_menu = ctk.CTkOptionMenu(
                 header_frame, 
                 values=opciones_estado,
-                fg_color="white",
-                button_color="#4A90E2",
-                button_hover_color="#357ABD",
-                text_color="#212529",
                 dropdown_fg_color="white",
                 dropdown_text_color="#212529"
             )

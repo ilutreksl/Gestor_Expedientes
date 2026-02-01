@@ -8,7 +8,7 @@ import os
 import tempfile
 import subprocess
 from tkinter import filedialog, messagebox
-from b2sdk.exception import B2Error
+from b2sdk.v2.exception import B2Error
 
 logger = logging.getLogger("GestorExpedientes")
 

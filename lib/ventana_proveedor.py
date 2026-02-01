@@ -105,36 +105,28 @@ class VentanaDetalleProveedor(ctk.CTkToplevel):
     
     def _crear_encabezado(self, parent):
         """Crea el encabezado con información del proveedor y estado."""
-        header_frame = ctk.CTkFrame(parent, fg_color="#4A90E2", corner_radius=8)
+        # Usar color del tema activo en lugar de azul fijo
+        header_frame = ctk.CTkFrame(parent, corner_radius=8)
         header_frame.pack(fill="x", pady=(0,10))
         header_frame.grid_columnconfigure(0, weight=1)
         header_frame.grid_columnconfigure(1, weight=1)
         
         ctk.CTkLabel(header_frame, text="RMP", 
-                    font=ctk.CTkFont(size=11, weight="bold"), 
-                    text_color="white").grid(row=0, column=0, padx=15, pady=(8,2), sticky="w")
+                    font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=15, pady=(8,2), sticky="w")
         ctk.CTkLabel(header_frame, text=self.proveedor_nombre, 
-                    font=ctk.CTkFont(size=14), 
-                    text_color="white").grid(row=1, column=0, padx=15, pady=(0,8), sticky="w")
+                    font=ctk.CTkFont(size=14)).grid(row=1, column=0, padx=15, pady=(0,8), sticky="w")
         
         ctk.CTkLabel(header_frame, text="ESTADO", 
-                    font=ctk.CTkFont(size=11, weight="bold"), 
-                    text_color="white").grid(row=0, column=1, padx=15, pady=(8,2), sticky="w")
+                    font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=1, padx=15, pady=(8,2), sticky="w")
         
         # Variable para rastrear el estado actual
         self.estado_var = {'actual': self.estado_actual or ''}
         
-        # CTkOptionMenu para editar el estado
+        # CTkOptionMenu para editar el estado (usa colores del tema)
         opciones_estado = ["", "En Progreso", "Enviado", "Completado", "Exportado"]
         self.estado_menu = ctk.CTkOptionMenu(
             header_frame,
             values=opciones_estado,
-            fg_color="white",
-            button_color="#4A90E2",
-            button_hover_color="#357ABD",
-            text_color="#212529",
-            dropdown_fg_color="white",
-            dropdown_text_color="#212529",
             command=self._actualizar_estado
         )
         self.estado_menu.set(self.estado_actual if self.estado_actual in opciones_estado else "")
