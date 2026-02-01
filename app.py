@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.29"
+APP_VERSION = "v1.0.30"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -15224,6 +15224,10 @@ Versión de la App: {APP_VERSION}
             btn_crear_backup.pack(side="left", padx=5)
             Tooltip(btn_crear_backup, "Ejecuta el script de backup para crear una nueva copia de seguridad de la base de datos")
             
+            btn_restaurar = ctk.CTkButton(botones_frame, text="📥 Restaurar Backup", width=140)
+            btn_restaurar.pack(side="left", padx=5)
+            Tooltip(btn_restaurar, "Restaura la base de datos desde un archivo de backup seleccionado (.db o .sql)")
+            
             btn_actualizar = ctk.CTkButton(botones_frame, text="↻ Actualizar Lista", width=120)
             btn_actualizar.pack(side="left", padx=5)
             Tooltip(btn_actualizar, "Recarga la lista de archivos desde Backblaze B2")
@@ -15635,9 +15639,173 @@ Versión de la App: {APP_VERSION}
                 pagina_actual = 0  # Reiniciar a la primera página
                 mostrar_archivos()
             
+            def restaurar_backup_seleccionado():
+                """Restaura un backup seleccionado desde B2"""
+                from lib.backup_restauracion import restaurar_backup, obtener_info_backup
+                import tempfile
+                
+                # Verificar que hay un archivo seleccionado
+                if not hasattr(ventana, 'fila_seleccionada_backup'):
+                    messagebox.showwarning("Selección requerida", 
+                                          "Por favor, selecciona un archivo de backup del listado.\n\n" +
+                                          "Solo se pueden restaurar archivos .db o .sql")
+                    logger.warning("Intento de restauración sin archivo seleccionado")
+                    return
+                
+                # Buscar el archivo seleccionado
+                file_id = ventana.fila_seleccionada_backup
+                archivo_seleccionado = None
+                for archivo in archivos_actuales:
+                    if archivo['fileId'] == file_id:
+                        archivo_seleccionado = archivo
+                        break
+                
+                if not archivo_seleccionado:
+                    messagebox.showerror("Error", "No se pudo encontrar el archivo seleccionado")
+                    logger.error("Archivo seleccionado no encontrado en la lista")
+                    return
+                
+                nombre_archivo = archivo_seleccionado['fileName']
+                
+                # Validar que sea .db o .sql
+                extension = os.path.splitext(nombre_archivo)[1].lower()
+                if extension not in ['.db', '.sql']:
+                    messagebox.showerror("Archivo no válido", 
+                                       f"El archivo '{nombre_archivo}' no es un backup válido.\n\n" +
+                                       "Solo se pueden restaurar archivos .db o .sql")
+                    logger.error(f"Intento de restaurar archivo con extensión no válida: {extension}")
+                    return
+                
+                # Crear ventana de confirmación personalizada
+                ventana_confirmacion = ctk.CTkToplevel(ventana)
+                ventana_confirmacion.title("⚠️ Confirmar Restauración de Backup")
+                ventana_confirmacion.geometry("550x420")
+                ventana_confirmacion.transient(ventana)
+                ventana_confirmacion.grab_set()
+                ventana_confirmacion.resizable(False, False)
+                
+                # Centrar ventana
+                ventana_confirmacion.update_idletasks()
+                x = ventana.winfo_x() + (ventana.winfo_width() - 550) // 2
+                y = ventana.winfo_y() + (ventana.winfo_height() - 420) // 2
+                ventana_confirmacion.geometry(f"550x420+{x}+{y}")
+                
+                # Contenido
+                frame_contenido = ctk.CTkFrame(ventana_confirmacion)
+                frame_contenido.pack(fill="both", expand=True, padx=20, pady=20)
+                
+                # Icono y título
+                ctk.CTkLabel(frame_contenido, text="⚠️", font=ctk.CTkFont(size=40)).pack(pady=(10, 5))
+                ctk.CTkLabel(frame_contenido, text="Restaurar Copia de Seguridad", 
+                           font=ctk.CTkFont(size=16, weight="bold")).pack(pady=5)
+                
+                # Mensaje de advertencia
+                mensaje = (
+                    f"Estás a punto de restaurar la base de datos desde:\n\n"
+                    f"📄 {nombre_archivo}\n\n"
+                    f"⚠️ ADVERTENCIA:\n"
+                    f"• Se reemplazarán TODOS los datos actuales\n"
+                    f"• Se creará un backup de seguridad automático\n"
+                    f"• La aplicación se cerrará después de la restauración\n\n"
+                    f"¿Deseas continuar?"
+                )
+                
+                lbl_mensaje = ctk.CTkLabel(frame_contenido, text=mensaje, 
+                                          justify="left", wraplength=450)
+                lbl_mensaje.pack(pady=10, padx=10)
+                
+                # Frame de botones
+                frame_botones = ctk.CTkFrame(frame_contenido, fg_color="transparent")
+                frame_botones.pack(side="bottom", pady=10)
+                
+                resultado = {"confirmar": False}
+                
+                def confirmar():
+                    resultado["confirmar"] = True
+                    ventana_confirmacion.destroy()
+                
+                def cancelar():
+                    resultado["confirmar"] = False
+                    ventana_confirmacion.destroy()
+                
+                btn_cancelar = ctk.CTkButton(frame_botones, text="❌ Cancelar", width=120,
+                                            fg_color="#dc2626", hover_color="#b91c1c",
+                                            command=cancelar)
+                btn_cancelar.pack(side="left", padx=10)
+                
+                btn_confirmar = ctk.CTkButton(frame_botones, text="✅ Restaurar", width=120,
+                                             command=confirmar)
+                btn_confirmar.pack(side="left", padx=10)
+                
+                # Esperar a que se cierre la ventana
+                ventana.wait_window(ventana_confirmacion)
+                
+                if not resultado["confirmar"]:
+                    logger.info("Restauración cancelada por el usuario")
+                    return
+                
+                # Proceder con la restauración
+                actualizar_estado("Descargando backup...", "blue")
+                logger.info(f"Iniciando restauración desde: {nombre_archivo}")
+                
+                try:
+                    # Descargar archivo a temporal
+                    temp_dir = tempfile.gettempdir()
+                    temp_file = os.path.join(temp_dir, nombre_archivo.replace("Archivo/", ""))
+                    
+                    success, msg = manager.descargar_archivo(archivo_seleccionado['fileId'], 
+                                                            archivo_seleccionado['fileName'], 
+                                                            temp_file)
+                    
+                    if not success:
+                        messagebox.showerror("Error de descarga", f"No se pudo descargar el backup:\n{msg}")
+                        actualizar_estado(f"Error: {msg}", "red")
+                        logger.error(f"Error al descargar backup: {msg}")
+                        return
+                    
+                    actualizar_estado("Restaurando base de datos...", "blue")
+                    logger.info("Archivo descargado, iniciando proceso de restauración")
+                    
+                    # Obtener ruta de la base de datos actual
+                    ruta_db = self.master.database_path
+                    
+                    # Restaurar
+                    exito, mensaje, ruta_backup_seguridad = restaurar_backup(temp_file, ruta_db)
+                    
+                    # Eliminar archivo temporal
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+                    
+                    if exito:
+                        actualizar_estado("Restauración completada", "green")
+                        logger.info(f"Restauración exitosa. Backup de seguridad en: {ruta_backup_seguridad}")
+                        
+                        messagebox.showinfo("Restauración Exitosa", 
+                                          f"{mensaje}\n\n" +
+                                          f"✅ Backup de seguridad creado en:\n{ruta_backup_seguridad}\n\n" +
+                                          f"La aplicación se cerrará para aplicar los cambios.\n" +
+                                          f"Vuelve a abrirla para continuar trabajando.")
+                        
+                        # Cerrar la aplicación
+                        logger.info("Cerrando aplicación tras restauración exitosa")
+                        self.master.quit()
+                    else:
+                        actualizar_estado("Error en restauración", "red")
+                        logger.error(f"Error en la restauración: {mensaje}")
+                        messagebox.showerror("Error de Restauración", 
+                                           f"No se pudo restaurar el backup:\n\n{mensaje}")
+                
+                except Exception as e:
+                    actualizar_estado("Error inesperado", "red")
+                    logger.error(f"Error inesperado durante restauración: {str(e)}", exc_info=True)
+                    messagebox.showerror("Error", f"Error inesperado:\n{str(e)}")
+            
             # Conectar botones
             btn_actualizar.configure(command=lambda: threading.Thread(target=cargar_archivos, daemon=True).start())
             btn_crear_backup.configure(command=crear_backup)
+            btn_restaurar.configure(command=restaurar_backup_seleccionado)
             btn_anterior.configure(command=ir_pagina_anterior)
             btn_siguiente.configure(command=ir_pagina_siguiente)
             

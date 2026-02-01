@@ -1,3 +1,4 @@
+- Añadida restauracion de backups de la BD. (1.0.30)
 - Corregido error al generar informe.docx en la ficha de expedientes, no recogia el valor del numero de albaran. (1.0.29)
 - Añadido paginacion a la ventana de backups para evitar la carga. (1.0.28)
 - Corregido error cuando se generaba el excel de los RMP, lo guardaba tanto en local como en la nube. (1.0.27)

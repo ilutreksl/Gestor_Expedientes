@@ -1,7 +1,7 @@
 # Manual de Usuario - Gestor de Expedientes RMA
 
-**Versión de la aplicación:** v1.0.11  
-**Fecha:** Enero 2026  
+**Versión de la aplicación:** v1.0.30  
+**Fecha:** Febrero 2026  
 **Destinado a:** Usuarios finales
 
 ---
@@ -20,6 +20,10 @@
 10. [Tareas y Recordatorios](#tareas-y-recordatorios)
 11. [Estadísticas e Informes](#estadísticas-e-informes)
 12. [Configuración Personal](#configuración-personal)
+    - [Cambiar el Tema de la Aplicación](#cambiar-el-tema-de-la-aplicación)
+    - [Activar/Desactivar Tooltips](#activardesactivar-tooltips)
+    - [Configurar Backups Automáticos](#configurar-backups-automáticos-administradores)
+    - [Restaurar una Copia de Seguridad](#restaurar-una-copia-de-seguridad-administradores)
 13. [Preguntas Frecuentes](#preguntas-frecuentes)
 14. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
 
@@ -872,6 +876,219 @@ Si eres administrador:
 2. Configura la frecuencia de backups automáticos
 3. Selecciona dónde guardar las copias
 
+### Restaurar una Copia de Seguridad (Administradores)
+
+⚠️ **IMPORTANTE**: Esta función está disponible solo para administradores y restaura TODOS los datos de la aplicación.
+
+#### ¿Cuándo usar esta función?
+
+- Si has perdido datos importantes por error
+- Si necesitas volver a un estado anterior de la base de datos
+- Si has detectado datos corruptos y quieres recuperar una versión anterior
+- Como medida de recuperación ante desastres
+
+#### Tipos de archivo de backup soportados
+
+La aplicación puede restaurar dos tipos de archivos:
+- **Archivos .db**: Base de datos SQLite completa
+- **Archivos .sql**: Scripts SQL con comandos de creación e inserción
+
+#### Paso a Paso: Restaurar un Backup
+
+**1. Acceder al Gestor de Backups**
+1. Haz clic en **💾 Backups** en el menú de administración
+2. Espera a que cargue la lista de backups desde Backblaze B2
+
+**2. Seleccionar el Backup a Restaurar**
+1. Navega por la lista de backups disponibles
+2. Usa los filtros para encontrar el backup deseado:
+   - **Buscar por nombre**: Escribe parte del nombre del archivo
+   - **Filtrar por tipo**: Selecciona ".db" o ".sql"
+   - **Filtrar por ubicación**: "Raíz" (recientes) o "Archivo/" (antiguos)
+3. Haz **clic en la fila** del backup que quieres restaurar
+   - La fila se resaltará en azul para indicar que está seleccionada
+4. Verifica la fecha del backup para asegurarte de que es el correcto
+
+**3. Iniciar la Restauración**
+1. Haz clic en el botón **📥 Restaurar Backup** (parte superior)
+2. Aparecerá una ventana de confirmación con:
+   - Nombre del archivo seleccionado
+   - Advertencias importantes sobre el proceso
+   - Información sobre el backup de seguridad automático
+
+**4. Confirmar la Restauración**
+
+La ventana de confirmación muestra:
+
+```
+⚠️ Restaurar Copia de Seguridad
+
+Estás a punto de restaurar la base de datos desde:
+📄 nombre_del_archivo.sql
+
+⚠️ ADVERTENCIA:
+• Se reemplazarán TODOS los datos actuales
+• Se creará un backup de seguridad automático
+• La aplicación se cerrará después de la restauración
+
+¿Deseas continuar?
+```
+
+- Haz clic en **✅ Restaurar** para continuar
+- Haz clic en **❌ Cancelar** (en rojo) para abortar
+
+**5. Proceso de Restauración**
+
+Si confirmas, el sistema ejecuta estos pasos automáticamente:
+
+**a) Descarga del Backup**
+- Descarga el archivo desde Backblaze B2 a una carpeta temporal
+- Muestra el progreso: "Descargando backup..."
+
+**b) Restauración en Turso (BD Principal)**
+- Si Turso está configurado (BD en la nube):
+  - Convierte el archivo .db a SQL si es necesario
+  - Ejecuta todos los comandos SQL en Turso
+  - Muestra progreso por lotes: "Ejecutando lote X/Y"
+  - ✅ Si tiene éxito: Continúa con la BD local
+  - ❌ Si falla: Muestra error y NO continúa (Turso es principal)
+
+**c) Backup de Seguridad Local**
+- Crea automáticamente un backup de la BD local actual
+- Lo guarda en: `backups_emergencia/backup_antes_restauracion_FECHA.db`
+- Este backup permite revertir cambios si algo sale mal
+
+**d) Restauración Local (BD Secundaria)**
+- Restaura el backup en la base de datos local
+- ✅ Si tiene éxito: Confirma restauración completa
+- ⚠️ Si falla (pero Turso OK): No es crítico, Turso tiene los datos
+
+**6. Resultados Posibles**
+
+**✅ Éxito Completo (Ambas BD restauradas)**
+```
+✅ TURSO (Principal): Base de datos restaurada en Turso (1250 comandos ejecutados)
+✅ LOCAL (Secundaria): Base de datos restaurada correctamente (45 tablas, 523 expedientes)
+✅ Backup de seguridad creado en: backups_emergencia/backup_antes_restauracion_20260201_153045.db
+
+La aplicación se cerrará para aplicar los cambios.
+Vuelve a abrirla para continuar trabajando.
+```
+
+**✅ Éxito Parcial (Solo Turso OK)**
+```
+✅ TURSO (Principal): Base de datos restaurada en Turso (1250 comandos ejecutados)
+⚠️ LOCAL (Secundaria): Error al restaurar
+ℹ️ La BD principal (Turso) fue restaurada correctamente
+```
+
+**❌ Error Crítico (Turso falló)**
+```
+❌ TURSO (Principal): Error al restaurar en Turso (lote 15/25): HTTP 500
+```
+
+**7. Después de la Restauración**
+
+- La aplicación se cierra automáticamente
+- Vuelve a abrirla para trabajar con los datos restaurados
+- Todos los usuarios verán los datos restaurados
+- Los cambios posteriores al backup se habrán perdido
+
+#### ⚠️ Advertencias y Precauciones
+
+**ANTES de restaurar:**
+- ✅ Avisa a todos los usuarios que vas a restaurar
+- ✅ Asegúrate de que nadie esté trabajando en la aplicación
+- ✅ Verifica la fecha del backup para no perder datos recientes
+- ✅ Considera exportar datos importantes antes de restaurar
+
+**DESPUÉS de restaurar:**
+- ⚠️ Todos los cambios posteriores a la fecha del backup se perderán
+- ⚠️ Los expedientes creados después ya no existirán
+- ⚠️ Las modificaciones recientes se habrán revertido
+- ✅ Tienes un backup de seguridad en `backups_emergencia/` por si necesitas volver atrás
+
+#### Backup de Seguridad Automático
+
+El sistema crea automáticamente un backup de seguridad antes de restaurar:
+
+- **Ubicación**: `backups_emergencia/backup_antes_restauracion_YYYYMMDD_HHMMSS.db`
+- **Contenido**: Copia exacta de la BD local antes de la restauración
+- **Uso**: Si la restauración sale mal, el administrador puede usar este archivo para volver al estado anterior
+
+#### Diferencia entre BD Principal (Turso) y Secundaria (Local)
+
+**Base de Datos Principal - Turso:**
+- ☁️ Almacenada en la nube
+- 👥 Compartida por todos los usuarios
+- 🔄 Sincronización en tiempo real
+- ⭐ **PRIORIDAD**: Si Turso se restaura OK, la operación es exitosa
+
+**Base de Datos Secundaria - Local:**
+- 💻 Almacenada en el ordenador
+- 👤 Copia local para cada usuario
+- 📋 Puede no existir en algunos equipos
+- ⚠️ Si falla pero Turso OK, no es crítico
+
+#### Filtros y Búsqueda de Backups
+
+Para encontrar un backup específico:
+
+**Búsqueda por nombre:**
+- Escribe parte del nombre en el campo "Buscar"
+- Ejemplo: "turso_backup_2026" mostrará todos los backups de 2026
+
+**Filtro por tipo:**
+- **Todos**: Muestra .db y .sql
+- **.db**: Solo archivos de base de datos SQLite
+- **.sql**: Solo scripts SQL
+
+**Filtro por ubicación:**
+- **Todos**: Muestra archivos en raíz y archivo
+- **Raíz**: Solo backups recientes (normalmente últimos 30)
+- **Archivo/**: Backups antiguos movidos a archivo
+
+**Ordenación:**
+- Haz clic en **"Fecha ▼"** para ordenar por fecha (más reciente primero)
+- Haz clic en **"Nombre"** para ordenar alfabéticamente
+
+#### Paginación
+
+Si hay muchos backups, la lista se divide en páginas:
+- Usa los botones **◀ Anterior** y **Siguiente ▶** para navegar
+- Cambia los "Elementos por página" (10, 20, 50, 100, 200) según prefieras
+- La indicación muestra: "Página 1 de 5 (1-10 de 48)"
+
+#### Solución de Problemas
+
+**❓ "Por favor, selecciona un archivo de backup"**
+- Haz clic en una fila de la lista para seleccionar el backup antes de restaurar
+
+**❓ "El archivo no es un backup válido"**
+- Solo puedes restaurar archivos .db o .sql
+- Verifica que has seleccionado el archivo correcto
+
+**❓ "Error al restaurar en Turso (timeout)"**
+- El archivo es muy grande y tardó demasiado
+- Intenta con un backup más pequeño o contacta con soporte técnico
+
+**❓ "Error al descargar el backup"**
+- Verifica tu conexión a internet
+- Comprueba que el archivo existe en Backblaze B2
+- El archivo puede haber sido eliminado
+
+**❓ "La restauración completó pero perdí datos recientes"**
+- Es normal: se restauraron los datos de la fecha del backup
+- Usa el backup de seguridad en `backups_emergencia/` si necesitas recuperar el estado anterior
+
+#### Mejores Prácticas
+
+1. **Haz backups regulares**: Configura backups automáticos diarios
+2. **Mantén varios puntos de restauración**: No elimines backups antiguos inmediatamente
+3. **Documenta cambios importantes**: Anota cuándo haces cambios críticos para saber a qué backup volver
+4. **Prueba la restauración**: Ocasionalmente, prueba restaurar un backup en un entorno de prueba
+5. **Comunica con el equipo**: Avisa antes de restaurar para que nadie pierda trabajo
+
 ---
 
 ## Preguntas Frecuentes
@@ -899,8 +1116,18 @@ El resto de funciones (crear expedientes, artículos, etc.) funcionan sin intern
 
 Sí, si se hacen backups regularmente:
 1. Contacta con el administrador
-2. Él puede restaurar un backup anterior
+2. El administrador puede restaurar un backup anterior usando la función **📥 Restaurar Backup**
 3. ⚠️ Se perderán los cambios posteriores al backup
+4. ✅ El sistema crea un backup de seguridad automático antes de restaurar
+
+**Proceso de restauración:**
+- El administrador accede a **💾 Backups**
+- Selecciona el backup de la fecha deseada
+- Hace clic en **📥 Restaurar Backup**
+- El sistema restaura automáticamente Turso (BD principal) y local (BD secundaria)
+- La aplicación se cierra y todos deben volver a abrirla
+
+💡 **Consejo**: Pide al administrador que verifique la fecha del backup antes de restaurar para minimizar la pérdida de datos.
 
 ### ❓ ¿Por qué algunos botones están deshabilitados?
 
@@ -1055,5 +1282,6 @@ Comienza por crear tu primer expediente RMA y explora las diferentes funciones. 
 
 ---
 
-*Versión del manual: 1.0 - Enero 2026*  
+*Versión del manual: 1.1 - Febrero 2026*  
+*Última actualización: Nueva sección sobre restauración de backups (v1.0.30)*  
 *Si encuentras errores en este manual o quieres sugerir mejoras, contacta con el administrador.*
