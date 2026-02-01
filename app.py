@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.28"
+APP_VERSION = "v1.0.29"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9481,7 +9481,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 # Campos nuevos de rma_maestro
                 '[[NUMERO_DOC]]': datos.get('numero_documento_cliente', 'N/A'),
                 '[[MOTIVO]]': datos.get('motivo', 'N/A'),
-                '[[NUMERO_ALBARAN]]': datos.get('numero_albaran', 'N/A'),
+                '[[NUMERO_ALBARAN]]': datos.get('Numero_Albaran', 'N/A'),
                 
                 # Campos de artículos mejorados
                 '[[LISTA_ARTICULOS]]': articulos_formateados,  # Lista estructurada completa

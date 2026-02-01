@@ -552,10 +552,8 @@ def mostrar_formulario_github(ventana_principal):
                     logger.error(f"Error al procesar imagen {ruta_imagen}: {e}")
                     cuerpo += f"{idx}. ⚠️ **Error al procesar imagen**\n"
             
-            if not DROPBOX_DISPONIBLE:
-                cuerpo += "\n*Nota: Dropbox no disponible. Las imágenes deben adjuntarse manualmente.*\n"
-            elif imagenes_subidas > 0:
-                cuerpo += f"\n*{imagenes_subidas} imagen(es) subida(s) a Dropbox correctamente.*\n"
+            if imagenes_subidas > 0:
+                cuerpo += f"\n*{imagenes_subidas} imagen(es) subida(s) a Backblaze B2 correctamente.*\n"
 
         token = os.getenv('GITHUB_TOKEN')
         if not token:
