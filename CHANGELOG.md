@@ -1,3 +1,4 @@
+- Modificado ubicacion de los backups de Turso a la nueva estructura de carpeta de B2. (1.0.23)
 - Migracion de Dropbox a Backblaze B2 (1.0.22)
 
 

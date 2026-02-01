@@ -245,13 +245,13 @@ def mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
         return False
 
 def gestionar_rotacion_backups(auth_data, bucket_id):
-    """Gestiona la rotación de backups: mantiene 30 y mueve antiguos a Archivo"""
+    """Gestiona la rotación de backups: mantiene 30 y mueve antiguos a BD/Archivo"""
     try:
         log("🔄 Verificando rotación de backups...")
         
         # Listar backups actuales (no en carpeta Archivo)
         todos_archivos = listar_archivos_b2(auth_data, bucket_id)
-        backups = [f for f in todos_archivos if f['fileName'].startswith('backup_turso_') and not f['fileName'].startswith('Archivo/')]
+        backups = [f for f in todos_archivos if f['fileName'].startswith('BD/backup_turso_') and not f['fileName'].startswith('BD/Archivo/')]
         
         # Ordenar por nombre (que incluye fecha) - más antiguos primero
         backups_db = sorted([f for f in backups if f['fileName'].endswith('.db')], key=lambda x: x['fileName'])
@@ -263,7 +263,8 @@ def gestionar_rotacion_backups(auth_data, bucket_id):
         while len(backups_db) > MAX_BACKUPS:
             backup_antiguo = backups_db.pop(0)
             nombre_actual = backup_antiguo['fileName']
-            nombre_nuevo = f"Archivo/{nombre_actual}"
+            # Mover a BD/Archivo/ en lugar de solo Archivo/
+            nombre_nuevo = nombre_actual.replace('BD/', 'BD/Archivo/')
             
             if mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
                 archivos_movidos += 1
@@ -272,13 +273,14 @@ def gestionar_rotacion_backups(auth_data, bucket_id):
         while len(backups_sql) > MAX_BACKUPS:
             backup_antiguo = backups_sql.pop(0)
             nombre_actual = backup_antiguo['fileName']
-            nombre_nuevo = f"Archivo/{nombre_actual}"
+            # Mover a BD/Archivo/ en lugar de solo Archivo/
+            nombre_nuevo = nombre_actual.replace('BD/', 'BD/Archivo/')
             
             if mover_archivo_b2(auth_data, bucket_id, nombre_actual, nombre_nuevo):
                 archivos_movidos += 1
         
         if archivos_movidos > 0:
-            log(f"📁 {archivos_movidos} archivos movidos a carpeta Archivo")
+            log(f"📁 {archivos_movidos} archivos movidos a carpeta BD/Archivo")
         else:
             log(f"✅ Rotación OK: {len(backups_db)} backups .db y {len(backups_sql)} backups .sql")
         
@@ -621,18 +623,22 @@ def main():
         archivos_subidos = 0
         
         if db_path and db_path.exists():
-            if subir_archivo_b2(auth_data, bucket_id, db_path, db_path.name):
+            # Subir a carpeta BD/
+            nombre_remoto_db = f"BD/{db_path.name}"
+            if subir_archivo_b2(auth_data, bucket_id, db_path, nombre_remoto_db):
                 archivos_subidos += 1
-                b2_urls.append(db_path.name)
+                b2_urls.append(nombre_remoto_db)
             else:
-                errores.append(f"- Error al subir {db_path.name}")
+                errores.append(f"- Error al subir {nombre_remoto_db}")
         
         if sql_path and sql_path.exists():
-            if subir_archivo_b2(auth_data, bucket_id, sql_path, sql_path.name):
+            # Subir a carpeta BD/
+            nombre_remoto_sql = f"BD/{sql_path.name}"
+            if subir_archivo_b2(auth_data, bucket_id, sql_path, nombre_remoto_sql):
                 archivos_subidos += 1
-                b2_urls.append(sql_path.name)
+                b2_urls.append(nombre_remoto_sql)
             else:
-                errores.append(f"- Error al subir {sql_path.name}")
+                errores.append(f"- Error al subir {nombre_remoto_sql}")
         
         estadisticas['archivos_subidos'] = archivos_subidos
         

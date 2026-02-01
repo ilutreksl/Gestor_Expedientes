@@ -81,8 +81,8 @@ class BackupManagerB2:
         except Exception as e:
             return False, f"Error: {e}"
     
-    def listar_archivos(self, prefix=""):
-        """Lista todos los archivos en el bucket con un prefijo opcional"""
+    def listar_archivos(self, prefix="BD/"):
+        """Lista todos los archivos en el bucket con un prefijo opcional (por defecto BD/)"""
         try:
             if not self.auth_data or not self.bucket_id:
                 return None, "No autenticado o bucket no encontrado"
