@@ -2571,11 +2571,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Resetear colores de todos los botones del índice
                 for widget in indice_frame.winfo_children():
                     if isinstance(widget, ctk.CTkButton):
-                        widget.configure(fg_color=None, hover_color=None)
+                        widget.configure(fg_color="#1f538d", hover_color="#14375e")
                 
                 # Destacar el botón clickeado
                 if btn_clickeado:
-                    btn_clickeado.configure(fg_color=None, hover_color=None)
+                    btn_clickeado.configure(fg_color="#14375e", hover_color="#0d2943")
                 
                 logger.debug(f"Manual: mostrando sección '{titulo_seccion}'")
             
