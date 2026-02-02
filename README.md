@@ -13,7 +13,7 @@ Sistema completo para la gestión de expedientes de devolución de mercancías (
 Copia y ejecuta este comando en tu terminal para instalar todas las librerías necesarias:
 
 ```bash
-pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab
+pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab docx2pdf
 ```
 
 ### **📋 LIBRERÍAS OBLIGATORIAS**
@@ -56,6 +56,9 @@ pip install win10toast
 
 # Graficos en excel
 pip install matplotlib
+
+# Word a PDF
+pip install docx2pdf
 ```
 
 ### **📋 LIBRERÍAS OPCIONALES (Mejoran funcionalidad)**

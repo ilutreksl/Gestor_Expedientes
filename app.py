@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.33"
+APP_VERSION = "v1.0.34"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5871,6 +5871,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 #hover_color="grey70",
                 font=ctk.CTkFont(size=14, weight="bold"))               
             self.btn_enviar_email.pack(side="left", padx=(5, 15))
+            
+            # Botón de generar autorización (solo para roles autorizados)
+            if self.rol in ["administrador", "admin", "Dpto. Tecnico"]:
+                self.btn_autorizacion = ctk.CTkButton(
+                    btn_action_frame,
+                    text="📋 Autorización",
+                    command=lambda: self.mostrar_dialogo_autorizacion(rma_id, codigo_rma_mostrar),
+                    font=ctk.CTkFont(size=14, weight="bold"),
+                    fg_color="#27ae60",
+                    hover_color="#229954"
+                )
+                self.btn_autorizacion.pack(side="left", padx=(5, 15))
+                Tooltip(self.btn_autorizacion, "Generar PDF de autorización de devolución")
 
         # 2. Botón de Guardar
         if es_edicion:
@@ -8256,6 +8269,415 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
     
+    def mostrar_dialogo_autorizacion(self, rma_id, codigo_rma):
+        """
+        Muestra el diálogo para generar el PDF de autorización.
+        
+        Args:
+            rma_id (int): ID del expediente
+            codigo_rma (str): Código del expediente
+        """
+        from lib.autorizacion_docx import generar_autorizacion_docx
+        import tkinter.filedialog as filedialog
+        from datetime import datetime
+        from CTkDatePicker import CTkDatePicker
+        from PIL import Image
+        
+        # Función para validar imagen
+        def validar_imagen(ruta_imagen):
+            if not os.path.exists(ruta_imagen):
+                return False
+            try:
+                with Image.open(ruta_imagen) as img:
+                    img.verify()
+                return True
+            except Exception:
+                return False
+        
+        # Verificar permisos
+        if self.rol not in ["administrador", "admin", "Dpto. Tecnico"]:
+            messagebox.showwarning(
+                "Permiso Denegado",
+                "No tiene permisos para generar autorizaciones."
+            )
+            return
+        
+        # Obtener datos del expediente
+        conn, cursor = self.master.conectar_db()
+        try:
+            cursor.execute("""
+                SELECT cliente, Persona_de_Contacto, Email_de_Contacto, 
+                       fecha_emision, motivo
+                FROM rma_maestro
+                WHERE id = ?
+            """, (rma_id,))
+            
+            resultado = cursor.fetchone()
+            if not resultado:
+                messagebox.showerror("Error", "No se encontraron los datos del expediente.")
+                return
+            
+            cliente, persona_de_contacto, email_de_contacto, fecha_emision, motivo = resultado
+            
+        except Exception as e:
+            logger.error(f"Error al obtener datos del expediente: {e}")
+            messagebox.showerror("Error", f"Error al obtener datos: {e}")
+            return
+        finally:
+            conn.close()
+        
+        # Crear ventana de diálogo
+        ventana = ctk.CTkToplevel(self.master)
+        ventana.title(f"Generar Autorización - {codigo_rma}")
+        ventana.geometry("650x580")
+        ventana.transient(self.master)
+        ventana.grab_set()
+        
+        # Centrar ventana
+        ventana.update_idletasks()
+        x = (ventana.winfo_screenwidth() // 2) - (650 // 2)
+        y = (ventana.winfo_screenheight() // 2) - (580 // 2)
+        ventana.geometry(f"650x580+{x}+{y}")
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(ventana)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Título
+        ctk.CTkLabel(
+            main_frame,
+            text=f"📄 Autorización de Devolución",
+            font=("Arial", 18, "bold")
+        ).pack(pady=(0, 20))
+        
+        # Información del expediente
+        info_frame = ctk.CTkFrame(main_frame)
+        info_frame.pack(fill="x", pady=(0, 15))
+        
+        ctk.CTkLabel(
+            info_frame,
+            text=f"Expediente: {codigo_rma}",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=10, pady=5)
+        
+        ctk.CTkLabel(
+            info_frame,
+            text=f"Cliente: {cliente or 'N/A'}",
+            font=("Arial", 11)
+        ).pack(anchor="w", padx=10)
+        
+        # Observaciones
+        ctk.CTkLabel(
+            main_frame,
+            text="Observaciones:",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", pady=(10, 5))
+        
+        observaciones_text = ctk.CTkTextbox(
+            main_frame,
+            height=120,
+            width=540
+        )
+        observaciones_text.pack(pady=(0, 15))
+        
+        # Fecha de autorización
+        fecha_frame = ctk.CTkFrame(main_frame)
+        fecha_frame.pack(fill="x", pady=(0, 15))
+        
+        ctk.CTkLabel(
+            fecha_frame,
+            text="Fecha de Autorización:",
+            font=("Arial", 12, "bold")
+        ).pack(side="left", padx=(10, 10))
+        
+        # Crear el date picker
+        fecha_picker = CTkDatePicker(fecha_frame, width=180)
+        
+        # Aplicar formato de fecha según preferencia del usuario
+        try:
+            pref = getattr(self, 'user_settings', {}).get('date_format', 'YYYY-MM-DD')
+            fmt_map = {
+                'YYYY-MM-DD': '%Y-%m-%d',
+                'DD/MM/YYYY': '%d/%m/%Y',
+                'MM/DD/YYYY': '%m/%d/%Y'
+            }
+            widget_fmt = fmt_map.get(pref, '%Y-%m-%d')
+            fecha_picker.set_date_format(widget_fmt)
+        except Exception:
+            # Fallback seguro
+            try:
+                fecha_picker.set_date_format('%Y-%m-%d')
+            except Exception:
+                pass
+        
+        fecha_picker.pack(side="left", padx=5)
+        
+        # Establecer fecha actual
+        fecha_picker.set_date(datetime.now())
+        
+        # Botón "Hoy"
+        def establecer_hoy():
+            fecha_picker.set_date(datetime.now())
+        
+        ctk.CTkButton(
+            fecha_frame,
+            text="Hoy",
+            command=establecer_hoy,
+            width=60
+        ).pack(side="left", padx=5)
+        
+        # Cuño de empresa
+        var_cuno = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            main_frame,
+            text="Incluir cuño de la empresa",
+            variable=var_cuno,
+            font=("Arial", 11)
+        ).pack(anchor="w", pady=(0, 10))
+        
+        # Firma
+        firma_frame = ctk.CTkFrame(main_frame)
+        firma_frame.pack(fill="x", pady=(0, 15))
+        
+        ctk.CTkLabel(
+            firma_frame,
+            text="Firma:",
+            font=("Arial", 12, "bold")
+        ).pack(side="left", padx=(10, 10))
+        
+        firma_path_var = ctk.StringVar(value="")
+        firma_label = ctk.CTkLabel(
+            firma_frame,
+            text="No seleccionada",
+            font=("Arial", 10),
+            text_color="gray"
+        )
+        firma_label.pack(side="left", padx=5)
+        
+        def seleccionar_firma():
+            ruta = filedialog.askopenfilename(
+                title="Seleccionar imagen de firma",
+                filetypes=[
+                    ("Imágenes", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                    ("Todos los archivos", "*.*")
+                ]
+            )
+            if ruta:
+                if validar_imagen(ruta):
+                    firma_path_var.set(ruta)
+                    nombre_archivo = os.path.basename(ruta)
+                    firma_label.configure(text=nombre_archivo, text_color="green")
+                else:
+                    messagebox.showerror("Error", "El archivo seleccionado no es una imagen válida.")
+        
+        ctk.CTkButton(
+            firma_frame,
+            text="Seleccionar...",
+            command=seleccionar_firma,
+            width=120
+        ).pack(side="left", padx=5)
+        
+        # Botones de acción
+        botones_frame = ctk.CTkFrame(main_frame)
+        botones_frame.pack(fill="x", pady=(20, 0))
+        
+        # Barra de progreso (oculta inicialmente)
+        progreso_frame = ctk.CTkFrame(main_frame)
+        progreso_label = ctk.CTkLabel(progreso_frame, text="Generando documento...", font=("Arial", 10))
+        progreso_bar = ctk.CTkProgressBar(progreso_frame, width=540)
+        progreso_bar.set(0)
+        
+        def mostrar_progreso(visible=True):
+            if visible:
+                progreso_frame.pack(fill="x", pady=(10, 0), before=botones_frame)
+                progreso_label.pack(pady=(5, 2))
+                progreso_bar.pack(pady=(0, 5))
+                ventana.update()
+            else:
+                progreso_frame.pack_forget()
+        
+        def actualizar_progreso(valor, texto="Generando documento..."):
+            progreso_bar.set(valor)
+            progreso_label.configure(text=texto)
+            ventana.update()
+        
+        def generar_pdf():
+            try:
+                # Mostrar barra de progreso
+                mostrar_progreso(True)
+                actualizar_progreso(0.1, "Preparando datos...")
+                
+                # Obtener valores
+                observaciones = observaciones_text.get("1.0", "end-1c").strip()
+                
+                # Obtener fecha del picker (devuelve string)
+                try:
+                    fecha_str = fecha_picker.get_date()
+                    # Convertir a formato ISO usando la función global parse_date_to_iso
+                    fecha_autorizacion_str = parse_date_to_iso(fecha_str)
+                except Exception as e:
+                    logger.error(f"Error obteniendo fecha del picker: {e}")
+                    fecha_autorizacion_str = datetime.now().strftime("%Y-%m-%d")
+                
+                usar_cuno = var_cuno.get()
+                ruta_firma = firma_path_var.get() if firma_path_var.get() else None
+                
+                actualizar_progreso(0.2, "Validando archivos...")
+                
+                # Ruta del cuño (si está habilitado)
+                cuno_path = None
+                if usar_cuno:
+                    directorio_base = os.path.dirname(os.path.abspath(__file__))
+                    cuno_path = os.path.join(directorio_base, "plantillas", "Cuño.jpeg")
+                    if not os.path.exists(cuno_path):
+                        logger.warning(f"No se encuentra el cuño en: {cuno_path}")
+                        cuno_path = None
+                
+                # Nombre del archivo - Formato: RMA26001_Autorizacion.pdf (se convertirá de DOCX)
+                nombre_archivo = f"{codigo_rma}_Autorizacion.pdf"
+                
+                actualizar_progreso(0.3, "Preparando archivos temporales...")
+                
+                # Generar documento en directorio temporal
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+                ruta_temporal = os.path.join(temp_dir, nombre_archivo)
+                
+                # Ruta de la plantilla
+                plantilla_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "plantillas",
+                    "Plantilla_Autorizacion.docx"
+                )
+                
+                if not os.path.exists(plantilla_path):
+                    mostrar_progreso(False)
+                    messagebox.showerror("Error", f"No se encuentra la plantilla:\n{plantilla_path}")
+                    return
+                
+                actualizar_progreso(0.4, "Generando documento...")
+                
+                # Generar documento DOCX
+                exito = generar_autorizacion_docx(
+                    plantilla_path=plantilla_path,
+                    ruta_destino=ruta_temporal,
+                    codigo_rma=codigo_rma,
+                    cliente=cliente or "",
+                    persona_de_contacto=persona_de_contacto or "",
+                    email_de_contacto=email_de_contacto or "",
+                    fecha_emision=fecha_emision or "",
+                    motivo=motivo or "",
+                    observaciones=observaciones,
+                    fecha_autorizacion=fecha_autorizacion_str,
+                    usar_cuno=usar_cuno,
+                    cuno_path=cuno_path,
+                    ruta_firma=ruta_firma
+                )
+                
+                if exito:
+                    actualizar_progreso(0.7, "Subiendo archivo...")
+                    
+                    # Subir el archivo usando el mismo sistema que otros adjuntos
+                    if usar_b2():
+                        exito_subida, ruta_relativa = self._subir_archivo_b2(ruta_temporal, codigo_rma, nombre_archivo, None)
+                        tipo_almacenamiento = 'backblaze'
+                    else:
+                        exito_subida, ruta_relativa = self._subir_archivo_local(ruta_temporal, codigo_rma, nombre_archivo)
+                        tipo_almacenamiento = 'local'
+                    
+                    # Limpiar archivo temporal
+                    try:
+                        os.unlink(ruta_temporal)
+                    except:
+                        pass
+                    
+                    if not exito_subida:
+                        mostrar_progreso(False)
+                        messagebox.showerror("Error", "No se pudo subir el documento. Revise los logs.")
+                        return
+                    
+                    actualizar_progreso(0.9, "Registrando en base de datos...")
+                    
+                    # Registrar en la base de datos
+                    conn, cursor = self.master.conectar_db()
+                    try:
+                        if getattr(self, '_usar_tipo_almacenamiento', False):
+                            # Usar esquema nuevo con tipo_almacenamiento
+                            cursor.execute("""
+                                INSERT INTO rma_adjuntos 
+                                (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                rma_id,
+                                nombre_archivo,
+                                ruta_relativa,
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                self.username,
+                                tipo_almacenamiento
+                            ))
+                        else:
+                            # Usar esquema antiguo sin tipo_almacenamiento
+                            cursor.execute("""
+                                INSERT INTO rma_adjuntos 
+                                (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (
+                                rma_id,
+                                nombre_archivo,
+                                ruta_relativa,
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                self.username
+                            ))
+                        conn.commit()
+                    except Exception as e:
+                        logger.error(f"Error al registrar adjunto: {e}")
+                    finally:
+                        conn.close()
+                    
+                    actualizar_progreso(1.0, "¡Completado!")
+                    
+                    # Ocultar barra de progreso después de un breve momento
+                    ventana.after(500, lambda: mostrar_progreso(False))
+                    
+                    messagebox.showinfo(
+                        "Éxito",
+                        f"Documento de autorización generado correctamente"
+                    )
+                    ventana.destroy()
+                    
+                    # Refrescar lista de adjuntos
+                    if hasattr(self, 'cargar_lista_adjuntos'):
+                        try:
+                            self.cargar_lista_adjuntos(rma_id)
+                        except Exception as e:
+                            logger.warning(f"No se pudo refrescar lista de adjuntos: {e}")
+                else:
+                    mostrar_progreso(False)
+                    messagebox.showerror("Error", "No se pudo generar el documento. Revise los logs.")
+                    
+            except Exception as e:
+                mostrar_progreso(False)
+                logger.error(f"Error al generar autorización: {e}", exc_info=True)
+                messagebox.showerror("Error", f"Error al generar autorización:\n{e}")
+        
+        ctk.CTkButton(
+            botones_frame,
+            text="✓ Generar PDF",
+            command=generar_pdf,
+            width=150,
+            fg_color="#27ae60",
+            hover_color="#229954"
+        ).pack(side="left", padx=10, expand=True)
+        
+        ctk.CTkButton(
+            botones_frame,
+            text="✗ Cancelar",
+            command=ventana.destroy,
+            width=150,
+            fg_color="#e74c3c",
+            hover_color="#c0392b"
+        ).pack(side="left", padx=10, expand=True)
+    
     def mostrar_menu_contextual_expediente(self, event, rma_id, codigo_rma):
         """
         Muestra el menú contextual al hacer clic derecho en un expediente.
@@ -8281,6 +8703,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             )
         
         menu.add_cascade(label="🔄 Cambiar Estado", menu=menu_estados)
+        
+        # Añadir opción de generar autorización (solo para roles autorizados)
+        if self.rol in ["administrador", "admin", "Dpto. Tecnico"]:
+            menu.add_separator()
+            menu.add_command(
+                label="📄 Generar Autorización",
+                command=lambda: self.mostrar_dialogo_autorizacion(rma_id, codigo_rma)
+            )
         
         # Mostrar el menú en la posición del cursor
         try:
