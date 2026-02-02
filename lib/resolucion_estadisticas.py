@@ -9,7 +9,18 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
 matplotlib.use('Agg')  # Backend sin GUI
-from app import connect_db
+
+# Importación compatible con ambos nombres de archivo principal
+try:
+    from app import connect_db
+except ImportError:
+    try:
+        from Gestor_Expedientes import connect_db
+    except ImportError:
+        # Si ninguno funciona, definir connect_db como None
+        # La función real se obtendrá del objeto ventana_principal.master
+        connect_db = None
+
 from lib.logger_config import get_logger
 
 logger = get_logger()
