@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.32"
+APP_VERSION = "v1.0.33"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8382,11 +8382,22 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         )
         btn_hoy.pack(side="left")
         
-        # Deshabilitar selector de fecha si no es admin o Dpto Tecnico
-        es_privilegiado = self.username in ["admin", "Dpto Tecnico"]
+        # Verificar si el usuario tiene privilegios (por ROL, no por username)
+        # Los roles con privilegios son: administrador, admin, y Dpto. Tecnico
+        es_privilegiado = self.rol in ["administrador", "admin", "Dpto. Tecnico"]
+        
+        # Si no es privilegiado, ocultar los controles de fecha y mostrar solo texto
         if not es_privilegiado:
-            date_picker.configure(state="disabled")
-            btn_hoy.configure(state="disabled")
+            # Ocultar date_picker y btn_hoy
+            date_picker.pack_forget()
+            btn_hoy.pack_forget()
+            
+            # Mostrar fecha actual como texto no editable
+            ctk.CTkLabel(
+                fecha_frame,
+                text=datetime.now().strftime('%Y-%m-%d'),
+                width=180
+            ).pack(side="left", padx=(0, 5))
         
         ctk.CTkLabel(
             info_frame,
@@ -8394,29 +8405,44 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             font=ctk.CTkFont(weight="bold")
         ).grid(row=2, column=0, sticky="w", padx=5, pady=5)
         
-        # Obtener lista de usuarios disponibles
-        usuarios_disponibles = [self.username]
-        try:
-            conn, cursor = self.master.conectar_db()
-            if conn:
-                cursor.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
-                usuarios_disponibles = [row[0] for row in cursor.fetchall()]
-                conn.close()
-        except Exception as e:
-            print(f"Error obteniendo usuarios: {e}")
-        
-        # Desplegable para el usuario (editable para admin y Dpto Tecnico)
-        usuario_menu = ctk.CTkOptionMenu(
-            info_frame,
-            values=usuarios_disponibles,
-            width=180
-        )
-        usuario_menu.set(self.username)
-        usuario_menu.grid(row=2, column=1, sticky="w", padx=5, pady=5, columnspan=2)
-        
-        # Deshabilitar usuario si no es admin o Dpto Tecnico
-        if not es_privilegiado:
-            usuario_menu.configure(state="disabled")
+        # Si es privilegiado, mostrar desplegable de usuarios
+        # Si no lo es, solo mostrar su nombre como texto
+        if es_privilegiado:
+            # Obtener lista de usuarios disponibles
+            usuarios_disponibles = [self.username]
+            try:
+                conn, cursor = self.master.conectar_db()
+                if conn:
+                    cursor.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+                    usuarios_disponibles = [row[0] for row in cursor.fetchall()]
+                    conn.close()
+            except Exception as e:
+                print(f"Error obteniendo usuarios: {e}")
+            
+            # Desplegable para el usuario
+            usuario_menu = ctk.CTkOptionMenu(
+                info_frame,
+                values=usuarios_disponibles,
+                width=180
+            )
+            usuario_menu.set(self.username)
+            usuario_menu.grid(row=2, column=1, sticky="w", padx=5, pady=5, columnspan=2)
+        else:
+            # Mostrar solo el nombre del usuario actual como texto
+            ctk.CTkLabel(
+                info_frame,
+                text=self.username,
+                width=180
+            ).grid(row=2, column=1, sticky="w", padx=5, pady=5, columnspan=2)
+            
+            # Crear un menu oculto para que ejecutar_cambio funcione
+            usuario_menu = ctk.CTkOptionMenu(
+                info_frame,
+                values=[self.username],
+                width=180
+            )
+            usuario_menu.set(self.username)
+            # No hacer grid, solo mantenerlo en memoria
         
         # Botones
         botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -8425,17 +8451,21 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         def ejecutar_cambio():
             from lib.rma_utils import cambiar_estado_expediente
             
-            # Obtener fecha del date_picker usando parse_date_to_iso para coherencia
-            try:
-                fecha_obj = date_picker.get_date()
-                # parse_date_to_iso espera un string o un objeto datetime
-                if isinstance(fecha_obj, str):
-                    fecha = parse_date_to_iso(fecha_obj)
-                else:
-                    # Es un objeto datetime, convertir a string ISO
-                    fecha = fecha_obj.strftime('%Y-%m-%d')
-            except Exception as e:
-                print(f"Error obteniendo fecha del picker: {e}")
+            # Obtener fecha (si es privilegiado del picker, si no, fecha actual)
+            if es_privilegiado:
+                try:
+                    fecha_obj = date_picker.get_date()
+                    # parse_date_to_iso espera un string o un objeto datetime
+                    if isinstance(fecha_obj, str):
+                        fecha = parse_date_to_iso(fecha_obj)
+                    else:
+                        # Es un objeto datetime, convertir a string ISO
+                        fecha = fecha_obj.strftime('%Y-%m-%d')
+                except Exception as e:
+                    print(f"Error obteniendo fecha del picker: {e}")
+                    fecha = datetime.now().strftime('%Y-%m-%d')
+            else:
+                # Usuario no privilegiado siempre usa fecha actual
                 fecha = datetime.now().strftime('%Y-%m-%d')
             
             usuario = usuario_menu.get()
