@@ -5,7 +5,8 @@
     "show_tooltips": true,
     "compact_mode": true,
     "icon_size": 24,
-    "mostrar_aviso": true
+    "mostrar_aviso": true,
+    "tiene_firma": false
   },
   "users": {
     "admin": {
@@ -16,6 +17,7 @@
       "theme": "themes/BH_rime.json",
       "appearance_mode": "light",
       "mostrar_aviso": true,
+      "tiene_firma": false,
       "historial_busquedas": [
         {
           "termino": "carlos",
@@ -73,7 +75,8 @@
       "icon_size": 24,
       "theme": "themes/teal_corporate.json",
       "appearance_mode": "light",
-      "mostrar_aviso": true
+      "mostrar_aviso": true,
+      "tiene_firma": false
     }
   }
 }

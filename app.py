@@ -40,6 +40,14 @@ from lib import rma_asociaciones
 # Sistema de logging
 from lib.logger_config import setup_logging, set_current_user, get_logger
 
+# Gestor de firmas de usuario
+from lib.firma_manager import (
+    subir_firma_usuario_b2,
+    descargar_firma_usuario_b2,
+    eliminar_firma_usuario_b2,
+    verificar_firma_usuario_existe
+)
+
 import tkinter as tk
 from tkinter import ttk
 
@@ -323,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.36"
+APP_VERSION = "v1.0.37"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -742,7 +750,8 @@ def load_user_settings(username: str = None) -> dict:
         "compact_mode": True,
         "icon_size": 24,
         "theme": "themes/BH_rime.json",
-        "appearance_mode": "light"
+        "appearance_mode": "light",
+        "tiene_firma": False  # Campo para indicar si el usuario tiene firma en B2
     }
     path = _get_user_settings_path()
     try:
@@ -1135,7 +1144,22 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # Cargar ajustes de usuario (ya aplicados en LoginApp, solo necesitamos cargarlos aquí)
         try:
             self.user_settings = load_user_settings(self.username)
-        except Exception:
+            
+            # Verificar estado de firma en B2 si está habilitado
+            if usar_b2():
+                tiene_firma_guardada = self.user_settings.get("tiene_firma", False)
+                firma_existe = verificar_firma_usuario_existe(self.username, get_b2_client)
+                
+                # Si hay desincronización, corregir
+                if tiene_firma_guardada != firma_existe:
+                    self.user_settings["tiene_firma"] = firma_existe
+                    save_user_settings(self.user_settings, self.username)
+                    if firma_existe:
+                        logger.info(f"Firma detectada en B2 para usuario {self.username}")
+                    else:
+                        logger.info(f"No se detectó firma en B2 para usuario {self.username}")
+        except Exception as e:
+            logger.error(f"Error al cargar ajustes de usuario: {e}")
             self.user_settings = {}
             
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
@@ -2332,6 +2356,197 @@ class VentanaPrincipal(ctk.CTkToplevel):
             ctk.CTkLabel(frm, text="Confirmar contraseña:").grid(row=7, column=0, sticky="w", padx=6, pady=6)
             entry_password2 = ctk.CTkEntry(frm, width=300, show="*")
             entry_password2.grid(row=7, column=1, sticky="ew", padx=6, pady=6)
+
+            # Separador
+            sep1 = ctk.CTkFrame(frm, height=2, fg_color="gray40")
+            sep1.grid(row=8, column=0, columnspan=2, sticky="ew", padx=6, pady=12)
+
+            # --- Sección de Firma ---
+            ctk.CTkLabel(frm, text="Gestión de Firma:", font=("Arial", 12, "bold")).grid(row=9, column=0, columnspan=2, sticky="w", padx=6, pady=(6,3))
+
+            # Checkbox "Tiene Firma?" (solo lectura)
+            var_tiene_firma = tk.BooleanVar(value=self.user_settings.get("tiene_firma", False))
+            switch_firma = ctk.CTkSwitch(frm, text="¿Tiene Firma?", variable=var_tiene_firma, width=40, state="disabled")
+            switch_firma.grid(row=10, column=0, columnspan=2, sticky="w", padx=6, pady=3)
+
+            # Frame para botones de firma
+            firma_btns_frame = ctk.CTkFrame(frm, fg_color="transparent")
+            firma_btns_frame.grid(row=11, column=0, columnspan=2, sticky="ew", padx=6, pady=3)
+
+            def adjuntar_firma():
+                """Permite al usuario adjuntar su firma"""
+                # Mostrar mensaje con requisitos
+                messagebox.showinfo(
+                    "Requisitos de la Firma",
+                    "La firma debe cumplir los siguientes requisitos:\\n\\n"
+                    "• Formato: Solo archivos .PNG\\n"
+                    "• Dimensiones máximas: 810x740 px\\n"
+                    "• Tamaño máximo: 2 MB\\n"
+                    "• Fondo transparente (recomendado)\\n"
+                )
+
+                # Selector de archivo
+                import tkinter.filedialog as filedialog
+                ruta = filedialog.askopenfilename(
+                    title="Seleccionar imagen de firma",
+                    filetypes=[("Imágenes PNG", "*.png")]
+                )
+                
+                if not ruta:
+                    return
+
+                # Validar que es PNG
+                if not ruta.lower().endswith('.png'):
+                    messagebox.showerror("Error", "Solo se aceptan archivos PNG.")
+                    return
+
+                # Validar imagen con PIL
+                try:
+                    from PIL import Image
+                    with Image.open(ruta) as img:
+                        ancho, alto = img.size
+                        
+                        # Validar dimensiones
+                        if ancho < 100 or alto < 50:
+                            messagebox.showwarning(
+                                "Dimensiones pequeñas",
+                                f"La imagen es muy pequeña ({ancho}x{alto} px).\\n"
+                                "Se recomienda al menos 300x150 px para mejor calidad."
+                            )
+                        
+                        if ancho > 810 or alto > 740:
+                            messagebox.showerror(
+                                "Dimensiones excedidas",
+                                f"La imagen excede las dimensiones máximas ({ancho}x{alto} px).\\n"
+                                "Las dimensiones máximas permitidas son 810x740 px."
+                            )
+                            return
+
+                        # Validar tamaño de archivo
+                        tamanio_mb = os.path.getsize(ruta) / (1024 * 1024)
+                        if tamanio_mb > 2:
+                            messagebox.showerror(
+                                "Archivo muy grande",
+                                f"El archivo pesa {tamanio_mb:.2f} MB.\\n"
+                                "El tamaño máximo es 2 MB."
+                            )
+                            return
+
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo leer la imagen:\\n{e}")
+                    return
+
+                # Subir a B2
+                try:
+                    exito, resultado = subir_firma_usuario_b2(self.username, ruta, get_b2_client)
+                    
+                    if exito:
+                        # Actualizar settings
+                        self.user_settings["tiene_firma"] = True
+                        save_user_settings(self.user_settings, self.username)
+                        
+                        # Actualizar checkbox
+                        var_tiene_firma.set(True)
+                        
+                        messagebox.showinfo(
+                            "Éxito",
+                            "Su firma ha sido guardada correctamente.\\n"
+                            f"Archivo: {resultado}"
+                        )
+                        logger.info(f"Usuario {self.username} adjuntó su firma")
+                    else:
+                        messagebox.showerror("Error", f"No se pudo subir la firma:\\n{resultado}")
+                        
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al procesar la firma:\\n{e}")
+
+            def eliminar_firma():
+                """Elimina la firma del usuario"""
+                if not var_tiene_firma.get():
+                    messagebox.showinfo("Información", "No tiene firma registrada.")
+                    return
+
+                # Confirmación
+                respuesta = messagebox.askyesno(
+                    "Confirmar Eliminación",
+                    "¿Está seguro de que desea eliminar su firma?\\n\\n"
+                    "Esta acción no se puede deshacer."
+                )
+                
+                if not respuesta:
+                    return
+
+                # Eliminar de B2
+                try:
+                    exito = eliminar_firma_usuario_b2(self.username, get_b2_client)
+                    
+                    if exito:
+                        # Actualizar settings
+                        self.user_settings["tiene_firma"] = False
+                        save_user_settings(self.user_settings, self.username)
+                        
+                        # Actualizar checkbox
+                        var_tiene_firma.set(False)
+                        
+                        messagebox.showinfo("Éxito", "Su firma ha sido eliminada correctamente.")
+                        logger.info(f"Usuario {self.username} eliminó su firma")
+                    else:
+                        messagebox.showwarning(
+                            "Advertencia",
+                            "No se pudo eliminar la firma del almacenamiento.\\n"
+                            "Es posible que ya no exista."
+                        )
+                        # Actualizar settings de todos modos
+                        self.user_settings["tiene_firma"] = False
+                        save_user_settings(self.user_settings, self.username)
+                        var_tiene_firma.set(False)
+                        
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error al eliminar la firma:\\n{e}")
+
+            def cambiar_firma():
+                """Permite cambiar la firma existente"""
+                if not var_tiene_firma.get():
+                    # Si no tiene firma, actuar como adjuntar
+                    adjuntar_firma()
+                    return
+
+                # Mensaje de confirmación
+                respuesta = messagebox.askyesno(
+                    "Cambiar Firma",
+                    "¿Desea reemplazar su firma actual por una nueva?\\n\\n"
+                    "La firma anterior será eliminada."
+                )
+                
+                if respuesta:
+                    adjuntar_firma()
+
+            # Botones de gestión de firma
+            ctk.CTkButton(
+                firma_btns_frame,
+                text="📎 Adjuntar Firma",
+                command=adjuntar_firma,
+                width=140,
+                height=32
+            ).grid(row=0, column=0, padx=3, pady=3)
+
+            ctk.CTkButton(
+                firma_btns_frame,
+                text="🔄 Cambiar Firma",
+                command=cambiar_firma,
+                width=140,
+                height=32
+            ).grid(row=0, column=1, padx=3, pady=3)
+
+            ctk.CTkButton(
+                firma_btns_frame,
+                text="🗑️ Eliminar Firma",
+                command=eliminar_firma,
+                width=140,
+                height=32,
+                fg_color="darkred",
+                hover_color="red"
+            ).grid(row=0, column=2, padx=3, pady=3)
 
             # Buttons
             btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
@@ -8444,47 +8659,29 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             font=("Arial", 11)
         ).pack(anchor="w", pady=(0, 10))
         
-        # Firma
-        firma_frame = ctk.CTkFrame(main_frame)
-        firma_frame.pack(fill="x", pady=(0, 15))
+        # Firma del usuario
+        var_usar_firma = ctk.BooleanVar(value=False)
         
-        ctk.CTkLabel(
-            firma_frame,
-            text="Firma:",
-            font=("Arial", 12, "bold")
-        ).pack(side="left", padx=(10, 10))
+        # Verificar si el usuario tiene firma registrada
+        tiene_firma_usuario = self.user_settings.get("tiene_firma", False)
         
-        firma_path_var = ctk.StringVar(value="")
-        firma_label = ctk.CTkLabel(
-            firma_frame,
-            text="No seleccionada",
-            font=("Arial", 10),
-            text_color="gray"
-        )
-        firma_label.pack(side="left", padx=5)
-        
-        def seleccionar_firma():
-            ruta = filedialog.askopenfilename(
-                title="Seleccionar imagen de firma",
-                filetypes=[
-                    ("Imágenes", "*.png *.jpg *.jpeg *.gif *.bmp"),
-                    ("Todos los archivos", "*.*")
-                ]
+        if tiene_firma_usuario:
+            var_usar_firma.set(True)
+            ctk.CTkCheckBox(
+                main_frame,
+                text="Incluir mi firma",
+                variable=var_usar_firma,
+                font=("Arial", 11)
+            ).pack(anchor="w", pady=(0, 10))
+        else:
+            # Mostrar mensaje de que no tiene firma configurada
+            no_firma_label = ctk.CTkLabel(
+                main_frame,
+                text="⚠️ No tiene firma configurada. Configure su firma en Ajustes.",
+                font=("Arial", 10),
+                text_color="orange"
             )
-            if ruta:
-                if validar_imagen(ruta):
-                    firma_path_var.set(ruta)
-                    nombre_archivo = os.path.basename(ruta)
-                    firma_label.configure(text=nombre_archivo, text_color="green")
-                else:
-                    messagebox.showerror("Error", "El archivo seleccionado no es una imagen válida.")
-        
-        ctk.CTkButton(
-            firma_frame,
-            text="Seleccionar...",
-            command=seleccionar_firma,
-            width=120
-        ).pack(side="left", padx=5)
+            no_firma_label.pack(anchor="w", pady=(0, 10))
         
         # Botones de acción
         botones_frame = ctk.CTkFrame(main_frame)
@@ -8529,7 +8726,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     fecha_autorizacion_str = datetime.now().strftime("%Y-%m-%d")
                 
                 usar_cuno = var_cuno.get()
-                ruta_firma = firma_path_var.get() if firma_path_var.get() else None
+                usar_firma = var_usar_firma.get()
                 
                 actualizar_progreso(0.2, "Validando archivos...")
                 
@@ -8541,6 +8738,27 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     if not os.path.exists(cuno_path):
                         logger.warning(f"No se encuentra el cuño en: {cuno_path}")
                         cuno_path = None
+                
+                # Descargar firma del usuario desde B2 si está habilitado
+                ruta_firma = None
+                firma_temp_path = None
+                if usar_firma and tiene_firma_usuario:
+                    import tempfile
+                    # Crear archivo temporal para la firma
+                    firma_temp_fd, firma_temp_path = tempfile.mkstemp(suffix=".png", prefix=f"firma_{self.username}_")
+                    os.close(firma_temp_fd)
+                    
+                    # Descargar firma desde B2
+                    if descargar_firma_usuario_b2(self.username, firma_temp_path, get_b2_client):
+                        ruta_firma = firma_temp_path
+                        logger.info(f"Firma descargada para usuario {self.username}")
+                    else:
+                        logger.warning(f"No se pudo descargar firma para usuario {self.username}")
+                        messagebox.showwarning(
+                            "Advertencia",
+                            "No se pudo descargar su firma desde el almacenamiento.\\n"
+                            "El documento se generará sin firma."
+                        )
                 
                 # Nombre del archivo - Formato: RMA26001_Autorizacion.pdf (se convertirá de DOCX)
                 nombre_archivo = f"{codigo_rma}_Autorizacion.pdf"
@@ -8561,7 +8779,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 
                 if not os.path.exists(plantilla_path):
                     mostrar_progreso(False)
-                    messagebox.showerror("Error", f"No se encuentra la plantilla:\n{plantilla_path}")
+                    messagebox.showerror("Error", f"No se encuentra la plantilla:\\n{plantilla_path}")
                     return
                 
                 actualizar_progreso(0.4, "Generando documento...")
@@ -8582,6 +8800,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     cuno_path=cuno_path,
                     ruta_firma=ruta_firma
                 )
+                
+                # Limpiar archivo temporal de firma si se creó
+                if firma_temp_path and os.path.exists(firma_temp_path):
+                    try:
+                        os.unlink(firma_temp_path)
+                    except:
+                        pass
                 
                 if exito:
                     actualizar_progreso(0.7, "Subiendo archivo...")

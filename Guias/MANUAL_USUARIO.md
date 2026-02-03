@@ -23,10 +23,16 @@
 12. [Configuración Personal](#configuración-personal)
     - [Cambiar el Tema de la Aplicación](#cambiar-el-tema-de-la-aplicación)
     - [Activar/Desactivar Tooltips](#activardesactivar-tooltips)
+    - [Gestión de Firma Digital Personal](#gestión-de-firma-digital-personal)
     - [Configurar Backups Automáticos](#configurar-backups-automáticos-administradores)
     - [Restaurar una Copia de Seguridad](#restaurar-una-copia-de-seguridad-administradores)
-13. [Preguntas Frecuentes](#preguntas-frecuentes)
-14. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
+13. [Documentos de Autorización de Devolución](#documentos-de-autorización-de-devolución)
+    - [¿Qué es un Documento de Autorización?](#qué-es-un-documento-de-autorización)
+    - [¿Quién puede Generar Autorizaciones?](#quién-puede-generar-autorizaciones)
+    - [Generar un Documento de Autorización](#generar-un-documento-de-autorización)
+    - [Gestión de Firma Digital](#gestión-de-firma-digital-personal)
+14. [Preguntas Frecuentes](#preguntas-frecuentes)
+15. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
 
 ---
 
@@ -934,6 +940,309 @@ Los **tooltips** son esos mensajes de ayuda que aparecen al pasar el ratón sobr
 1. En **Ajustes**, busca la opción **"Mostrar tooltips"**
 2. Marca o desmarca la casilla según prefieras
 3. Se guarda automáticamente
+
+### Configurar Backups Automáticos (Administradores)
+
+Si eres administrador:
+1. Ve a **💾 Backups**
+2. Configura la frecuencia de backups automáticos
+3. Selecciona dónde guardar las copias
+
+### Gestión de Firma Digital Personal
+
+Cada usuario puede configurar su firma digital personal para incluirla automáticamente en los documentos de autorización de devolución.
+
+#### ¿Qué es la firma digital?
+
+Es una imagen (archivo PNG) con tu firma manuscrita o cualquier imagen que te identifique como responsable de una autorización. Esta firma se almacena de forma segura en la nube y se puede incluir automáticamente en los documentos de autorización.
+
+#### Configurar tu Firma Digital
+
+**Requisitos de la imagen:**
+- 📝 **Formato:** Solo archivos .PNG
+- 📏 **Dimensiones máximas:** 810x740 píxeles
+- 💾 **Tamaño máximo:** 2 MB
+- 🎨 **Fondo:** Transparente (recomendado)
+
+**Pasos para adjuntar tu firma:**
+
+1. Haz clic en **🎨 Ajustes** en el menú lateral
+2. Desplázate hasta la sección **"Gestión de Firma"**
+3. Verás un checkbox **"¿Tiene Firma?"** (deshabilitado)
+4. Haz clic en el botón **📎 Adjuntar Firma**
+5. Lee los requisitos de la imagen en el mensaje que aparece
+6. Selecciona tu archivo .PNG de firma
+7. El sistema validará:
+   - ✅ Que sea formato PNG
+   - ✅ Que las dimensiones sean adecuadas
+   - ✅ Que el tamaño no supere 2 MB
+8. Si todo es correcto, la firma se sube automáticamente
+9. El checkbox **"¿Tiene Firma?"** se marcará automáticamente
+10. Recibirás un mensaje de confirmación
+
+**Advertencias durante la validación:**
+- Si la imagen es muy pequeña (< 100x50 px), recibirás una advertencia pero podrás continuar
+- Si la imagen excede las dimensiones máximas (> 810x740 px), NO se permitirá subir
+- Si el archivo pesa más de 2 MB, NO se permitirá subir
+
+#### Cambiar tu Firma Digital
+
+Si ya tienes una firma configurada y deseas reemplazarla:
+
+1. Ve a **🎨 Ajustes**
+2. En la sección **"Gestión de Firma"**, haz clic en **🔄 Cambiar Firma**
+3. El sistema te preguntará si deseas reemplazar tu firma actual
+4. Si confirmas, se abrirá el selector de archivos
+5. Selecciona la nueva imagen PNG
+6. La firma anterior será eliminada y la nueva se guardará
+
+💡 **Consejo**: Si no tienes firma configurada, el botón "Cambiar Firma" actuará como "Adjuntar Firma".
+
+#### Eliminar tu Firma Digital
+
+Para eliminar tu firma del sistema:
+
+1. Ve a **🎨 Ajustes**
+2. En la sección **"Gestión de Firma"**, haz clic en **🗑️ Eliminar Firma** (botón rojo)
+3. Confirma la eliminación en el mensaje que aparece
+4. Tu firma será eliminada del almacenamiento
+5. El checkbox **"¿Tiene Firma?"** se desmarcará automáticamente
+
+⚠️ **Importante**: Esta acción NO se puede deshacer. Tendrás que volver a adjuntar tu firma si deseas usarla nuevamente.
+
+#### Verificar el Estado de tu Firma
+
+El checkbox **"¿Tiene Firma?"** en la sección de Ajustes te indica el estado actual:
+- ✅ **Marcado**: Tienes una firma configurada en el sistema
+- ❌ **Desmarcado**: No tienes firma configurada
+
+Este checkbox es de solo lectura - no puedes marcarlo o desmarcarlo manualmente. Se actualiza automáticamente según si tienes o no firma en el almacenamiento.
+
+---
+
+## Documentos de Autorización de Devolución
+
+### ¿Qué es un Documento de Autorización?
+
+Es un documento PDF oficial que se genera para autorizar formalmente la devolución de un producto al cliente. Este documento incluye:
+
+- 📋 Información del expediente (código RMA, cliente, contacto)
+- 📅 Fecha de emisión y fecha de autorización
+- 📝 Motivo de la devolución
+- 💬 Observaciones personalizadas
+- 🏢 Cuño de la empresa (opcional)
+- ✍️ Firma del responsable (opcional)
+
+### ¿Quién puede Generar Autorizaciones?
+
+Solo usuarios con los siguientes roles pueden generar documentos de autorización:
+- **admin** (administrador)
+- **administrador**
+- **Dpto. Tecnico** (Departamento Técnico)
+
+Si no tienes estos permisos, el botón no estará disponible.
+
+### Restricción de Autorización Única
+
+**Regla importante**: Un expediente solo puede ser autorizado **UNA VEZ**.
+
+- ✅ Si el expediente **NO** está autorizado → Cualquier usuario autorizado puede generar el documento
+- ⚠️ Si el expediente **YA** está autorizado → Solo el usuario **admin** puede generar una nueva autorización
+
+Cuando intentas autorizar un expediente ya autorizado (sin ser admin), verás un mensaje como:
+```
+⚠️ Expediente Autorizado
+Este expediente ya fue autorizado el 03/02/2026 por juan.perez.
+```
+
+### Generar un Documento de Autorización
+
+#### Desde el Editor de Expedientes
+
+1. Abre el expediente RMA que deseas autorizar
+2. Haz clic en el botón **📄 Generar Autorización** (parte superior derecha)
+3. Se abrirá el diálogo de autorización
+
+#### Desde el Menú Contextual
+
+1. En la lista de expedientes, haz **clic derecho** sobre el expediente
+2. Selecciona **"Generar Autorización"** del menú
+3. Se abrirá el diálogo de autorización
+
+### Completar el Formulario de Autorización
+
+El diálogo de autorización mostrará:
+
+**1. Información del Expediente (Solo lectura)**
+- Código RMA
+- Cliente
+- Persona de contacto (si existe)
+
+**2. Observaciones (Editable)**
+- Campo de texto libre para añadir comentarios o instrucciones especiales
+- Por ejemplo: "Producto verificado. Se autoriza devolución completa."
+
+**3. Fecha de Autorización**
+- Selector de fecha con calendario
+- Por defecto: Fecha actual
+- Botón **"Hoy"** para restablecer a la fecha actual
+- Puedes seleccionar otra fecha si es necesario
+
+**4. Opciones de Firma y Cuño**
+
+**Incluir cuño de la empresa:**
+- Checkbox para incluir el logotipo/cuño oficial de la empresa
+- Por defecto: **Marcado** (se incluirá)
+- El cuño se carga automáticamente desde `plantillas/Cuño.jpg`
+
+**Incluir mi firma:**
+- Checkbox para incluir tu firma digital personal
+- Solo visible si **tienes firma configurada** en tus ajustes
+- Si NO tienes firma configurada, verás el mensaje:
+  ```
+  ⚠️ No tiene firma configurada. Configure su firma en Ajustes.
+  ```
+- Si tienes firma, estará **marcado por defecto**
+
+### Proceso de Generación
+
+Cuando haces clic en **"Generar"**:
+
+**Barra de Progreso** mostrará los siguientes pasos:
+
+1. **10%** - "Preparando datos..." 
+   - Recopila información del expediente
+   - Valida fecha de autorización
+
+2. **20%** - "Validando archivos..."
+   - Verifica existencia del cuño (si está marcado)
+   - Descarga tu firma desde la nube (si está marcado)
+
+3. **30%** - "Preparando archivos temporales..."
+   - Crea archivos temporales para el procesamiento
+
+4. **40%** - "Generando documento..."
+   - Rellena la plantilla DOCX con los datos
+   - Inserta el cuño en su cuadro de texto
+   - Inserta tu firma en su cuadro de texto
+   - Convierte el DOCX a PDF
+
+5. **70%** - "Subiendo archivo..."
+   - Sube el PDF al almacenamiento (B2 o local)
+
+6. **90%** - "Registrando en base de datos..."
+   - Registra el documento en la tabla de adjuntos
+   - **Actualiza la fecha de autorización del expediente**
+   - **Registra quién autorizó el expediente**
+   - **Añade entrada en el historial del expediente**
+
+7. **100%** - "¡Completado!"
+   - Se muestra mensaje de éxito
+   - La ventana se cierra automáticamente
+   - La lista de adjuntos se actualiza
+
+### ¿Qué sucede después de Generar la Autorización?
+
+1. **El expediente queda marcado como autorizado:**
+   - Campo `fecha_autorizacion` actualizado
+   - Campo `autorizado_por` con tu nombre de usuario
+
+2. **Se crea un registro en el historial:**
+   ```
+   Documento de autorización generado. Fecha de autorización: 03/02/2026
+   ```
+
+3. **El PDF aparece en los adjuntos:**
+   - Nombre: `{CODIGO_RMA}_Autorizacion.pdf`
+   - Ejemplo: `RMA26001_Autorizacion.pdf`
+   - Disponible para descargar, visualizar o enviar por email
+
+4. **Restricción activada:**
+   - Solo el usuario `admin` podrá generar una nueva autorización para este expediente
+
+### Visualizar el Documento Generado
+
+Una vez generado, puedes:
+
+1. **Descargarlo:**
+   - Ve a la pestaña **"Adjuntos"** del expediente
+   - Busca el archivo `{CODIGO_RMA}_Autorizacion.pdf`
+   - Haz clic en **"Descargar"**
+
+2. **Visualizarlo:**
+   - Haz clic en **"Ver"**
+   - Se abrirá en tu visor de PDF predeterminado
+
+3. **Enviarlo por Email:**
+   - Usa la función de enviar email con adjuntos
+   - Selecciona el documento de autorización
+   - El cliente recibirá el PDF oficial
+
+### Ejemplo del Documento de Autorización
+
+El documento PDF generado contendrá:
+
+```
+┌──────────────────────────────────────────────────┐
+│         AUTORIZACIÓN DE DEVOLUCIÓN               │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│  Expediente: RMA26001                            │
+│  Cliente: ACME Corporation                       │
+│  Contacto: María García                          │
+│  Email: maria@acme.com                           │
+│                                                  │
+│  Fecha Emisión: 15/01/2026                       │
+│  Motivo: Producto defectuoso                     │
+│                                                  │
+│  OBSERVACIONES:                                  │
+│  Producto verificado. Se autoriza devolución     │
+│  completa del importe.                           │
+│                                                  │
+│  Fecha Autorización: 03/02/2026                  │
+│                                                  │
+│                                    [Cuño]        │
+│                                    [Firma]       │
+└──────────────────────────────────────────────────┘
+```
+
+### Solución de Problemas
+
+**Problema**: No veo el botón "Generar Autorización"
+- **Solución**: Verifica que tienes uno de los roles autorizados (admin, administrador, Dpto. Tecnico)
+
+**Problema**: Mensaje "Expediente ya autorizado"
+- **Solución**: El expediente ya fue autorizado previamente. Solo el usuario `admin` puede regenerarlo.
+
+**Problema**: No aparece el checkbox "Incluir mi firma"
+- **Solución**: No tienes firma configurada. Ve a Ajustes → Gestión de Firma → Adjuntar Firma.
+
+**Problema**: El cuño no aparece en el documento
+- **Solución**: Verifica que existe el archivo `plantillas/Cuño.jpg`. Contacta con el administrador si no existe.
+
+**Problema**: La firma aparece pero está distorsionada
+- **Solución**: Verifica las dimensiones de tu imagen PNG. Debe tener proporciones adecuadas (ej: 400x200 px).
+
+**Problema**: Error al generar el documento
+- **Solución**: 
+  1. Verifica que existe `plantillas/Plantilla_Autorizacion.docx`
+  2. Revisa los logs de la aplicación
+  3. Contacta con el administrador
+
+### Mejores Prácticas
+
+✅ **DO (Hacer):**
+- Configura tu firma digital al empezar a usar la aplicación
+- Revisa las observaciones antes de generar el documento
+- Verifica que la fecha de autorización es correcta
+- Descarga una copia del PDF para tus registros
+- Incluye siempre el cuño de la empresa para documentos oficiales
+
+❌ **DON'T (No hacer):**
+- No generes múltiples autorizaciones para el mismo expediente (solo admin puede)
+- No uses imágenes de firma de baja calidad
+- No olvides incluir observaciones relevantes
+- No uses fechas de autorización incorrectas
 
 ### Configurar Backups Automáticos (Administradores)
 
