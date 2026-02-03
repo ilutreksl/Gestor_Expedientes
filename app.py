@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.35"
+APP_VERSION = "v1.0.36"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8307,7 +8307,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         try:
             cursor.execute("""
                 SELECT cliente, Persona_de_Contacto, Email_de_Contacto, 
-                       fecha_emision, motivo
+                       fecha_emision, motivo, fecha_autorizacion, autorizado_por
                 FROM rma_maestro
                 WHERE id = ?
             """, (rma_id,))
@@ -8317,7 +8317,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 messagebox.showerror("Error", "No se encontraron los datos del expediente.")
                 return
             
-            cliente, persona_de_contacto, email_de_contacto, fecha_emision, motivo = resultado
+            cliente, persona_de_contacto, email_de_contacto, fecha_emision, motivo, fecha_autorizacion, autorizado_por = resultado
+            
+            # Verificar si el expediente ya está autorizado
+            if fecha_autorizacion and self.rol != "admin":
+                usuario_info = f" por {autorizado_por}" if autorizado_por else ""
+                messagebox.showwarning(
+                    "Expediente Autorizado",
+                    f"Este expediente ya fue autorizado el {fecha_autorizacion}{usuario_info}."
+                )
+                return
             
         except Exception as e:
             logger.error(f"Error al obtener datos del expediente: {e}")
@@ -8601,6 +8610,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     # Registrar en la base de datos
                     conn, cursor = self.master.conectar_db()
                     try:
+                        # Registrar el adjunto
                         if getattr(self, '_usar_tipo_almacenamiento', False):
                             # Usar esquema nuevo con tipo_almacenamiento
                             cursor.execute("""
@@ -8628,6 +8638,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 self.username
                             ))
+                        
+                        # Actualizar campos de autorización en rma_maestro
+                        cursor.execute("""
+                            UPDATE rma_maestro
+                            SET fecha_autorizacion = ?,
+                                autorizado_por = ?
+                            WHERE id = ?
+                        """, (fecha_autorizacion_str, self.username, rma_id))
+                        
+                        # Registrar en historial del expediente
+                        cursor.execute("""
+                            INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                            VALUES (?, ?, ?, ?)
+                        """, (
+                            rma_id,
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            self.username,
+                            f"Documento de autorización generado. Fecha de autorización: {fecha_autorizacion_str}"
+                        ))
+                        
                         conn.commit()
                     except Exception as e:
                         logger.error(f"Error al registrar adjunto: {e}")
