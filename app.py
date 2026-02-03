@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.38"
+APP_VERSION = "v1.0.39"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9068,8 +9068,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         btn_hoy.pack(side="left")
         
         # Verificar si el usuario tiene privilegios (por ROL, no por username)
-        # Los roles con privilegios son: administrador, admin, y Dpto. Tecnico
-        es_privilegiado = self.rol in ["administrador", "admin", "Dpto. Tecnico"]
+        # Los roles con privilegios son: administrador, admin, administracion y Dpto. Tecnico
+        es_privilegiado = self.rol in ["administrador", "admin", "Administracion", "Dpto. Tecnico"]
         
         # Si no es privilegiado, ocultar los controles de fecha y mostrar solo texto
         if not es_privilegiado:
@@ -9093,12 +9093,12 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Si es privilegiado, mostrar desplegable de usuarios
         # Si no lo es, solo mostrar su nombre como texto
         if es_privilegiado:
-            # Obtener lista de usuarios disponibles
+            # Obtener lista de usuarios disponibles (excluyendo 'admin')
             usuarios_disponibles = [self.username]
             try:
                 conn, cursor = self.master.conectar_db()
                 if conn:
-                    cursor.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+                    cursor.execute("SELECT nombre_usuario FROM usuarios WHERE nombre_usuario != 'admin' ORDER BY nombre_usuario")
                     usuarios_disponibles = [row[0] for row in cursor.fetchall()]
                     conn.close()
             except Exception as e:
