@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.39"
+APP_VERSION = "v1.0.40"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8959,6 +8959,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         menu.add_cascade(label="🔄 Cambiar Estado", menu=menu_estados)
         
+        # Añadir opción de asociar expediente
+        menu.add_separator()
+        menu.add_command(
+            label="🔗 Asociar Expediente",
+            command=lambda: self.mostrar_dialogo_asociar_rma(rma_id)
+        )
+        
         # Añadir opción de generar autorización (solo para roles autorizados)
         if self.rol in ["administrador", "admin", "Dpto. Tecnico"]:
             menu.add_separator()
@@ -8967,11 +8974,116 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 command=lambda: self.mostrar_dialogo_autorizacion(rma_id, codigo_rma)
             )
         
+        # Verificar si existe el archivo de autorización
+        archivo_autorizacion = self._verificar_existe_autorizacion(rma_id, codigo_rma)
+        if archivo_autorizacion:
+            menu.add_separator()
+            menu.add_command(
+                label="📥 Descargar Autorización",
+                command=lambda: self._abrir_autorizacion(archivo_autorizacion, codigo_rma)
+            )
+        
         # Mostrar el menú en la posición del cursor
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+    
+    def _verificar_existe_autorizacion(self, rma_id, codigo_rma):
+        """
+        Verifica si existe el archivo de autorización para el expediente.
+        
+        Args:
+            rma_id (int): ID del expediente
+            codigo_rma (str): Código del expediente
+            
+        Returns:
+            dict o None: Diccionario con info del adjunto si existe, None si no
+        """
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return None
+            
+            # Buscar el archivo de autorización en rma_adjuntos
+            nombre_archivo = f"{codigo_rma}_Autorizacion.pdf"
+            cursor.execute("""
+                SELECT ruta_relativa, tipo_almacenamiento
+                FROM rma_adjuntos
+                WHERE rma_id = ? AND nombre_archivo = ?
+            """, (rma_id, nombre_archivo))
+            
+            resultado = cursor.fetchone()
+            conn.close()
+            
+            if resultado:
+                return {
+                    'ruta_relativa': resultado[0],
+                    'tipo_almacenamiento': resultado[1] if len(resultado) > 1 else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error verificando autorización: {e}")
+            return None
+    
+    def _abrir_autorizacion(self, archivo_info, codigo_rma):
+        """
+        Descarga el archivo de autorización.
+        
+        Args:
+            archivo_info (dict): Información del archivo (ruta_relativa, tipo_almacenamiento)
+            codigo_rma (str): Código del expediente
+        """
+        try:
+            import tkinter.filedialog as filedialog
+            
+            # Preguntar dónde guardar el archivo
+            nombre_archivo = f"{codigo_rma}_Autorizacion.pdf"
+            ruta_destino = filedialog.asksaveasfilename(
+                title="Guardar Autorización",
+                initialfile=nombre_archivo,
+                defaultextension=".pdf",
+                filetypes=[("PDF", "*.pdf"), ("Todos los archivos", "*.*")]
+            )
+            
+            if not ruta_destino:
+                return  # Usuario canceló
+            
+            ruta_relativa = archivo_info['ruta_relativa']
+            
+            # Descargar según el tipo de almacenamiento
+            if usar_b2():
+                # Descargar desde B2
+                b2_api, bucket = get_b2_client()
+                if not b2_api or not bucket:
+                    messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
+                    return
+                
+                ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
+                downloaded_file = bucket.download_file_by_name(ruta_b2)
+                downloaded_file.save_to(ruta_destino)
+                
+            else:
+                # Copiar desde almacenamiento local
+                import shutil
+                ruta_local = os.path.join("Adjuntos_RMA", ruta_relativa)
+                if os.path.exists(ruta_local):
+                    shutil.copy2(ruta_local, ruta_destino)
+                else:
+                    messagebox.showerror("Error", f"No se encuentra el archivo:\n{ruta_local}")
+                    return
+            
+            messagebox.showinfo("Éxito", f"Archivo guardado en:\n{ruta_destino}")
+            logger.info(f"Autorización descargada: {codigo_rma} -> {ruta_destino}")
+            
+            # Preguntar si desea abrir el archivo
+            if messagebox.askyesno("Abrir archivo", "¿Desea abrir el archivo descargado?"):
+                os.startfile(ruta_destino)
+                
+        except Exception as e:
+            logger.error(f"Error descargando autorización: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo descargar el archivo de autorización:\n{e}")
     
     def confirmar_cambio_estado(self, rma_id, codigo_rma, nuevo_estado):
         """

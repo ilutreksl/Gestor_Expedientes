@@ -308,6 +308,89 @@ Imagina que necesitas autorizar el expediente RMA25020:
 - **Recibido** → Actualiza `fecha_recepcion`
 - **En Proceso** → Actualiza `fecha_proceso`
 
+---
+
+**🔗 Asociar Expediente**
+
+Esta opción permite vincular expedientes relacionados entre sí de forma rápida desde el menú contextual.
+
+**Proceso de asociación:**
+
+1. Haz **clic derecho** sobre el expediente origen
+2. Selecciona **"🔗 Asociar Expediente"**
+3. Se abrirá una ventana de búsqueda donde puedes:
+   - 🔍 **Buscar** por código RMA o nombre de cliente
+   - 📋 **Ver lista** de expedientes disponibles
+   - ✅ **Seleccionar** el expediente a asociar
+4. Haz clic en **"Asociar Seleccionado"**
+
+**Características:**
+- ⚡ Acceso rápido sin necesidad de abrir el expediente
+- 🔄 Asociaciones bidireccionales automáticas
+- 📊 Visualización de expedientes ya asociados
+- ❌ Opción de desasociar desde la misma ventana
+
+**Ejemplo de uso:**
+
+Un cliente devuelve un producto defectuoso (RMA25030) y después envía otro artículo relacionado (RMA25031):
+
+1. Clic derecho sobre **RMA25030**
+2. Selecciona **"🔗 Asociar Expediente"**
+3. Busca **RMA25031** en el cuadro de búsqueda
+4. Selecciona **RMA25031** de la lista
+5. Clic en **"Asociar Seleccionado"**
+6. Ahora ambos expedientes están vinculados
+
+**💡 Beneficios:**
+- 🔍 Trazabilidad completa entre expedientes relacionados
+- 📈 Mejor seguimiento de casos complejos
+- ⏱️ Ahorro de tiempo en la gestión
+
+---
+
+**📥 Descargar Autorización**
+
+Esta opción aparece **solo si el expediente tiene un documento de autorización generado** y permite descargarlo rápidamente.
+
+**¿Cuándo aparece esta opción?**
+- ✅ Aparece si existe el archivo `{codigo_rma}_Autorizacion.pdf` en el sistema
+- ❌ No aparece si el documento no ha sido generado
+
+**Proceso de descarga:**
+
+1. Haz **clic derecho** sobre el expediente
+2. Selecciona **"📥 Descargar Autorización"**
+3. Se abrirá un diálogo para elegir dónde guardar el archivo
+   - Nombre predeterminado: `RMA25XXX_Autorizacion.pdf`
+   - Puedes cambiar la ubicación y el nombre
+4. Haz clic en **"Guardar"**
+5. El sistema descarga el archivo (desde B2 o almacenamiento local)
+6. Muestra mensaje de confirmación con la ruta donde se guardó
+7. Pregunta si deseas **abrir el archivo** descargado
+
+**Características:**
+- 📦 Compatible con Backblaze B2 y almacenamiento local
+- 📝 Descarga el PDF generado originalmente
+- 🔓 Disponible para todos los usuarios (no requiere permisos especiales)
+- ✅ Confirmación de descarga exitosa
+
+**Ejemplo práctico:**
+
+Necesitas enviar por email el documento de autorización del expediente RMA25015:
+
+1. Clic derecho sobre **RMA25015**
+2. Selecciona **"📥 Descargar Autorización"**
+3. Elige la carpeta **"Descargas"**
+4. El archivo se guarda como `RMA25015_Autorizacion.pdf`
+5. Se muestra: *"Archivo guardado en: C:\Users\...\Descargas\RMA25015_Autorizacion.pdf"*
+6. Clic en **"Sí"** para abrir el archivo y verificar su contenido
+7. Adjunta el archivo al email
+
+**💡 Ventaja principal:**
+- ⚡ Acceso instantáneo al documento sin necesidad de navegar por carpetas o abrir el expediente completo
+
+⚠️ **Nota**: Si el documento no aparece en el menú contextual pero crees que debería existir, verifica en la pestaña **"Adjuntos"** del expediente si el archivo fue generado correctamente.
+
 ### Eliminar un Expediente
 
 ⚠️ **¡CUIDADO!** Esta acción no se puede deshacer.
