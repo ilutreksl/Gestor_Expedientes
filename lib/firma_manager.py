@@ -141,7 +141,7 @@ def eliminar_firma_usuario_b2(username, get_b2_client_func):
         try:
             file_version = bucket.get_file_info_by_name(ruta_b2)
             if file_version:
-                b2_api.delete_file_version(file_version.id_, nombre_archivo)
+                b2_api.delete_file_version(file_version.id_, ruta_b2)
                 logger.info(f"Firma eliminada correctamente para usuario '{username}'")
                 return True
             else:
@@ -149,9 +149,10 @@ def eliminar_firma_usuario_b2(username, get_b2_client_func):
                 return False
         except Exception as e:
             # Si el archivo no existe, no es un error crítico
-            if "not_found" in str(e).lower() or "does not exist" in str(e).lower():
+            error_str = str(e).lower()
+            if "not_found" in error_str or "does not exist" in error_str or "not present" in error_str or "filenotpresent" in error_str:
                 logger.warning(f"No se encontró firma para usuario '{username}': {e}")
-                return False
+                return True  # Retornar True porque el objetivo (que no exista) se cumplió
             else:
                 raise
         

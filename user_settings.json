@@ -75,8 +75,8 @@
       "icon_size": 24,
       "theme": "themes/teal_corporate.json",
       "appearance_mode": "light",
-      "mostrar_aviso": true,
-      "tiene_firma": false
+      "tiene_firma": false,
+      "mostrar_aviso": true
     }
   }
 }

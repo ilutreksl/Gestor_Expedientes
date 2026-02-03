@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.37"
+APP_VERSION = "v1.0.38"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2378,11 +2378,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Mostrar mensaje con requisitos
                 messagebox.showinfo(
                     "Requisitos de la Firma",
-                    "La firma debe cumplir los siguientes requisitos:\\n\\n"
-                    "• Formato: Solo archivos .PNG\\n"
-                    "• Dimensiones máximas: 810x740 px\\n"
-                    "• Tamaño máximo: 2 MB\\n"
-                    "• Fondo transparente (recomendado)\\n"
+                    "La firma debe cumplir los siguientes requisitos:\n\n"
+                    "• Formato: Solo archivos .PNG\n"
+                    "• Dimensiones máximas: 810x740 px\n"
+                    "• Tamaño máximo: 2 MB\n"
+                    "• Fondo transparente (recomendado)\n"
                 )
 
                 # Selector de archivo
@@ -2410,14 +2410,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         if ancho < 100 or alto < 50:
                             messagebox.showwarning(
                                 "Dimensiones pequeñas",
-                                f"La imagen es muy pequeña ({ancho}x{alto} px).\\n"
+                                f"La imagen es muy pequeña ({ancho}x{alto} px).\n"
                                 "Se recomienda al menos 300x150 px para mejor calidad."
                             )
                         
                         if ancho > 810 or alto > 740:
                             messagebox.showerror(
                                 "Dimensiones excedidas",
-                                f"La imagen excede las dimensiones máximas ({ancho}x{alto} px).\\n"
+                                f"La imagen excede las dimensiones máximas ({ancho}x{alto} px).\n"
                                 "Las dimensiones máximas permitidas son 810x740 px."
                             )
                             return
@@ -2427,13 +2427,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         if tamanio_mb > 2:
                             messagebox.showerror(
                                 "Archivo muy grande",
-                                f"El archivo pesa {tamanio_mb:.2f} MB.\\n"
+                                f"El archivo pesa {tamanio_mb:.2f} MB.\n"
                                 "El tamaño máximo es 2 MB."
                             )
                             return
 
                 except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo leer la imagen:\\n{e}")
+                    messagebox.showerror("Error", f"No se pudo leer la imagen:\n{e}")
                     return
 
                 # Subir a B2
@@ -2450,15 +2450,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         
                         messagebox.showinfo(
                             "Éxito",
-                            "Su firma ha sido guardada correctamente.\\n"
+                            "Su firma ha sido guardada correctamente.\n"
                             f"Archivo: {resultado}"
                         )
                         logger.info(f"Usuario {self.username} adjuntó su firma")
                     else:
-                        messagebox.showerror("Error", f"No se pudo subir la firma:\\n{resultado}")
+                        messagebox.showerror("Error", f"No se pudo subir la firma:\n{resultado}")
                         
                 except Exception as e:
-                    messagebox.showerror("Error", f"Error al procesar la firma:\\n{e}")
+                    messagebox.showerror("Error", f"Error al procesar la firma:\n{e}")
 
             def eliminar_firma():
                 """Elimina la firma del usuario"""
@@ -2469,7 +2469,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Confirmación
                 respuesta = messagebox.askyesno(
                     "Confirmar Eliminación",
-                    "¿Está seguro de que desea eliminar su firma?\\n\\n"
+                    "¿Está seguro de que desea eliminar su firma?\n\n"
                     "Esta acción no se puede deshacer."
                 )
                 
@@ -2493,7 +2493,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     else:
                         messagebox.showwarning(
                             "Advertencia",
-                            "No se pudo eliminar la firma del almacenamiento.\\n"
+                            "No se pudo eliminar la firma del almacenamiento.\n"
                             "Es posible que ya no exista."
                         )
                         # Actualizar settings de todos modos
@@ -2502,7 +2502,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         var_tiene_firma.set(False)
                         
                 except Exception as e:
-                    messagebox.showerror("Error", f"Error al eliminar la firma:\\n{e}")
+                    messagebox.showerror("Error", f"Error al eliminar la firma:\n{e}")
 
             def cambiar_firma():
                 """Permite cambiar la firma existente"""
@@ -2514,7 +2514,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Mensaje de confirmación
                 respuesta = messagebox.askyesno(
                     "Cambiar Firma",
-                    "¿Desea reemplazar su firma actual por una nueva?\\n\\n"
+                    "¿Desea reemplazar su firma actual por una nueva?\n\n"
                     "La firma anterior será eliminada."
                 )
                 
@@ -8756,7 +8756,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         logger.warning(f"No se pudo descargar firma para usuario {self.username}")
                         messagebox.showwarning(
                             "Advertencia",
-                            "No se pudo descargar su firma desde el almacenamiento.\\n"
+                            "No se pudo descargar su firma desde el almacenamiento.\n"
                             "El documento se generará sin firma."
                         )
                 
