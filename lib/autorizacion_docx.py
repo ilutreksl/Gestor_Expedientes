@@ -168,120 +168,132 @@ def generar_autorizacion_docx(
         reemplazar_texto_preservando_formato(document, mapeo)
         logger.info("Texto reemplazado en el documento")
         
-        # Añadir imágenes si están disponibles
-        # Usar posicionamiento absoluto para que no desplacen el texto
+        # Añadir imágenes en cuadros de texto
+        # Buscar cuadros de texto con marcadores [[CUNO]] y [[FIRMA]]
         firma_agregada = False
         cuno_agregado = False
         
-        # Buscar párrafo con marcador [[FIRMAS]] o [[IMAGENES]]
-        parrafo_firmas = None
-        for paragraph in document.paragraphs:
-            texto = paragraph.text
-            if '[[FIRMAS]]' in texto or '[[IMAGENES]]' in texto:
-                parrafo_firmas = paragraph
-                # Limpiar el marcador pero mantener el párrafo
-                for run in paragraph.runs:
-                    run.text = run.text.replace('[[FIRMAS]]', '').replace('[[IMAGENES]]', '')
-                break
+        # En python-docx, los cuadros de texto son shapes dentro del documento
+        # Necesitamos acceder al XML del documento directamente
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         
-        # Si no encontramos el marcador, usar el último párrafo
-        if parrafo_firmas is None and ((usar_cuno and cuno_path and os.path.exists(cuno_path)) or (ruta_firma and os.path.exists(ruta_firma))):
-            parrafo_firmas = document.add_paragraph()
+        # Función auxiliar para obtener dimensiones del cuadro de texto
+        def obtener_dimensiones_textbox(txbxContent_element):
+            """Obtiene ancho y alto del cuadro de texto en pulgadas"""
+            # Navegar hacia arriba para encontrar el shape que contiene el textbox
+            # txbxContent -> wps:txbx -> wps:wsp (shape)
+            try:
+                txbx = txbxContent_element.getparent()
+                wsp = txbx.getparent()
+                
+                # Buscar spPr (shape properties) que contiene las dimensiones
+                spPr = wsp.find(qn('wps:spPr'))
+                if spPr is not None:
+                    # Buscar xfrm (transform) que contiene ext (extent - dimensiones)
+                    xfrm = spPr.find(qn('a:xfrm'))
+                    if xfrm is not None:
+                        ext = xfrm.find(qn('a:ext'))
+                        if ext is not None:
+                            # Las dimensiones están en EMUs (914400 EMU = 1 pulgada)
+                            cx = int(ext.get('cx'))  # ancho
+                            cy = int(ext.get('cy'))  # alto
+                            ancho_inches = cx / 914400.0
+                            alto_inches = cy / 914400.0
+                            return ancho_inches, alto_inches
+            except Exception as e:
+                logger.debug(f"No se pudieron obtener dimensiones del textbox: {e}")
+            
+            # Valores por defecto si no se pueden obtener
+            return 1.5, 1.5
         
-        # Si hay imágenes para añadir
-        if parrafo_firmas and ((usar_cuno and cuno_path and os.path.exists(cuno_path)) or (ruta_firma and os.path.exists(ruta_firma))):
-            # Añadir un run vacío para poder insertar las imágenes flotantes
-            run_contenedor = parrafo_firmas.add_run()
-            
-            # Posiciones absolutas desde la esquina inferior derecha de la página
-            # En EMUs (English Metric Units): 914400 EMU = 1 pulgada
-            margen_derecha = 914400 * 1.0  # 1 pulgada desde la derecha
-            y_inicial = 914400 * 2.5  # Posición Y inicial (desde arriba)
-            
-            # Añadir cuño si se solicita
-            if usar_cuno and cuno_path and os.path.exists(cuno_path):
-                try:
-                    # Añadir imagen como inline primero
-                    picture = run_contenedor.add_picture(cuno_path, width=Inches(1.5))
+        # Función auxiliar para añadir imagen a un párrafo XML
+        def anadir_imagen_a_parrafo_xml(paragraph_element, ruta_imagen, ancho_box=None, alto_box=None):
+            """Añade una imagen a un elemento de párrafo XML del cuadro de texto, llenando el espacio disponible"""
+            try:
+                # Crear un párrafo temporal en el documento para generar la imagen
+                temp_paragraph = document.add_paragraph()
+                temp_run = temp_paragraph.add_run()
+                
+                # Si tenemos dimensiones del cuadro, usar esas dimensiones para llenar el cuadro
+                if ancho_box and alto_box:
+                    # Leer dimensiones de la imagen para calcular la mejor escala
+                    from PIL import Image as PILImage
+                    with PILImage.open(ruta_imagen) as img:
+                        ancho_px, alto_px = img.size
+                        aspect_ratio_img = ancho_px / alto_px
+                        aspect_ratio_box = ancho_box / alto_box
+                        
+                        # Ajustar para llenar el cuadro al máximo manteniendo proporción
+                        # Escalar por la dimensión menor para que llene más
+                        if aspect_ratio_img > aspect_ratio_box:
+                            # Imagen más ancha: ajustar por alto para llenar más verticalmente
+                            temp_picture = temp_run.add_picture(ruta_imagen, height=Inches(alto_box))
+                        else:
+                            # Imagen más alta: ajustar por ancho para llenar más horizontalmente
+                            temp_picture = temp_run.add_picture(ruta_imagen, width=Inches(ancho_box))
+                else:
+                    # Sin dimensiones del cuadro, usar tamaño por defecto
+                    temp_picture = temp_run.add_picture(ruta_imagen, width=Inches(1.5))
+                
+                # Obtener el XML del run con la imagen
+                imagen_run_xml = temp_run._element
+                
+                # Copiar el run con la imagen al párrafo del cuadro de texto
+                paragraph_element.append(imagen_run_xml)
+                
+                # Eliminar el párrafo temporal del documento
+                temp_p_element = temp_paragraph._element
+                temp_p_element.getparent().remove(temp_p_element)
+                
+                return True
+            except Exception as e:
+                logger.error(f"Error al crear imagen en cuadro de texto: {e}")
+                return False
+        
+        # Buscar todos los elementos de cuadro de texto en el documento
+        for element in document.element.body.iter():
+            # Buscar elementos de tipo textbox
+            if element.tag == qn('w:txbxContent'):
+                # Obtener dimensiones del cuadro de texto
+                ancho_box, alto_box = obtener_dimensiones_textbox(element)
+                
+                # Este es el contenido de un cuadro de texto
+                # Buscar párrafos dentro del cuadro de texto
+                for paragraph in element.iter(qn('w:p')):
+                    # Obtener el texto del párrafo
+                    texto_completo = ''
+                    for texto_elem in paragraph.iter(qn('w:t')):
+                        if texto_elem.text:
+                            texto_completo += texto_elem.text
                     
-                    # Obtener el elemento inline de la imagen
-                    inline = picture._inline
+                    # Verificar si contiene el marcador de cuño
+                    if '[[CUNO]]' in texto_completo:
+                        # Limpiar el contenido del cuadro de texto (eliminar todos los runs)
+                        for run in list(paragraph.iter(qn('w:r'))):
+                            paragraph.remove(run)
+                        
+                        # Si se debe usar el cuño, añadir la imagen adaptada al tamaño del cuadro
+                        if usar_cuno and cuno_path and os.path.exists(cuno_path):
+                            if anadir_imagen_a_parrafo_xml(paragraph, cuno_path, ancho_box, alto_box):
+                                cuno_agregado = True
+                                logger.info(f"Cuño añadido en cuadro de texto ({ancho_box:.2f}x{alto_box:.2f} pulgadas)")
+                        else:
+                            logger.info("Cuadro de texto del cuño dejado vacío (no se solicitó cuño)")
                     
-                    # Convertir a anchor (flotante) y posicionar
-                    from docx.oxml import parse_xml
-                    
-                    # Eliminar el inline
-                    parent = inline.getparent()
-                    anchor_xml = f'''
-                    <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-                               xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
-                               distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="251658240"
-                               behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
-                        <wp:simplePos x="0" y="0"/>
-                        <wp:positionH relativeFrom="page">
-                            <wp:align>right</wp:align>
-                        </wp:positionH>
-                        <wp:positionV relativeFrom="page">
-                            <wp:posOffset>{int(y_inicial)}</wp:posOffset>
-                        </wp:positionV>
-                        <wp:extent cx="{inline.extent.cx}" cy="{inline.extent.cy}"/>
-                        <wp:effectExtent l="0" t="0" r="0" b="0"/>
-                        <wp:wrapNone/>
-                        <wp:docPr id="{inline.docPr.id}" name="{inline.docPr.name}"/>
-                        {inline.graphic.xml}
-                    </wp:anchor>
-                    '''
-                    anchor = parse_xml(anchor_xml)
-                    parent.replace(inline, anchor)
-                    
-                    cuno_agregado = True
-                    logger.info(f"Cuño añadido al documento (flotante)")
-                except Exception as e:
-                    logger.error(f"Error al añadir cuño: {e}")
-            
-            # Añadir firma si se proporciona
-            if ruta_firma and os.path.exists(ruta_firma):
-                try:
-                    # Calcular posición Y para la firma (debajo del cuño)
-                    y_firma = y_inicial + (914400 * 0.8)  # 0.8 pulgadas más abajo
-                    
-                    # Añadir imagen como inline primero
-                    picture = run_contenedor.add_picture(ruta_firma, width=Inches(1.5))
-                    
-                    # Obtener el elemento inline de la imagen
-                    inline = picture._inline
-                    
-                    # Convertir a anchor (flotante) y posicionar
-                    from docx.oxml import parse_xml
-                    
-                    # Eliminar el inline
-                    parent = inline.getparent()
-                    anchor_xml = f'''
-                    <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-                               xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
-                               distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="251658241"
-                               behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
-                        <wp:simplePos x="0" y="0"/>
-                        <wp:positionH relativeFrom="page">
-                            <wp:align>right</wp:align>
-                        </wp:positionH>
-                        <wp:positionV relativeFrom="page">
-                            <wp:posOffset>{int(y_firma)}</wp:posOffset>
-                        </wp:positionV>
-                        <wp:extent cx="{inline.extent.cx}" cy="{inline.extent.cy}"/>
-                        <wp:effectExtent l="0" t="0" r="0" b="0"/>
-                        <wp:wrapNone/>
-                        <wp:docPr id="{inline.docPr.id}" name="{inline.docPr.name}"/>
-                        {inline.graphic.xml}
-                    </wp:anchor>
-                    '''
-                    anchor = parse_xml(anchor_xml)
-                    parent.replace(inline, anchor)
-                    
-                    firma_agregada = True
-                    logger.info(f"Firma añadida al documento (flotante)")
-                except Exception as e:
-                    logger.error(f"Error al añadir firma: {e}")
+                    # Verificar si contiene el marcador de firma
+                    elif '[[FIRMA]]' in texto_completo:
+                        # Limpiar el contenido del cuadro de texto (eliminar todos los runs)
+                        for run in list(paragraph.iter(qn('w:r'))):
+                            paragraph.remove(run)
+                        
+                        # Si hay firma, añadir la imagen adaptada al tamaño del cuadro
+                        if ruta_firma and os.path.exists(ruta_firma):
+                            if anadir_imagen_a_parrafo_xml(paragraph, ruta_firma, ancho_box, alto_box):
+                                firma_agregada = True
+                                logger.info(f"Firma añadida en cuadro de texto")
+                        else:
+                            logger.info("Cuadro de texto de firma dejado vacío (no se proporcionó firma)")
         
         # Guardar el documento DOCX temporalmente
         document.save(ruta_destino)

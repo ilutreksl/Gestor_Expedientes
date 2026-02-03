@@ -323,7 +323,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.34"
+APP_VERSION = "v1.0.35"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8528,7 +8528,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 cuno_path = None
                 if usar_cuno:
                     directorio_base = os.path.dirname(os.path.abspath(__file__))
-                    cuno_path = os.path.join(directorio_base, "plantillas", "Cuño.jpeg")
+                    cuno_path = os.path.join(directorio_base, "plantillas", "Cuño.jpg")
                     if not os.path.exists(cuno_path):
                         logger.warning(f"No se encuentra el cuño en: {cuno_path}")
                         cuno_path = None
