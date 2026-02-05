@@ -5,6 +5,9 @@ import tkinter.filedialog as filedialog
 import sqlite3
 import locale
 import datetime
+from lib.logger_config import get_logger
+
+logger = get_logger()
 
 def mostrar_rentabilidad_clientes(app):
     """Módulo externo que dibuja la estadística de rentabilidad por cliente.
@@ -115,45 +118,68 @@ def mostrar_rentabilidad_clientes(app):
     def construir_where_and_params():
         where = ["1=1"]
         params = []
+        
+        logger.debug("=== Construyendo filtros de rentabilidad ===")
+        
         # Resultado
         res = resultado_opt.get()
+        logger.debug(f"Filtro Resultado: '{res}'")
         if res and res != 'Todos':
             where.append("lower(resultado_expediente) = ?")
             params.append(res.strip().lower())
-        # Año
+            logger.debug(f"  -> Aplicado filtro resultado: {res.strip().lower()}")
+        
+        # Año (fecha_gestion en formato ISO: YYYY-MM-DD)
         anio = año_opt.get()
-        if anio and anio != 'Todos':
-            where.append("SUBSTR(fecha_gestion, 7, 4) = ?")
-            params.append(anio)
+        logger.debug(f"Filtro Año: '{anio}'")
+        if anio and anio != 'Todos' and anio.strip():
+            where.append("fecha_gestion IS NOT NULL AND fecha_gestion != '' AND SUBSTR(fecha_gestion, 1, 4) = ?")
+            params.append(anio.strip())
+            logger.debug(f"  -> Aplicado filtro año: {anio.strip()}")
+        
         # Periodo
         per_tipo = periodo_tipo.get()
         per_val = periodo_valor.get()
+        logger.debug(f"Filtro Periodo: tipo='{per_tipo}', valor='{per_val}'")
+        
         if per_tipo == 'Trimestre' and per_val in ('Q1','Q2','Q3','Q4'):
             mapping = {'Q1':('01','03'),'Q2':('04','06'),'Q3':('07','09'),'Q4':('10','12')}
             m1,m2 = mapping[per_val]
-            where.append("SUBSTR(fecha_gestion, 4, 2) BETWEEN ? AND ?")
+            where.append("fecha_gestion IS NOT NULL AND fecha_gestion != '' AND SUBSTR(fecha_gestion, 6, 2) BETWEEN ? AND ?")
             params.extend([m1,m2])
-        if per_tipo == 'Semestre' and per_val in ('H1','H2'):
+            logger.debug(f"  -> Aplicado filtro trimestre {per_val}: meses {m1}-{m2}")
+        elif per_tipo == 'Semestre' and per_val in ('H1','H2'):
             mapping = {'H1':('01','06'),'H2':('07','12')}
             m1,m2 = mapping[per_val]
-            where.append("SUBSTR(fecha_gestion, 4, 2) BETWEEN ? AND ?")
+            where.append("fecha_gestion IS NOT NULL AND fecha_gestion != '' AND SUBSTR(fecha_gestion, 6, 2) BETWEEN ? AND ?")
             params.extend([m1,m2])
+            logger.debug(f"  -> Aplicado filtro semestre {per_val}: meses {m1}-{m2}")
+        
         # Cliente
         cliente_like = cliente_entry.get().strip()
+        logger.debug(f"Filtro Cliente (texto): '{cliente_like}'")
         if cliente_like:
             where.append("cliente LIKE ?")
             params.append(f"%{cliente_like}%")
-        return " AND ".join(where), params
+            logger.debug(f"  -> Aplicado filtro cliente con LIKE: %{cliente_like}%")
+        
+        where_final = " AND ".join(where)
+        logger.debug(f"WHERE final: {where_final}")
+        logger.debug(f"Parámetros: {params}")
+        
+        return where_final, params
 
     # caché de resultados para exportar
     results_cache = []
 
     def cargar_datos():
+        logger.info("Cargando datos de rentabilidad por cliente")
         for w in resultados_frame.winfo_children():
             w.destroy()
 
         conn, cursor = app.master.conectar_db()
         if not conn:
+            logger.error("No se pudo conectar a la base de datos")
             messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
             return
 
@@ -177,9 +203,15 @@ def mostrar_rentabilidad_clientes(app):
             ORDER BY suma_total DESC
             LIMIT 200
         """
+        
+        logger.debug(f"SQL ejecutada: {sql}")
+        logger.debug(f"Parámetros: {params}")
+        
         try:
             cursor.execute(sql, params)
             rows = cursor.fetchall()
+            
+            logger.info(f"Se encontraron {len(rows)} clientes con los filtros aplicados")
 
             # Guardar resultados en caché para export
             try:
@@ -240,6 +272,7 @@ def mostrar_rentabilidad_clientes(app):
                     lbl.bind('<Button-1>', make_open(cliente))
             except Exception as e:
                 # Mostrar detalle del error para depuración en tiempo de ejecución
+                logger.error(f"Error mostrando tabla de resultados: {e}", exc_info=True)
                 try:
                     import traceback
                     tb = traceback.format_exc()
@@ -249,12 +282,14 @@ def mostrar_rentabilidad_clientes(app):
                 return
 
         except sqlite3.Error as e:
+            logger.error(f"Error de BD al consultar rentabilidad: {e}", exc_info=True)
             messagebox.showerror('Error BD', f'Error al consultar: {e}')
         finally:
             conn.close()
 
     def abrir_ventana_cliente(app, cliente_nombre, where_clause, params):
         # Abrir nueva ventana con listados de expedientes del cliente
+        logger.info(f"Abriendo ventana de detalle para cliente: {cliente_nombre}")
         win = ctk.CTkToplevel(app)
         win.title(f"Expedientes - {cliente_nombre}")
         win.geometry('900x600')
@@ -271,6 +306,7 @@ def mostrar_rentabilidad_clientes(app):
         # Re-consultar expedientes filtrando por cliente y respetando otros filtros
         conn, cursor = app.master.conectar_db()
         if not conn:
+            logger.error("No se pudo conectar a BD para detalles de cliente")
             messagebox.showerror('Error', 'No se pudo conectar a la base de datos.')
             win.destroy()
             return
@@ -282,9 +318,15 @@ def mostrar_rentabilidad_clientes(app):
         params_local.append(cliente_nombre)
 
         sql = f"SELECT id, codigo_rma, precio_total_expediente, resultado_expediente, fecha_gestion FROM rma_maestro WHERE {' AND '.join(where)} ORDER BY fecha_gestion DESC"
+        
+        logger.debug(f"Consultando expedientes de {cliente_nombre}: {sql}")
+        logger.debug(f"Parámetros: {params_local}")
+        
         try:
             cursor.execute(sql, params_local)
             expedientes = cursor.fetchall()
+            
+            logger.info(f"Se encontraron {len(expedientes)} expedientes para {cliente_nombre}")
 
             # Encabezados
             hdr = ctk.CTkFrame(tabla)
@@ -323,6 +365,7 @@ def mostrar_rentabilidad_clientes(app):
 
                 # Abrir expediente con doble click en la fila (en lugar de botón)
                 def _on_double(evt=None, _rid=rid, _code=code):
+                    logger.info(f"Abriendo expediente {_code} (ID: {_rid})")
                     try:
                         app.mostrar_nuevo_rma(_rid)
                         try:
@@ -332,6 +375,7 @@ def mostrar_rentabilidad_clientes(app):
                             pass
                         win.destroy()
                     except Exception as e:
+                        logger.error(f"Error abriendo expediente {_code}: {e}", exc_info=True)
                         messagebox.showerror('Error', f'No se pudo abrir el expediente: {e}')
 
                 # Hacer que la fila y sus hijos reaccionen al doble clic
@@ -345,6 +389,7 @@ def mostrar_rentabilidad_clientes(app):
                         pass
 
         except sqlite3.Error as e:
+            logger.error(f"Error BD consultando expedientes de cliente: {e}", exc_info=True)
             messagebox.showerror('Error BD', f'Error al consultar expedientes: {e}')
         finally:
             conn.close()
@@ -354,45 +399,108 @@ def mostrar_rentabilidad_clientes(app):
 
     # Exportar resultados a Excel/CSV
     def export_results():
+        logger.info("Iniciando exportación de resultados de rentabilidad")
         if not results_cache:
+            logger.warning("No hay datos en caché para exportar")
             messagebox.showinfo('Exportar', 'No hay datos para exportar. Aplica filtros primero.')
             return
 
         # Pedir nombre de fichero
-        fpath = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel Workbook', '*.xlsx'), ('CSV', '*.csv'), ('All files', '*.*')])
+        fpath = filedialog.asksaveasfilename(
+            defaultextension='.xlsx', 
+            filetypes=[('Excel Workbook', '*.xlsx'), ('CSV', '*.csv'), ('All files', '*.*')],
+            title='Guardar exportación como...'
+        )
         if not fpath:
+            logger.info("Exportación cancelada por el usuario")
             return
+
+        logger.info(f"Exportando {len(results_cache)} registros a: {fpath}")
 
         # Intentar usar openpyxl si está disponible
         try:
             from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
             use_xlsx = True
-        except Exception:
+            logger.debug("openpyxl disponible, exportando con formato")
+        except Exception as e:
+            logger.warning(f"openpyxl no disponible, exportando sin formato: {e}")
             use_xlsx = False
 
-        headers = ['CLIENTE', 'TOTAL_EXPEDIENTES', 'SUMA_TOTAL']
+        headers = ['CLIENTE', 'TOTAL_EXPEDIENTES', 'SUMA_TOTAL_€']
 
         try:
             if use_xlsx and fpath.lower().endswith('.xlsx'):
                 wb = Workbook()
                 ws = wb.active
-                ws.title = 'Resultados'
+                ws.title = 'Rentabilidad por Cliente'
+                
+                # Escribir encabezados
                 ws.append(headers)
+                
+                # Formatear encabezados
+                header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                header_font = Font(bold=True, color="FFFFFF", size=12)
+                header_alignment = Alignment(horizontal="center", vertical="center")
+                
+                for col_num in range(1, len(headers) + 1):
+                    cell = ws.cell(row=1, column=col_num)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = header_alignment
+                
+                # Escribir datos
                 for r in results_cache:
-                    # r could be tuple: (cliente, total_expedientes, suma_total)
                     ws.append([r[0], int(r[1] or 0), float(r[2] or 0.0)])
+                
+                # Formatear datos
+                border_style = Border(
+                    left=Side(style='thin', color='CCCCCC'),
+                    right=Side(style='thin', color='CCCCCC'),
+                    top=Side(style='thin', color='CCCCCC'),
+                    bottom=Side(style='thin', color='CCCCCC')
+                )
+                
+                for row_num in range(2, len(results_cache) + 2):
+                    # Cliente
+                    ws.cell(row=row_num, column=1).alignment = Alignment(horizontal="left")
+                    ws.cell(row=row_num, column=1).border = border_style
+                    
+                    # Total expedientes
+                    ws.cell(row=row_num, column=2).alignment = Alignment(horizontal="center")
+                    ws.cell(row=row_num, column=2).border = border_style
+                    
+                    # Suma total (formato moneda)
+                    cell_suma = ws.cell(row=row_num, column=3)
+                    cell_suma.number_format = '#,##0.00 €'
+                    cell_suma.alignment = Alignment(horizontal="right")
+                    cell_suma.border = border_style
+                
+                # Ajustar anchos de columna
+                ws.column_dimensions['A'].width = 40  # Cliente
+                ws.column_dimensions['B'].width = 20  # Total expedientes
+                ws.column_dimensions['C'].width = 20  # Suma total
+                
+                # Congelar primera fila (encabezados)
+                ws.freeze_panes = 'A2'
+                
                 wb.save(fpath)
+                logger.info(f"Archivo Excel guardado exitosamente: {fpath}")
             else:
                 # guardar CSV
+                logger.debug("Exportando como CSV")
                 import csv
                 with open(fpath, 'w', newline='', encoding='utf-8') as csvf:
                     writer = csv.writer(csvf, delimiter=';')
                     writer.writerow(headers)
                     for r in results_cache:
                         writer.writerow([r[0], r[1] or 0, r[2] or 0.0])
+                logger.info(f"Archivo CSV guardado exitosamente: {fpath}")
 
-            messagebox.showinfo('Exportar', f'Exportación completada: {fpath}')
+            messagebox.showinfo('Exportar', f'Exportación completada:\n{fpath}')
         except Exception as e:
+            logger.error(f"Error al exportar: {e}", exc_info=True)
             messagebox.showerror('Exportar', f'Error al exportar: {e}')
 
     ctk.CTkButton(btn_frame, text='Exportar a Excel', command=export_results).pack(side='left', padx=8)
