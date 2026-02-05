@@ -1,4 +1,14 @@
-Cambio V.1.0.32 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.40 - ✨ Últimas mejoras implementadas:
+
+- Sistema de gestion de Autorizacion.(Puede revisar en ayuda su funcionamiento).
+- Sistema de firmas para la gestion de autorizacion. (Puede revisar la ayuda).
+- Nuevas funciones añadidas al menu contextual del boton derecho del raton:
+	* Asociar expedientes.
+	* Generar autorizacion para el cliente.
+	* Descargar la autorizacion, si esta generada.
+
+
+Cambio V.1.0.32
 
 - Funciones con el boton derecho del raton: Cambio de estado de los expedientes. (1.0.32)
 - Añadida paginacion a la ventana principal. (1.0.31)
