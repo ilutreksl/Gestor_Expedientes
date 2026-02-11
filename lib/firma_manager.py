@@ -92,10 +92,8 @@ def descargar_firma_usuario_b2(username, ruta_destino, get_b2_client_func):
         logger.debug(f"Descargando firma desde B2: {ruta_b2} -> {ruta_destino}")
         
         # Descargar archivo
-        bucket.download_file_by_name(
-            file_name=ruta_b2,
-            local_file=ruta_destino
-        )
+        downloaded_file = bucket.download_file_by_name(ruta_b2)
+        downloaded_file.save_to(ruta_destino)
         
         # Verificar que se descargó
         if os.path.exists(ruta_destino):

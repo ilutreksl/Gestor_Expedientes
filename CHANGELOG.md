@@ -1,3 +1,9 @@
+Cambio V.1.0.41
+
+- Correccion de bug de adjuntar la firma para autorizar documento.
+- Correccion de bug de actuaizar datos de autorizacion cuando se genera el documento de autorizacion.
+
+
 Cambio V.1.0.40 - ✨ Últimas mejoras implementadas:
 
 - Sistema de gestion de Autorizacion.(Puede revisar en ayuda su funcionamiento).

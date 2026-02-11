@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.40"
+APP_VERSION = "v1.0.41"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -8864,11 +8864,12 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                 self.username
                             ))
                         
-                        # Actualizar campos de autorización en rma_maestro
+                        # Actualizar campos de autorización y estado en rma_maestro
                         cursor.execute("""
                             UPDATE rma_maestro
                             SET fecha_autorizacion = ?,
-                                autorizado_por = ?
+                                autorizado_por = ?,
+                                estado = 'Autorizado'
                             WHERE id = ?
                         """, (fecha_autorizacion_str, self.username, rma_id))
                         
@@ -8906,6 +8907,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                             self.cargar_lista_adjuntos(rma_id)
                         except Exception as e:
                             logger.warning(f"No se pudo refrescar lista de adjuntos: {e}")
+                    
+                    # Recargar la ficha actual para mostrar los cambios
+                    if hasattr(self, 'mostrar_nuevo_rma'):
+                        try:
+                            self.mostrar_nuevo_rma(rma_id)
+                            logger.info(f"Ficha del expediente {codigo_rma} recargada después de autorización")
+                        except Exception as e:
+                            logger.warning(f"No se pudo recargar la ficha del expediente: {e}")
                 else:
                     mostrar_progreso(False)
                     messagebox.showerror("Error", "No se pudo generar el documento. Revise los logs.")
