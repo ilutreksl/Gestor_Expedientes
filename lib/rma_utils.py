@@ -407,5 +407,6 @@ def cambiar_estado_expediente(conn, rma_id, nuevo_estado, usuario, fecha=None):
         
     except Exception as e:
         logger.error(f"Error al cambiar estado del expediente RMA ID {rma_id}: {e}")
-        conn.rollback()
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
         return False

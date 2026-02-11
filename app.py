@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.42"
+APP_VERSION = "v1.0.43"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7041,7 +7041,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
-            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Num_Order', 'Obs_Tecnica',
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
         
@@ -7249,7 +7249,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
 
             # 3d. Guardar número de orden en rma_orders
-            num_order = datos_maestro.get('num_order', '')
+            # Obtener num_order directamente del widget ya que no está en campos_a_insertar
+            num_order = ''
+            if hasattr(self, 'entry_Num_Order'):
+                try:
+                    num_order = self.entry_Num_Order.get() if hasattr(self.entry_Num_Order, 'get') else ''
+                except Exception:
+                    num_order = ''
+            
             if num_order and str(num_order).strip():
                 cursor.execute("""
                     INSERT INTO rma_orders (rma_id, num_order)
@@ -7309,11 +7316,15 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # self.mostrar_lista_rma()
 
         except sqlite3.IntegrityError as e:
-            conn.rollback()
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
             print(f"Error al guardar (Integridad): {e}. Es posible que el código RMA ya exista.")
+            messagebox.showerror("Error de Integridad", f"No se pudo guardar el expediente:\n{e}")
         except sqlite3.Error as e:
-            conn.rollback()
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
             print(f"Error general de DB al guardar: {e}")
+            messagebox.showerror("Error de Base de Datos", f"Error al guardar:\n{e}")
         finally:
             conn.close()
 
@@ -7330,7 +7341,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
-            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Num_Order', 'Obs_Tecnica',
+            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
 
@@ -7386,6 +7397,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         datos_maestro[campo.lower()] = valor
         
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
+        
+        # Num_Order se maneja por separado ya que está en la tabla rma_orders
+        if hasattr(self, 'entry_Num_Order'):
+            try:
+                num_order_val = self.entry_Num_Order.get() if hasattr(self.entry_Num_Order, 'get') else ''
+                datos_maestro['num_order'] = num_order_val
+            except Exception:
+                datos_maestro['num_order'] = ''
         
         return datos_maestro
 
@@ -8135,7 +8154,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             v2 = str(val2).strip() if val2 is not None else ""
             return v1 != v2
         
+        # Campos que no pertenecen a rma_maestro (se manejan en otras tablas)
+        campos_excluir = {'num_order'}  # num_order está en rma_orders, no en rma_maestro
+        
         for columna_db, valor_nuevo in datos_nuevos.items():
+            # Saltar campos que no pertenecen a rma_maestro
+            if columna_db in campos_excluir:
+                continue
+                
             valor_antiguo = datos_antiguos.get(columna_db)
             
             # SQLite almacena el boolean como int (1/0)
@@ -8170,7 +8196,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 updated_any = True
             except sqlite3.Error as e:
                 print(f"Error al actualizar maestro: {e}")
-                conn.rollback()
+                if hasattr(conn, 'rollback'):
+                    conn.rollback()
                 conn.close()
                 return
 
@@ -8261,7 +8288,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
         except sqlite3.Error as e:
             print(f"Error al actualizar detalles: {e}")
-            conn.rollback()
+            if hasattr(conn, 'rollback'):
+                conn.rollback()
             conn.close()
             return
             
@@ -10836,7 +10864,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     messagebox.showinfo("Éxito", f"✅ Informe '{nombre_archivo_final}' generado y guardado localmente.")
                 
             except Exception as db_e:
-                conn.rollback()
+                if hasattr(conn, 'rollback'):
+                    conn.rollback()
                 messagebox.showerror("Error DB", f"Informe generado, pero error al registrar en DB.\nError: {db_e}")
             finally:
                 conn.close()
@@ -10988,7 +11017,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     messagebox.showinfo("Éxito", f"✅ Documento de Reposición/Devolución '{nombre_archivo_final}' generado y guardado localmente.")
                 
             except Exception as db_e:
-                conn.rollback()
+                if hasattr(conn, 'rollback'):
+                    conn.rollback()
                 messagebox.showerror("Error DB", f"Documento generado, pero error al registrar en DB/Historial. Error: {db_e}")
             finally:
                 conn.close()
@@ -11032,7 +11062,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 messagebox.showinfo("Éxito", f"Documento de Reposición/Devolución '{nombre_archivo_final}' generado y adjuntado correctamente.")
                 
             except Exception as db_e:
-                conn.rollback()
+                if hasattr(conn, 'rollback'):
+                    conn.rollback()
                 messagebox.showerror("Error DB", f"Documento generado, pero error al registrar en DB/Historial. Error: {db_e}")
             finally:
                 conn.close()

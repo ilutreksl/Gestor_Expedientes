@@ -1,6 +1,7 @@
-Cambio V.1.0.42
+Cambio V.1.0.43
 
-- Añadido campo numero de ORDER a la ficha de expedientes en la pestaña Tecnica y creada tabla y campo en la BD.
+- Correccion de bug a la hora de guardar y actualizar expedientes.
+- Añadido campo numero de ORDER a la ficha de expedientes en la pestaña Tecnica y creada tabla y campo en la BD.(1.0.42)
 
 
 Cambio V.1.0.41
