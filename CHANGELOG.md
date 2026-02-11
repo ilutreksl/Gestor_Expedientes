@@ -1,3 +1,8 @@
+Cambio V.1.0.42
+
+- Añadido campo numero de ORDER a la ficha de expedientes en la pestaña Tecnica y creada tabla y campo en la BD.
+
+
 Cambio V.1.0.41
 
 - Correccion de bug de adjuntar la firma para autorizar documento.

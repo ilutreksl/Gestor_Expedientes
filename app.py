@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.41"
+APP_VERSION = "v1.0.42"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1161,6 +1161,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             logger.error(f"Error al cargar ajustes de usuario: {e}")
             self.user_settings = {}
+            
+        # Crear tablas necesarias si no existen
+        try:
+            self.crear_tabla_rma_orders()
+            self.crear_tabla_adjuntos()
+            self.crear_tabla_tareas()
+        except Exception as e:
+            logger.error(f"Error al crear tablas: {e}")
             
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
@@ -5827,17 +5835,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.crear_campo(info_tecnica_frame, 2, "N. Serie:", "N_Serie")
         # Fila 3: Ref. Proveedor
         self.crear_campo(info_tecnica_frame, 3, "Ref. Proveedor:", "Ref_Proveedor")
-        # Fila 4: Observaciones Técnicas (caja de texto mayor)
-        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(row=4, column=0, padx=10, pady=5, sticky="w")
+        # Fila 4: Número de Orden/Partida
+        self.crear_campo(info_tecnica_frame, 4, "Nº ORDER:", "Num_Order")
+        # Fila 5: Observaciones Técnicas (caja de texto mayor)
+        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(row=5, column=0, padx=10, pady=5, sticky="w")
         self.entry_Obs_Tecnica = ctk.CTkTextbox(info_tecnica_frame, height=120, wrap="word")
-        self.entry_Obs_Tecnica.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
+        self.entry_Obs_Tecnica.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
 
         # Botón para generar la Solicitud de RMA desde la plantilla PDF
         ctk.CTkButton(
             info_tecnica_frame,
             text="Generar Solicitud de RMA",
             command=self.autorrellena_pdf
-        ).grid(row=5, column=1, padx=10, pady=(8, 12), sticky="e")
+        ).grid(row=6, column=1, padx=10, pady=(8, 12), sticky="e")
 
         # C) PESTAÑA ARTÍCULOS (Mantener la lógica de listado y añadir artículo)
         articulos_tab.grid_columnconfigure(0, weight=1)
@@ -7031,7 +7041,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
-            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Num_Order', 'Obs_Tecnica',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
         
@@ -7238,6 +7248,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 VALUES (?, ?, ?, ?)
             """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
 
+            # 3d. Guardar número de orden en rma_orders
+            num_order = datos_maestro.get('num_order', '')
+            if num_order and str(num_order).strip():
+                cursor.execute("""
+                    INSERT INTO rma_orders (rma_id, num_order)
+                    VALUES (?, ?)
+                """, (rma_id_generado, str(num_order).strip()))
+
             conn.commit()
             
             # Invalidar caché de estados (puede que se haya creado un nuevo estado)
@@ -7312,7 +7330,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
-            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Num_Order', 'Obs_Tecnica',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
 
@@ -7670,6 +7688,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario, precio_final, depreciacion, porcentaje_depreciacion FROM rma_detalles WHERE rma_id = ?", (rma_id,))
             columnas_detalle = [col[0] for col in cursor.description]
             articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
+            
+            # 3. Cargar Número de Orden desde rma_orders
+            cursor.execute("SELECT num_order FROM rma_orders WHERE rma_id = ?", (rma_id,))
+            orden_row = cursor.fetchone()
+            if orden_row:
+                datos_maestro['num_order'] = orden_row[0]
+            else:
+                datos_maestro['num_order'] = ''
             
             # IMPORTANTE: Recalcular precio_final si está en 0 (datos antiguos)
             try:
@@ -8239,7 +8265,37 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             conn.close()
             return
             
-        # 6. Commit final e invalidar caché
+        # 6. Actualizar/Insertar en rma_orders
+        try:
+            num_order_nuevo = datos_nuevos.get('num_order', '')
+            
+            # Verificar si ya existe un registro para este RMA
+            cursor.execute("SELECT num_order FROM rma_orders WHERE rma_id = ?", (rma_id,))
+            orden_existente = cursor.fetchone()
+            
+            if orden_existente:
+                # Actualizar solo si el valor cambió
+                num_order_antiguo = orden_existente[0] or ''
+                if str(num_order_antiguo).strip() != str(num_order_nuevo).strip():
+                    if num_order_nuevo and str(num_order_nuevo).strip():
+                        cursor.execute("UPDATE rma_orders SET num_order = ? WHERE rma_id = ?", (str(num_order_nuevo).strip(), rma_id))
+                        self.guardar_cambio_historial(rma_id, "Número de Orden", str(num_order_antiguo), str(num_order_nuevo))
+                    else:
+                        # Si el nuevo valor está vacío, eliminar el registro
+                        cursor.execute("DELETE FROM rma_orders WHERE rma_id = ?", (rma_id,))
+                        self.guardar_cambio_historial(rma_id, "Número de Orden", str(num_order_antiguo), "(eliminado)")
+                    updated_any = True
+            else:
+                # Insertar si no existe y hay valor
+                if num_order_nuevo and str(num_order_nuevo).strip():
+                    cursor.execute("INSERT INTO rma_orders (rma_id, num_order) VALUES (?, ?)", (rma_id, str(num_order_nuevo).strip()))
+                    self.guardar_cambio_historial(rma_id, "Número de Orden", "(ninguno)", str(num_order_nuevo))
+                    updated_any = True
+        except sqlite3.Error as e:
+            print(f"Error al actualizar rma_orders: {e}")
+            # No hacer rollback completo, solo registrar el error
+            
+        # 7. Commit final e invalidar caché
         conn.commit()
         conn.close()
         
@@ -9315,6 +9371,28 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             hover_color="#c0392b"
         ).pack(side="left", padx=10)
     
+    def crear_tabla_rma_orders(self):
+        """Crea la tabla de órdenes/partidas RMA si no existe."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
+                
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rma_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rma_id INTEGER NOT NULL,
+                    num_order TEXT,
+                    FOREIGN KEY (rma_id) REFERENCES rma_maestro(id)
+                )
+            """)
+            
+            conn.commit()
+            conn.close()
+            logger.info("Tabla rma_orders creada o verificada correctamente")
+        except Exception as e:
+            logger.error(f"Error al crear tabla rma_orders: {e}")
+    
     def crear_tabla_adjuntos(self):
         """Crea la tabla rma_adjuntos si no existe."""
         conn, cursor = self.master.conectar_db()
@@ -9516,6 +9594,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 continue  # Error ya mostrado, continuar con el siguiente archivo
             
             # 4. Insertar registro en la base de datos para este archivo
+            self.crear_tabla_rma_orders()
             self.crear_tabla_adjuntos()
             
             conn, cursor = self.master.conectar_db()
