@@ -1,6 +1,7 @@
-Cambio V.1.0.43
+Cambio V.1.0.44
 
-- Correccion de bug a la hora de guardar y actualizar expedientes.
+- Corregido bug al actualizar expediente cuando se generaba autorizacion, abria en ventana principal.
+- Correccion de bug a la hora de guardar y actualizar expedientes. (1.0.43)
 - Añadido campo numero de ORDER a la ficha de expedientes en la pestaña Tecnica y creada tabla y campo en la BD.(1.0.42)
 
 

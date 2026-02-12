@@ -331,7 +331,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.43"
+APP_VERSION = "v1.0.44"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -7097,6 +7097,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         datos_maestro[campo.lower()] = 0
                 elif campo == 'Email_de_Contacto':
                     datos_maestro[campo.lower()] = valor.lower() if valor else ''
+                elif campo == 'Autorizado_Por':
+                    datos_maestro[campo.lower()] = valor.upper() if valor else ''
                 else:
                     datos_maestro[campo.lower()] = valor
 
@@ -7393,6 +7395,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     # Conversión especial para Email_de_Contacto (siempre en minúsculas)
                     elif campo == 'Email_de_Contacto':
                         datos_maestro[campo.lower()] = valor.lower() if valor else ''
+                    # Conversión especial para Autorizado_Por (siempre en mayúsculas)
+                    elif campo == 'Autorizado_Por':
+                        datos_maestro[campo.lower()] = valor.upper() if valor else ''
                     else:
                         datos_maestro[campo.lower()] = valor
         
@@ -8955,7 +8960,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                                 autorizado_por = ?,
                                 estado = 'Autorizado'
                             WHERE id = ?
-                        """, (fecha_autorizacion_str, self.username, rma_id))
+                        """, (fecha_autorizacion_str, self.username.upper(), rma_id))
                         
                         # Registrar en historial del expediente
                         cursor.execute("""
@@ -8992,13 +8997,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         except Exception as e:
                             logger.warning(f"No se pudo refrescar lista de adjuntos: {e}")
                     
-                    # Recargar la ficha actual para mostrar los cambios
-                    if hasattr(self, 'mostrar_nuevo_rma'):
+                    # Recargar los datos del expediente en la ventana actual (sin abrir nueva ventana)
+                    if hasattr(self, 'cargar_datos_rma'):
                         try:
-                            self.mostrar_nuevo_rma(rma_id)
-                            logger.info(f"Ficha del expediente {codigo_rma} recargada después de autorización")
+                            self.cargar_datos_rma(rma_id)
+                            logger.info(f"Datos del expediente {codigo_rma} actualizados después de autorización")
                         except Exception as e:
-                            logger.warning(f"No se pudo recargar la ficha del expediente: {e}")
+                            logger.warning(f"No se pudieron actualizar los datos del expediente: {e}")
                 else:
                     mostrar_progreso(False)
                     messagebox.showerror("Error", "No se pudo generar el documento. Revise los logs.")
