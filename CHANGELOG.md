@@ -1,6 +1,7 @@
-Cambio V.1.0.44
+Cambio V.1.0.45 - ✨ Últimas mejoras implementadas:
 
-- Corregido bug al actualizar expediente cuando se generaba autorizacion, abria en ventana principal.
+- Sistema de Tareas mejorada. Asignacion de tareas y notificaciones sonoras. Se pueden deshabilitar desde los ajustes de cada usuario.
+- Corregido bug al actualizar expediente cuando se generaba autorizacion, abria en ventana principal. (1.0.44)
 - Correccion de bug a la hora de guardar y actualizar expedientes. (1.0.43)
 - Añadido campo numero de ORDER a la ficha de expedientes en la pestaña Tecnica y creada tabla y campo en la BD.(1.0.42)
 
@@ -11,7 +12,7 @@ Cambio V.1.0.41
 - Correccion de bug de actuaizar datos de autorizacion cuando se genera el documento de autorizacion.
 
 
-Cambio V.1.0.40 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.40
 
 - Sistema de gestion de Autorizacion.(Puede revisar en ayuda su funcionamiento).
 - Sistema de firmas para la gestion de autorizacion. (Puede revisar la ayuda).

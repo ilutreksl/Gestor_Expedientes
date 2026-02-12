@@ -6,7 +6,8 @@
     "compact_mode": true,
     "icon_size": 24,
     "mostrar_aviso": true,
-    "tiene_firma": false
+    "tiene_firma": false,
+    "notificaciones_sonoras": true
   },
   "users": {
     "admin": {
@@ -18,6 +19,7 @@
       "appearance_mode": "light",
       "mostrar_aviso": true,
       "tiene_firma": false,
+      "notificaciones_sonoras": true,
       "historial_busquedas": [
         {
           "termino": "carlos",
@@ -76,7 +78,8 @@
       "theme": "themes/teal_corporate.json",
       "appearance_mode": "light",
       "tiene_firma": true,
-      "mostrar_aviso": true
+      "mostrar_aviso": true,
+      "notificaciones_sonoras": true
     }
   }
 }

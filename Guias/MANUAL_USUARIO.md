@@ -911,56 +911,158 @@ Si quieres ver todos los archivos de golpe:
 
 ## Tareas y Recordatorios
 
-Las tareas te ayudan a recordar acciones pendientes para cada expediente.
+Las tareas te ayudan a recordar acciones pendientes para cada expediente. El sistema incluye notificaciones automáticas, alertas sonoras y un seguimiento visual en tiempo real.
 
-### Ver Tareas Pendientes
+### 🔔 Indicador de Tareas Pendientes (Badge)
 
-En el menú lateral, el botón **✓ Tareas** muestra un **número rojo** si tienes tareas pendientes.
+En el menú lateral verás un **badge circular** al lado del botón **✓ Tareas** que muestra el número de tareas pendientes:
 
-### Ver Todas las Tareas
+- **🟢 Verde** (0-4 tareas): Todo bajo control
+- **🟠 Naranja** (5-9 tareas): Atención moderada
+- **🔴 Rojo** (10+ tareas): Alta carga de trabajo
 
-1. Haz clic en **✓ Tareas** en el menú
-2. Verás una lista de todas las tareas con:
+El contador se actualiza automáticamente cada 5 minutos y muestra solo las tareas asignadas a ti que están pendientes.
+
+### 📋 Acceso según tu Rol
+
+**Usuarios normales:**
+- Al hacer clic en **✓ Tareas**, se abre un **panel personalizado**
+- Verás solo las tareas asignadas a ti
+- Puedes filtrar por estado (Todas/Pendientes/Completadas)
+- Vista compacta y enfocada en tu trabajo
+
+**Administradores:**
+- Al hacer clic en **✓ Tareas**, se abre la **ventana de gestión completa**
+- Ves TODAS las tareas del sistema
+- Puedes filtrar por usuario creador
+- Acceso completo a creación, edición y eliminación
+
+### Ver el Panel de Tareas (Usuarios)
+
+1. Haz clic en el **badge de tareas** o en **✓ Tareas** en el menú
+2. Se abre una ventana (700x600) con tus tareas
+3. Verás columnas con:
    - **RMA**: Expediente relacionado
    - **Descripción**: Qué hay que hacer
    - **Fecha límite**: Cuándo vence
-   - **Estado**: Pendiente o Completada
+   - **Creado por**: Quién asignó la tarea
+   - **Prioridad**: Alta/Normal/Baja
+   - **Estado**: Pendiente/Completada
+
+**Uso del panel:**
+- Doble clic en una tarea para ver detalles
+- Botón **"Actualizar"** para refrescar la lista
+- Selector de estado para filtrar tareas
+
+### Ver Gestión Completa (Administradores)
+
+1. Haz clic en **✓ Tareas** en el menú
+2. Se abre la ventana completa (700x550) con:
+   - Lista de TODAS las tareas del sistema
+   - Filtros por estado y creador
+   - Botones de gestión (Nueva/Editar/Completar/Eliminar)
 
 **Filtros disponibles:**
-- Mostrar: Todas / Pendientes / Completadas
-- Por expediente específico
-- Por rango de fechas
+- **Estado**: Todas / Pendientes / Completadas
+- **Creadas por**: Todos / Usuario específico
+- Ordenación por fecha límite
 
 ### Crear una Nueva Tarea
 
-Desde la vista de tareas:
+**Desde la ventana de gestión (solo administradores):**
 1. Haz clic en **"Nueva Tarea"**
-2. Completa:
-   - **RMA**: Selecciona el expediente
-   - **Descripción**: Qué hay que hacer
-   - **Fecha límite**: Cuándo vence
-3. Guarda
+2. Completa el formulario (500x580 píx):
+   - **RMA**: Selecciona el expediente relacionado
+   - **Descripción**: Explica qué hay que hacer
+   - **Fecha límite**: Cuándo debe completarse
+   - **Asignado a**: Selecciona el usuario responsable
+   - **Prioridad**: Alta / Normal / Baja
+3. Haz clic en **"Crear Tarea"**
 
-**Desde un expediente:**
-1. Abre el expediente
+**Desde la ficha de un expediente:**
+1. Abre cualquier expediente RMA
 2. Ve a la pestaña **"Tareas"**
 3. Haz clic en **"Añadir Tarea"**
-4. Completa descripción y fecha límite
+4. Completa descripción, fecha, asignado y prioridad
 5. Guarda
+
+💡 **Consejo**: Usa prioridad **Alta** solo para tareas urgentes que requieren atención inmediata.
 
 ### Marcar una Tarea como Completada
 
-- En la lista de tareas, haz clic en **☑️ Marcar completada**
-- Las tareas completadas aparecen con una marca verde ✅
+**Desde el panel:**
+- Selecciona la tarea en la lista
+- Haz clic en **☑️ Marcar completada**
+- Las tareas completadas se marcan con ✅
 
-### Editar o Eliminar una Tarea
+**Desde la gestión completa:**
+- Selecciona la tarea
+- Botón **"Marcar como completada"**
+- Se actualiza el estado automáticamente
 
-- **Editar**: Haz clic en el botón **✏️** para modificar
-- **Eliminar**: Haz clic en **🗑️** para borrar
+### Editar o Eliminar Tareas
 
-### Notificaciones de Tareas Vencidas
+**Editar (solo administradores):**
+1. Selecciona la tarea en la lista
+2. Haz clic en **✏️ Editar**
+3. Ventana de edición (500x620 píx)
+4. Modifica los campos necesarios
+5. Guarda cambios
 
-⏰ **Automático**: Cada 30 minutos, la aplicación comprueba si hay tareas vencidas y te avisa con un mensaje.
+**Eliminar (solo administradores):**
+1. Selecciona la tarea
+2. Haz clic en **🗑️ Eliminar**
+3. Confirma la eliminación
+4. La tarea se borra permanentemente
+
+### 🔔 Notificaciones Automáticas
+
+El sistema comprueba **cada 30 minutos** si hay tareas que requieren tu atención:
+
+**Tipos de notificaciones:**
+- **Tareas vencidas**: Tareas cuya fecha límite ya pasó
+- **Tareas que vencen hoy**: Tareas con fecha límite en el día actual
+
+**Características:**
+- Notificación nativa de Windows con icono de la app
+- Sonido de alerta (configurable)
+- Solo se notifican tareas **pendientes** asignadas a ti
+- Las tareas ya completadas no generan notificaciones
+
+**Formato del mensaje:**
+```
+📋 Tienes X tarea(s) vencida(s)
+Y tarea(s) vence(n) hoy
+```
+
+### 🔊 Configurar Notificaciones Sonoras
+
+Por defecto, las notificaciones incluyen un **sonido de alerta** cuando aparecen. Puedes desactivarlo:
+
+1. Haz clic en **🎨 Ajustes** en el menú
+2. En la sección **"Notificaciones"**, busca:
+   - **"Habilitar sonido en notificaciones"**
+3. Desmarca la casilla para desactivar el sonido
+4. Márcala para volver a activarlo
+5. El cambio se guarda automáticamente
+
+💡 **Nota**: El sonido es el tono estándar de Windows (MessageBeep), discreto y profesional.
+
+### Colores de Prioridad
+
+Las tareas se identifican visualmente por su prioridad:
+
+- 🔴 **Alta**: Requiere atención urgente
+- 🟡 **Normal**: Flujo de trabajo estándar
+- 🟢 **Baja**: Puede esperar si hay tareas más urgentes
+
+### Consejos para Gestionar Tareas
+
+✅ **Revisa diariamente** tu panel de tareas al iniciar la sesión  
+✅ **Completa las tareas vencidas** primero para mantener el flujo  
+✅ **Asigna prioridades** correctamente para organizar el trabajo  
+✅ **Usa descripciones claras** que expliquen exactamente qué hacer  
+✅ **Actualiza el estado** en cuanto completes una tarea
 
 ---
 

@@ -36,6 +36,8 @@ from lib.resultado_expediente_manager import ResultadoExpedienteManager
 from lib.tipos_cliente_manager import cargar_tipos_cliente
 from lib import github_issue_manager
 from lib import rma_asociaciones
+from lib import tareas_notificaciones
+from lib.tareas_panel import TareasBadge, PanelTareas
 
 # Sistema de logging
 from lib.logger_config import setup_logging, set_current_user, get_logger
@@ -311,12 +313,6 @@ import locale
 import shutil # Para copiar archivos
 import tkinter.filedialog as filedialog # Para el diálogo de selección de archivos
 import subprocess # Para abrir archivos en diferentes OS
-# Notificaciones nativas (Windows)
-try:
-    from win10toast import ToastNotifier
-except Exception:
-    ToastNotifier = None
-
 # Módulo para rellenado de PDFs
 try:
     from lib.pdf_fill import fill_pdf_for_rma, get_pdf_field_names, fill_pdf
@@ -331,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.44"
+APP_VERSION = "v1.0.45"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -916,7 +912,7 @@ class LoginApp(ctk.CTk):
         except sqlite3.Error as e:
             self.error_label.configure(text=f"Error de DB: {e}", text_color="red")
             print(f"Error de base de datos: {e}")
-            return None
+            return None, None
 
     def cargar_tema_usuario(self, username):
         """Carga y aplica el tema personalizado del usuario antes de crear la ventana principal."""
@@ -1116,11 +1112,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
         set_current_user(username)
         logger.info(f"Usuario '{username}' con rol '{rol}' ha iniciado sesión")
         
-        try:
-            self.toaster = ToastNotifier() if ToastNotifier else None
-        except Exception:
-            self.toaster = None
-
         # Configuración para compatibilidad de esquema de BD
         self._usar_tipo_almacenamiento = True  # Por defecto asumimos que funciona
 
@@ -1167,8 +1158,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.crear_tabla_rma_orders()
             self.crear_tabla_adjuntos()
             self.crear_tabla_tareas()
+            
+            # Actualizar estructura de tabla tareas (añadir columnas asignado_a y prioridad)
+            tareas_notificaciones.actualizar_tabla_tareas(self.master.conectar_db)
         except Exception as e:
-            logger.error(f"Error al crear tablas: {e}")
+            logger.error(f"Error al crear/actualizar tablas: {e}")
             
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
@@ -1585,19 +1579,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
                                         command=self.mostrar_gestion_tareas)
         self.btn_tareas.grid(row=0, column=0)
         
-        # Badge para contador de tareas pendientes
-        self.badge_tareas = ctk.CTkLabel(self.frame_tareas,
-                                       text="0",
-                                       width=18,
-                                       height=18,
-                                       corner_radius=9,
-                                       fg_color="#e74c3c",  # Rojo más intenso
-                                       text_color="white",
-                                       font=ctk.CTkFont(size=9, weight="bold"))
-        self.badge_tareas.grid(row=0, column=0, sticky="ne", padx=(32, 0), pady=(2, 0))
+        # Badge mejorado con auto-actualización y panel
+        self.badge_tareas = TareasBadge(
+            parent=self.frame_tareas,
+            connect_db_func=self.conectar_db,
+            username=self.username,
+            on_click_callback=self.abrir_panel_tareas
+        )
+        self.badge_tareas.grid(row=0, column=0, sticky="ne", padx=(30, 0), pady=(0, 0))
         
-        # Inicializar badge (oculto inicialmente)
-        self.badge_tareas.grid_remove()
+        # Iniciar auto-actualización del badge cada 5 minutos
+        self.badge_tareas.programar_actualizacion()
         
         Tooltip(self.btn_tareas, "Tareas")
         fila += 1
@@ -1692,28 +1684,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
         
         self.mostrar_lista_rma()
         
-        # Actualizar badge de tareas al cargar la ventana
-        self.actualizar_badge_tareas()
+        # El badge de tareas se auto-actualiza cada 5 minutos
     
-    def contar_tareas_pendientes(self):
-        """Cuenta las tareas que no están completadas (Pendiente + En progreso)."""
-        try:
-            conn, cursor = self.conectar_db()
-            if not conn:
-                return 0
-            
-            cursor.execute("""
-                SELECT COUNT(*) FROM tareas 
-                WHERE estado NOT IN ('Completado', 'Completada', 'Finalizada')
-                AND estado IS NOT NULL
-            """)
-            count = int(cursor.fetchone()[0])  # Convertir a entero
-            conn.close()
-            return count
-        except Exception as e:
-            print(f"Error al contar tareas pendientes: {e}")
-            return 0
-
     def verificar_tareas_pendientes_expediente(self, rma_id):
         """Verifica si un expediente específico tiene tareas pendientes."""
         try:
@@ -1748,24 +1720,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
         except Exception as e:
             print(f"Error al verificar tareas pendientes del expediente: {e}")
             return 0, []
-
-    def actualizar_badge_tareas(self):
-        """Actualiza el badge visual del botón de tareas."""
-        if not hasattr(self, 'badge_tareas'):
-            return
-        
-        count = self.contar_tareas_pendientes()
-        if count > 0:
-            # Mostrar badge con el número
-            self.badge_tareas.configure(text=str(count))
-            self.badge_tareas.grid()  # Hacer visible
-            # Actualizar tooltip con información de tareas pendientes
-            Tooltip(self.btn_tareas, f"Tareas ({count} pendientes)")
-        else:
-            # Ocultar badge si no hay tareas pendientes
-            self.badge_tareas.grid_remove()
-            # Restaurar tooltip normal
-            Tooltip(self.btn_tareas, "Tareas")
 
     def conectar_db(self):
         """Intenta conectar a la base de datos (método heredado de master)."""
@@ -2556,6 +2510,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 hover_color="red"
             ).grid(row=0, column=2, padx=3, pady=3)
 
+            # Separador
+            sep2 = ctk.CTkFrame(frm, height=2, fg_color="gray40")
+            sep2.grid(row=12, column=0, columnspan=2, sticky="ew", padx=6, pady=12)
+
+            # --- Sección de Notificaciones ---
+            ctk.CTkLabel(frm, text="Notificaciones:", font=("Arial", 12, "bold")).grid(row=13, column=0, columnspan=2, sticky="w", padx=6, pady=(6,3))
+
+            # Checkbox para notificaciones sonoras
+            var_sonido_notif = tk.BooleanVar(value=self.user_settings.get("notificaciones_sonoras", True))
+            switch_sonido = ctk.CTkSwitch(frm, text="Habilitar sonido en notificaciones de tareas", variable=var_sonido_notif, width=40)
+            switch_sonido.grid(row=14, column=0, columnspan=2, sticky="w", padx=6, pady=3)
+
             # Buttons
             btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
             btn_frame.grid(row=99, column=0, sticky="ew", padx=12, pady=(6,12))
@@ -2579,7 +2545,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     "show_tooltips": bool(var_tooltips.get()),
                     "compact_mode": bool(var_compact.get()),
                     "theme": f"themes/{archivo_tema}",
-                    "appearance_mode": appearance_mode
+                    "appearance_mode": appearance_mode,
+                    "notificaciones_sonoras": bool(var_sonido_notif.get())
                 }
                 
                 # Actualizar configuraciones
@@ -5357,7 +5324,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             # Abrir un pequeño diálogo para título, descripción y fecha
             dlg = ctk.CTkToplevel(self)
             dlg.title("Crear tarea")
-            dlg.geometry("400x300")
+            dlg.geometry("500x580")
             dlg.grab_set()
 
             ctk.CTkLabel(dlg, text=f"RMA: {self.lbl_codigo_rma.cget('text').split(': ')[1]}").pack(pady=5)
@@ -5368,18 +5335,47 @@ class VentanaPrincipal(ctk.CTkToplevel):
             titulo_entry.pack(padx=10, pady=5, fill='x')
 
             ctk.CTkLabel(dlg, text="Descripción:").pack(pady=(10,0))
-            desc_text = tk.Text(dlg, height=5)
+            desc_text = tk.Text(dlg, height=4)
             desc_text.pack(padx=10, pady=5, fill='both', expand=True)
 
             ctk.CTkLabel(dlg, text="Fecha Vencimiento (YYYY-MM-DD):").pack(pady=(5,0))
             fecha_entry = ctk.CTkEntry(dlg)
             fecha_entry.pack(padx=10, pady=5, fill='x')
+            
+            # Campo Asignado a
+            ctk.CTkLabel(dlg, text="Asignar a:").pack(pady=(5,0))
+            # Obtener lista de usuarios para asignación
+            usuarios_disponibles = ["No asignado"]
+            try:
+                conn_temp = connect_db()
+                cur_temp = conn_temp.cursor()
+                cur_temp.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+                usuarios_disponibles.extend([row[0] for row in cur_temp.fetchall()])
+                conn_temp.close()
+            except:
+                pass
+            
+            asignado_var = ctk.StringVar(value="No asignado")
+            asignado_opt = ctk.CTkOptionMenu(dlg, values=usuarios_disponibles, variable=asignado_var)
+            asignado_opt.pack(padx=10, pady=5, fill='x')
+            
+            # Campo Prioridad
+            ctk.CTkLabel(dlg, text="Prioridad:").pack(pady=(5,0))
+            prioridad_var = ctk.StringVar(value="Normal")
+            prioridad_opt = ctk.CTkOptionMenu(dlg, values=["Alta", "Normal", "Baja"], variable=prioridad_var)
+            prioridad_opt.pack(padx=10, pady=5, fill='x')
 
             def confirmar_crear():
                 titulo = titulo_entry.get().strip()
                 descripcion = desc_text.get("1.0", "end").strip()
                 fecha_v = fecha_entry.get().strip() or None
+                asignado_a = asignado_var.get()
+                prioridad = prioridad_var.get()
                 codigo_rma = self.lbl_codigo_rma.cget('text').split(': ')[1]
+                
+                # Si es "No asignado", guardar como NULL
+                if asignado_a == "No asignado":
+                    asignado_a = None
                 
                 if not titulo:
                     messagebox.showerror("Error", "El título es obligatorio.")
@@ -5400,8 +5396,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     conn = connect_db()
                     cur = conn.cursor()
                     cur.execute(
-                        "INSERT INTO tareas (codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por, creado_en, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-                        (codigo_rma, titulo, descripcion, fecha_v, 'Pendiente', self.username, datetime.datetime.now().isoformat())
+                        "INSERT INTO tareas (codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por, creado_en, asignado_a, prioridad, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        (codigo_rma, titulo, descripcion, fecha_v, 'Pendiente', self.username, datetime.datetime.now().isoformat(), asignado_a, prioridad)
                     )
                     conn.commit()
                     
@@ -5410,11 +5406,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     rma_row = cur.fetchone()
                     if rma_row:
                         rma_id = rma_row[0]
+                        asignacion_texto = f" (asignada a {asignado_a})" if asignado_a else ""
                         cur.execute("""
                             INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
                             VALUES (?, ?, ?, ?)
                         """, (rma_id, datetime.datetime.now().isoformat(), self.username,
-                             f"Nueva tarea creada: {titulo}"))
+                             f"Nueva tarea creada: {titulo}{asignacion_texto}"))
                         conn.commit()
                         conn.close()
                     
@@ -5424,8 +5421,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         self.cargar_lista_tareas_rma()
                     if hasattr(self, 'refrescar_historial'):
                         self.refrescar_historial()
-                    # Actualizar badge de tareas
-                    self.actualizar_badge_tareas()
+                    # Actualizar badge de tareas inmediatamente
+                    if hasattr(self, 'badge_tareas'):
+                        self.badge_tareas.actualizar_contador()
                     messagebox.showinfo("Éxito", "✅ Tarea creada correctamente")
                 except sqlite3.Error as e:
                     messagebox.showerror("Error BD", f"No se pudo crear la tarea: {e}")
@@ -5442,7 +5440,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # task is a dict with task fields
                 dlg = ctk.CTkToplevel(self)
                 dlg.title("Editar tarea")
-                dlg.geometry("420x360")
+                dlg.geometry("500x620")
                 dlg.grab_set()
 
                 ctk.CTkLabel(dlg, text=f"ID: {task['id']} - RMA: {task['codigo_rma']}").pack(pady=5)
@@ -5452,7 +5450,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 titulo_entry.pack(padx=10, pady=5, fill='x')
 
                 ctk.CTkLabel(dlg, text="Descripción:").pack(pady=(10,0))
-                desc_text = tk.Text(dlg, height=6)
+                desc_text = tk.Text(dlg, height=5)
                 desc_text.insert('1.0', task['descripcion'] or '')
                 desc_text.pack(padx=10, pady=5, fill='both', expand=True)
 
@@ -5461,20 +5459,53 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 fecha_entry.insert(0, task.get('fecha_vencimiento') or '')
                 fecha_entry.pack(padx=10, pady=5, fill='x')
 
+                ctk.CTkLabel(dlg, text="Estado:").pack(pady=(5,0))
                 estado_var = ctk.StringVar(value=task.get('estado', 'Pendiente'))
                 estado_opt = ctk.CTkOptionMenu(dlg, values=["Pendiente", "En Progreso", "Completado"], variable=estado_var)
-                estado_opt.pack(pady=5)
+                estado_opt.pack(padx=10, pady=5, fill='x')
+                
+                # Campo Asignado a
+                ctk.CTkLabel(dlg, text="Asignar a:").pack(pady=(5,0))
+                usuarios_disponibles = ["No asignado"]
+                try:
+                    conn_temp = connect_db()
+                    cur_temp = conn_temp.cursor()
+                    cur_temp.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+                    usuarios_disponibles.extend([row[0] for row in cur_temp.fetchall()])
+                    conn_temp.close()
+                except:
+                    pass
+                
+                asignado_actual = task.get('asignado_a') or "No asignado"
+                asignado_var = ctk.StringVar(value=asignado_actual)
+                asignado_opt = ctk.CTkOptionMenu(dlg, values=usuarios_disponibles, variable=asignado_var)
+                asignado_opt.pack(padx=10, pady=5, fill='x')
+                
+                # Campo Prioridad
+                ctk.CTkLabel(dlg, text="Prioridad:").pack(pady=(5,0))
+                prioridad_var = ctk.StringVar(value=task.get('prioridad', 'Normal'))
+                prioridad_opt = ctk.CTkOptionMenu(dlg, values=["Alta", "Normal", "Baja"], variable=prioridad_var)
+                prioridad_opt.pack(padx=10, pady=5, fill='x')
 
                 def guardar_edicion():
                     nuevo_titulo = titulo_entry.get().strip()
                     nueva_desc = desc_text.get('1.0', 'end').strip()
                     nueva_fecha = fecha_entry.get().strip() or None
                     nuevo_estado = estado_var.get()
+                    nuevo_asignado = asignado_var.get()
+                    nueva_prioridad = prioridad_var.get()
+                    
+                    # Si es "No asignado", guardar como NULL
+                    if nuevo_asignado == "No asignado":
+                        nuevo_asignado = None
+                    
                     try:
                         conn = connect_db()
                         cur = conn.cursor()
-                        cur.execute("UPDATE tareas SET titulo = ?, descripcion = ?, fecha_vencimiento = ?, estado = ? WHERE id = ?",
-                                    (nuevo_titulo, nueva_desc, nueva_fecha, nuevo_estado, task['id']))
+                        cur.execute("""UPDATE tareas 
+                                    SET titulo = ?, descripcion = ?, fecha_vencimiento = ?, estado = ?, asignado_a = ?, prioridad = ?
+                                    WHERE id = ?""",
+                                    (nuevo_titulo, nueva_desc, nueva_fecha, nuevo_estado, nuevo_asignado, nueva_prioridad, task['id']))
                         conn.commit()
                         # Registrar en historial del RMA
                         try:
@@ -5483,13 +5514,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
                             rma_row = cur.fetchone()
                             if rma_row:
                                 rma_id = rma_row[0]
+                                asignacion_texto = f" (asignada a {nuevo_asignado})" if nuevo_asignado else ""
                                 # Registrar el cambio en el historial
                                 cur.execute("""
                                     INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
                                     VALUES (?, ?, ?, ?)
                                 """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
                                      self.username, 
-                                     f"Tarea ID {task['id']} editada - {task['titulo']} -> {nuevo_titulo} (Estado: {nuevo_estado})")
+                                     f"Tarea ID {task['id']} editada - {task['titulo']} -> {nuevo_titulo} (Estado: {nuevo_estado}){asignacion_texto}")
                                 )
                                 conn.commit()
                         except sqlite3.Error as e:
@@ -5497,8 +5529,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         conn.close()
                         dlg.destroy()
                         self.cargar_lista_tareas_rma()
-                        # Actualizar badge de tareas
-                        self.actualizar_badge_tareas()
+                        # Actualizar badge de tareas inmediatamente
+                        if hasattr(self, 'badge_tareas'):
+                            self.badge_tareas.actualizar_contador()
                         messagebox.showinfo("Éxito", "✅ Tarea actualizada correctamente")
                     except sqlite3.Error as e:
                         messagebox.showerror("Error BD", f"No se pudo actualizar la tarea: {e}")
@@ -12509,8 +12542,15 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
     def mostrar_gestion_tareas(self):
         """Ventana para crear y listar tareas relacionadas con expedientes."""
+        # Si NO es administrador, mostrar el panel de tareas personalizado (mismo que el badge)
+        if self.rol != 'administrador':
+            self.abrir_panel_tareas()
+            return
+        
+        # Solo admin ve la ventana antigua con TODAS las tareas
         # Actualizar badge antes de mostrar la ventana
-        self.actualizar_badge_tareas()
+        if hasattr(self, 'badge_tareas'):
+            self.badge_tareas.actualizar_contador()
         
         # Mostrar solo el listado de tareas y filtros (la creación se hace desde la ficha del expediente)
         ventana = ctk.CTkToplevel(self)
@@ -12519,32 +12559,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         # Configurar para permitir minimización
         ventana.resizable(True, True)
-        ventana.attributes('-topmost', False)
         ventana.minsize(600, 400)
-        # No usar transient ni grab_set para permitir minimización completa
-        try:
-            ventana.focus_set()  # Dar foco sin bloquear
-        except:
-            pass
         
         # Forzar aparición al frente (incluso si la principal está maximizada)
-        ventana.attributes('-topmost', True)   # Temporalmente al frente
+        ventana.attributes('-topmost', True)
         ventana.lift()
-        try:
-            ventana.focus_force()
-        except:
-            pass
-        
-        def quitar_topmost_ventana():
-            try:
-                if ventana.winfo_exists():
-                    ventana.attributes('-topmost', False)
-            except:
-                pass
-        
-        ventana.after(500, quitar_topmost_ventana)
         ventana.focus_force()
-        ventana.after(500, lambda: ventana.attributes('-topmost', False))  # Quitar topmost después de 500ms
+        # Quitar topmost después de 500ms para no ser molesto
+        ventana.after(500, lambda: ventana.attributes('-topmost', False))
 
         frame = ctk.CTkFrame(ventana)
         frame.pack(fill="both", expand=True, padx=15, pady=15)
@@ -12611,6 +12633,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 cur = conn.cursor()
                 estado = filtro_estado.get()
                 creador = filtro_creador.get()
+                
+                logger.debug(f"Filtrando tareas - Estado: {estado}, Creador: {creador}")
 
                 base_sql = "SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas"
                 where_clauses = []
@@ -12629,7 +12653,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     cur.execute(sql, tuple(params))
                 else:
                     cur.execute(base_sql + order_clause)
+                    
                 filas = cur.fetchall()
+                logger.info(f"Admin viendo {len(filas)} tareas en total (filtro: {creador})")
                 conn.close()
 
                 # Encabezados de tabla con estructura en columnas
@@ -12723,8 +12749,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 conn.commit()
                 conn.close()
                 actualizar_lista_tareas()
-                # Actualizar badge de tareas
-                self.actualizar_badge_tareas()
+                # Actualizar badge de tareas inmediatamente
+                if hasattr(self, 'badge_tareas'):
+                    self.badge_tareas.actualizar_contador()
             except sqlite3.Error as e:
                 messagebox.showerror("Error", f"No se pudo actualizar la tarea: {e}")
 
@@ -12742,7 +12769,57 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 messagebox.showerror("Error", f"No se pudo eliminar la tarea: {e}")
 
         filtro_estado.configure(command=lambda v=None: actualizar_lista_tareas())
+        filtro_creador.configure(command=lambda v=None: actualizar_lista_tareas())
         actualizar_lista_tareas()
+
+    def abrir_panel_tareas(self):
+        """Abre el panel moderno de tareas con filtros y visualización mejorada."""
+        logger = get_logger()
+        logger.debug(f"Abriendo panel de tareas para usuario: {self.username}")
+        
+        try:
+            # Crear el panel de tareas
+            panel = PanelTareas(
+                parent=self,
+                connect_db_func=self.conectar_db,
+                username=self.username,
+                abrir_expediente_callback=self.abrir_expediente_desde_panel
+            )
+            
+            # El panel se posiciona automáticamente y maneja su propia visibilidad
+            logger.info(f"Panel de tareas abierto exitosamente para {self.username}")
+            
+        except Exception as e:
+            logger.error(f"Error al abrir panel de tareas: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir el panel de tareas:\n{e}")
+    
+    def abrir_expediente_desde_panel(self, codigo_rma):
+        """Callback para abrir un expediente desde el panel de tareas."""
+        logger = get_logger()
+        logger.debug(f"Abriendo expediente {codigo_rma} desde panel de tareas")
+        
+        try:
+            # Buscar el ID del expediente
+            conn, cursor = self.conectar_db()
+            if not conn:
+                logger.error("No se pudo conectar a la base de datos")
+                return
+            
+            cursor.execute("SELECT id FROM rma_maestro WHERE Codigo_RMA = ?", (codigo_rma,))
+            resultado = cursor.fetchone()
+            conn.close()
+            
+            if resultado:
+                rma_id = resultado[0]
+                logger.info(f"Abriendo expediente {codigo_rma} (ID: {rma_id})")
+                self.mostrar_nuevo_rma(rma_id)
+            else:
+                logger.warning(f"No se encontró expediente con código {codigo_rma}")
+                messagebox.showwarning("No encontrado", f"No se encontró el expediente {codigo_rma}")
+                
+        except Exception as e:
+            logger.error(f"Error al abrir expediente desde panel: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir el expediente:\n{e}")
 
     def mostrar_gestion_rmp(self):
         """Ventana para listar proveedores (rmp_proveedores) y permitir acciones: búsqueda, orden, editar estado y ver expedientes asociados."""
@@ -14210,57 +14287,37 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         start_load_expedientes(1)
 
     def comprobar_tareas_vencidas(self):
-        """Comprueba tareas vencidas para el usuario actual y muestra notificaciones (sistema si es posible)."""
+        """Comprueba tareas vencidas para el usuario actual y muestra notificaciones."""
         try:
-            hoy = datetime.date.today().strftime("%Y-%m-%d")
-            conn = connect_db()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT id, codigo_rma, titulo, fecha_vencimiento 
-                FROM tareas 
-                WHERE creado_por = ? 
-                AND notificado = 0 
-                AND fecha_vencimiento IS NOT NULL 
-                AND fecha_vencimiento <= ?
-                AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
-            """, (self.username, hoy))
-            filas = cur.fetchall()
-            if filas:
-                mensajes = []
-                ids = []
-                for tid, codigo, titulo, fecha in filas:
-                    mensajes.append(f"{fecha} - {titulo} [{codigo}]")
-                    ids.append(tid)
-                texto = "Tienes tareas vencidas o para hoy:\n" + "\n".join(mensajes)
-                # Intentar notificación nativa en Windows
-                try:
-                    if hasattr(self, 'toaster') and self.toaster:
-                        # win10toast limita longitud, mostramos un resumen
-                        resumen = "; ".join(mensajes[:5])
-                        self.toaster.show_toast("Tareas vencidas/hoy", resumen, duration=10, threaded=True)
-                    else:
-                        raise Exception("No toaster")
-                except Exception:
-                    # Fallback a messagebox si no hay toaster
-                    messagebox.showinfo("Tareas vencidas / hoy", texto)
-
-                # Marcar como notificado para no repetir
-                for tid in ids:
-                    cur.execute("UPDATE tareas SET notificado = 1 WHERE id = ?", (tid,))
-                conn.commit()
-            conn.close()
+            # Obtener ruta del icono de la app
+            icono = None
+            try:
+                icono_path = os.path.join(os.path.dirname(__file__), "Icono_Ilutrek.ico")
+                if os.path.exists(icono_path):
+                    icono = icono_path
+            except Exception:
+                pass
+            
+            # Usar el módulo de tareas_notificaciones
+            tareas_notificaciones.comprobar_y_notificar_tareas(
+                connect_db_func=self.conectar_db,
+                usuario=self.username,
+                mostrar_messagebox_func=lambda title, msg: messagebox.showinfo(title, msg),
+                icono=icono,
+                habilitar_sonido=self.user_settings.get("notificaciones_sonoras", True)
+            )
         except Exception as e:
-            print(f"Error comprobando tareas vencidas: {e}")
+            logger.error(f"Error en comprobar_tareas_vencidas: {e}", exc_info=True)
 
-    def programar_chequeo_tareas(self, intervalo_ms=1_800_000):
-        """Programa la comprobación periódica de tareas vencidas (por defecto cada 30 minutos)."""
+    def programar_chequeo_tareas(self, intervalo_ms=3_600_000):
+        """Programa la comprobación periódica de tareas vencidas (por defecto cada 60 minutos)."""
         try:
-            # Llamamos a la comprobación
+            # Llamar a la comprobación
             self.comprobar_tareas_vencidas()
             # Reprogramar
             self.after(intervalo_ms, lambda: self.programar_chequeo_tareas(intervalo_ms))
         except Exception as e:
-            print(f"Error programando chequeo tareas: {e}")
+            logger.error(f"Error programando chequeo tareas: {e}", exc_info=True)
     def mostrar_ventana_estadisticas(self):
         """Crea y muestra la ventana Toplevel y la estructura de navegación interna para estadísticas."""
         
