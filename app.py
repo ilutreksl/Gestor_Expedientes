@@ -1,4 +1,4 @@
-import customtkinter as ctk
+﻿import customtkinter as ctk
 import tkinter.messagebox as messagebox
 from tkinter import Toplevel
 import sqlite3
@@ -12794,29 +12794,23 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             messagebox.showerror("Error", f"No se pudo abrir el panel de tareas:\n{e}")
     
     def abrir_expediente_desde_panel(self, codigo_rma):
-        """Callback para abrir un expediente desde el panel de tareas."""
         logger = get_logger()
         logger.debug(f"Abriendo expediente {codigo_rma} desde panel de tareas")
-        
         try:
-            # Buscar el ID del expediente
             conn, cursor = self.conectar_db()
             if not conn:
                 logger.error("No se pudo conectar a la base de datos")
                 return
-            
             cursor.execute("SELECT id FROM rma_maestro WHERE Codigo_RMA = ?", (codigo_rma,))
             resultado = cursor.fetchone()
             conn.close()
-            
             if resultado:
                 rma_id = resultado[0]
-                logger.info(f"Abriendo expediente {codigo_rma} (ID: {rma_id})")
-                self.mostrar_nuevo_rma(rma_id)
+                logger.info(f"Abriendo expediente en ventana flotante: {codigo_rma}")
+                self._abrir_editor_rma(rma_id=rma_id)
             else:
-                logger.warning(f"No se encontró expediente con código {codigo_rma}")
-                messagebox.showwarning("No encontrado", f"No se encontró el expediente {codigo_rma}")
-                
+                logger.warning(f"No se encontro expediente: {codigo_rma}")
+                messagebox.showwarning("No encontrado", f"No se encontro el expediente {codigo_rma}")
         except Exception as e:
             logger.error(f"Error al abrir expediente desde panel: {e}", exc_info=True)
             messagebox.showerror("Error", f"No se pudo abrir el expediente:\n{e}")
