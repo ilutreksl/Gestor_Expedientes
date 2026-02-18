@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.46"
+APP_VERSION = "v1.0.47"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5275,6 +5275,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
             auth_widget = getattr(self, 'entry_Autorizacion', None)
             if auth_widget is not None:
                 def _on_autorizacion_change(choice=None):
+                    # No ejecutar durante la carga de datos
+                    if getattr(self, '_cargando_datos', False):
+                        return
+                    
                     try:
                         sel = choice if choice is not None else None
                         # CTkOptionMenu may call the function with the selected value
@@ -7316,6 +7320,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
     def cargar_datos_rma(self, rma_id):
         """Carga el RMA maestro y sus detalles en el formulario."""
+        # Bandera para evitar callbacks durante la carga
+        self._cargando_datos = True
+        
         conn, cursor = self.master.conectar_db()
         if not conn: return
         cursor = conn.cursor()
@@ -7600,6 +7607,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.lbl_precio_total.configure(text=f"{precio_total:.2f} €")
             
             # --- SINCRONIZACIÓN: Si hay fecha_autorizacion, marcar Autorización como SI ---
+            # (Esto se hace ANTES de desactivar la bandera para evitar callbacks)
             try:
                 fecha_aut = datos_maestro.get('fecha_autorizacion')
                 if fecha_aut and str(fecha_aut).strip():
@@ -7618,6 +7626,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
         except Exception as e:
             print(f"Error al cargar datos del RMA ID {rma_id}: {e}")
+        finally:
+            # Desactivar bandera de carga SIEMPRE, incluso si hay error
+            self._cargando_datos = False
             conn.close()
             
     def guardar_cambio_historial(self, rma_id, campo, valor_antiguo, valor_nuevo):

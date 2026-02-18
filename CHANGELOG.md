@@ -1,6 +1,7 @@
-Cambio V.1.0.46 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.47 - ✨ Últimas mejoras implementadas:
 
 - Ventana de ajustes de usuario mejorada por pestañas y añadidas nuevas funcionalidades.
+- Corregido bug de guardado  de usuario en menu contextual.
 
 
 Cambio V.1.0.45
