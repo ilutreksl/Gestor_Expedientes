@@ -175,48 +175,61 @@ class ExpedientesQuincenaWindow:
         try:
             # Consulta para obtener expedientes con fecha_para_factura que coincida
             # Si es "Todas", usar LIKE con patrón Q_-MM-YY (Q1 o Q2)
+            # IMPORTANTE: Calcula el total contabilizable excluyendo artículos con contabilizar=0
             if "Q_" in patron_quincena:
                 # Buscar ambas quincenas: reemplazar Q_ por Q% para wildcard
                 patron_sql = patron_quincena.replace("Q_", "Q%")
                 query = """
                     SELECT 
-                        codigo_rma,
-                        cliente,
-                        numero_documento_cliente,
-                        fecha_emision,
-                        fecha_recepcion,
-                        fecha_autorizacion,
-                        fecha_proceso,
-                        fecha_gestion,
-                        precio_total_expediente,
-                        resultado_expediente,
-                        fecha_para_factura
-                    FROM rma_maestro
-                    WHERE fecha_para_factura IS NOT NULL 
-                    AND fecha_para_factura != ''
-                    AND fecha_para_factura != 'Seleccionar...'
-                    AND fecha_para_factura LIKE ?
-                    ORDER BY fecha_para_factura DESC, codigo_rma DESC
+                        m.codigo_rma,
+                        m.cliente,
+                        m.numero_documento_cliente,
+                        m.fecha_emision,
+                        m.fecha_recepcion,
+                        m.fecha_autorizacion,
+                        m.fecha_proceso,
+                        m.fecha_gestion,
+                        m.precio_total_expediente,
+                        COALESCE(
+                            (SELECT SUM(d.precio_final * d.cantidad_entregada)
+                             FROM rma_detalles d
+                             WHERE d.rma_id = m.id AND COALESCE(d.contabilizar, 1) = 1),
+                            0
+                        ) as total_contabilizable,
+                        m.resultado_expediente,
+                        m.fecha_para_factura
+                    FROM rma_maestro m
+                    WHERE m.fecha_para_factura IS NOT NULL 
+                    AND m.fecha_para_factura != ''
+                    AND m.fecha_para_factura != 'Seleccionar...'
+                    AND m.fecha_para_factura LIKE ?
+                    ORDER BY m.fecha_para_factura DESC, m.codigo_rma DESC
                 """
                 cursor.execute(query, (patron_sql,))
             else:
                 # Buscar quincena específica
                 query = """
                     SELECT 
-                        codigo_rma,
-                        cliente,
-                        numero_documento_cliente,
-                        fecha_emision,
-                        fecha_recepcion,
-                        fecha_autorizacion,
-                        fecha_proceso,
-                        fecha_gestion,
-                        precio_total_expediente,
-                        resultado_expediente,
-                        fecha_para_factura
-                    FROM rma_maestro
-                    WHERE fecha_para_factura = ?
-                    ORDER BY codigo_rma DESC
+                        m.codigo_rma,
+                        m.cliente,
+                        m.numero_documento_cliente,
+                        m.fecha_emision,
+                        m.fecha_recepcion,
+                        m.fecha_autorizacion,
+                        m.fecha_proceso,
+                        m.fecha_gestion,
+                        m.precio_total_expediente,
+                        COALESCE(
+                            (SELECT SUM(d.precio_final * d.cantidad_entregada)
+                             FROM rma_detalles d
+                             WHERE d.rma_id = m.id AND COALESCE(d.contabilizar, 1) = 1),
+                            0
+                        ) as total_contabilizable,
+                        m.resultado_expediente,
+                        m.fecha_para_factura
+                    FROM rma_maestro m
+                    WHERE m.fecha_para_factura = ?
+                    ORDER BY m.codigo_rma DESC
                 """
                 cursor.execute(query, (patron_quincena,))
             
@@ -278,15 +291,17 @@ class ExpedientesQuincenaWindow:
         info_frame.pack(fill="x", pady=(0, 10))
         
         total_expedientes = len(self.expedientes_data)
-        total_importe = sum(float(exp[8]) if exp[8] else 0.0 for exp in self.expedientes_data)
+        # Usar total_contabilizable (índice 9) en lugar de precio_total_expediente (índice 8)
+        total_importe = sum(float(exp[9]) if exp[9] else 0.0 for exp in self.expedientes_data)
         
         ctk.CTkLabel(
             info_frame,
-            text=f"📋 Total: {total_expedientes} expedientes | 💰 Importe total: {total_importe:,.2f} €",
+            text=f"📋 Total: {total_expedientes} expedientes | 💰 Importe contabilizable: {total_importe:,.2f} €",
             font=ctk.CTkFont(size=13, weight="bold")
         ).pack(side="left")
         
-        # Cabeceras - estructura: 0=codigo_rma, 1=cliente, 2=num_doc, 3-7=fechas, 8=precio, 9=resultado, 10=quincena
+        # Cabeceras - estructura: 0=codigo_rma, 1=cliente, 2=num_doc, 3-7=fechas, 
+        # 8=precio_total, 9=total_contabilizable, 10=resultado, 11=quincena
         columnas = [
             ("RMA", 0, 120),
             ("Cliente", 1, 200),
@@ -296,9 +311,9 @@ class ExpedientesQuincenaWindow:
             ("F. Autorización", 5, 110),
             ("F. Proceso", 6, 100),
             ("F. Gestión", 7, 100),
-            ("Importe", 8, 100),
-            ("Resultado", 9, 150),
-            ("Quincena", 10, 100)
+            ("Importe", 9, 100),  # Cambio a índice 9 (total_contabilizable)
+            ("Resultado", 10, 150),  # Cambio a índice 10
+            ("Quincena", 11, 100)  # Cambio a índice 11
         ]
         
         header_frame = ctk.CTkFrame(self.tabla_frame)
@@ -327,8 +342,8 @@ class ExpedientesQuincenaWindow:
             for i, (_, col_idx, col_ancho) in enumerate(columnas):
                 valor = exp[col_idx] if exp[col_idx] else "-"
                 
-                # Formatear importe
-                if col_idx == 8 and valor != "-":
+                # Formatear importe (índice 9 = total_contabilizable)
+                if col_idx == 9 and valor != "-":
                     try:
                         valor = f"{float(valor):,.2f} €"
                     except:
@@ -341,7 +356,7 @@ class ExpedientesQuincenaWindow:
                         color = "#10b981"  # Verde si está gestionado
                     else:
                         color = "#f59e0b"  # Naranja si está pendiente
-                elif col_idx == 10:  # Quincena
+                elif col_idx == 11:  # Quincena (ahora en índice 11)
                     color = "#3b82f6"
                 
                 label = ctk.CTkLabel(
@@ -396,11 +411,11 @@ class ExpedientesQuincenaWindow:
             cell.font = Font(bold=True, size=14)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             
-            # Info general
+            # Info general - Usar total_contabilizable (índice 9)
             ws.merge_cells('A2:K2')
-            total_importe = sum(float(exp[8]) if exp[8] else 0.0 for exp in self.expedientes_data)
+            total_importe = sum(float(exp[9]) if exp[9] else 0.0 for exp in self.expedientes_data)
             cell = ws['A2']
-            cell.value = f"Total: {len(self.expedientes_data)} expedientes | Importe total: {total_importe:,.2f} €"
+            cell.value = f"Total: {len(self.expedientes_data)} expedientes | Importe contabilizable: {total_importe:,.2f} € (excluye artículos no contabilizables)"
             cell.alignment = Alignment(horizontal="center")
             
             # Cabeceras
@@ -417,14 +432,17 @@ class ExpedientesQuincenaWindow:
                 cell.alignment = header_align
                 cell.border = border
             
-            # Datos
+            # Datos - Mapeo de índices (excluir precio_total_expediente, usar total_contabilizable)
+            # Columnas Excel: RMA(0), Cliente(1), Doc(2), Fechas(3-7), Importe(9), Resultado(10), Quincena(11)
+            columnas_indices = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]  # Saltar índice 8 (precio_total_expediente)
+            
             for row_idx, exp in enumerate(self.expedientes_data, start=5):
-                for col_idx in range(11):
-                    cell = ws.cell(row=row_idx, column=col_idx + 1)
-                    valor = exp[col_idx] if exp[col_idx] else "-"
+                for excel_col_idx, data_col_idx in enumerate(columnas_indices, start=1):
+                    cell = ws.cell(row=row_idx, column=excel_col_idx)
+                    valor = exp[data_col_idx] if exp[data_col_idx] else "-"
                     
-                    # Formatear importe
-                    if col_idx == 8 and valor != "-":
+                    # Formatear importe (cuando data_col_idx == 9, es el total_contabilizable)
+                    if data_col_idx == 9 and valor != "-":
                         try:
                             cell.value = float(valor)
                             cell.number_format = '#,##0.00 "€"'

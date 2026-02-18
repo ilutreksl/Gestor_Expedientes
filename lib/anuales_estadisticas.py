@@ -82,19 +82,19 @@ def obtener_estadisticas_anuales(conn, año):
         """, (fecha_inicio, fecha_fin))
         stats['cerrados'] = int(cursor.fetchone()[0] or 0)
         
-        # 5. Total euros en expedientes cerrados del año
+        # 5. Total euros en expedientes cerrados del año (solo artículos contabilizables)
         cursor.execute("""
-            SELECT COALESCE(SUM(CAST(precio_total_expediente AS REAL)), 0)
-            FROM rma_maestro 
-            WHERE fecha_emision BETWEEN ? AND ?
-            AND fecha_gestion IS NOT NULL 
-            AND fecha_gestion != ''
-            AND precio_total_expediente IS NOT NULL
-            AND precio_total_expediente != ''
+            SELECT COALESCE(SUM(CAST(d.precio_final * d.cantidad_entregada AS REAL)), 0)
+            FROM rma_detalles d
+            INNER JOIN rma_maestro m ON d.rma_id = m.id
+            WHERE m.fecha_emision BETWEEN ? AND ?
+            AND m.fecha_gestion IS NOT NULL 
+            AND m.fecha_gestion != ''
+            AND COALESCE(d.contabilizar, 1) = 1
         """, (fecha_inicio, fecha_fin))
         stats['total_euros_cerrados'] = float(cursor.fetchone()[0] or 0.0)
         
-        # 6. Total euros en productos en "mal estado"
+        # 6. Total euros en productos en "mal estado" (solo artículos contabilizables)
         placeholders = ','.join('?' * len(ESTADOS_MAL_ESTADO))
         cursor.execute(f"""
             SELECT COALESCE(SUM(CAST(rma_detalles.precio_unitario AS REAL)), 0)
@@ -102,17 +102,19 @@ def obtener_estadisticas_anuales(conn, año):
             INNER JOIN rma_maestro ON rma_detalles.rma_id = rma_maestro.id
             WHERE rma_maestro.fecha_emision BETWEEN ? AND ?
             AND rma_detalles.estado_producto IN ({placeholders})
+            AND COALESCE(rma_detalles.contabilizar, 1) = 1
             AND rma_detalles.precio_unitario IS NOT NULL
             AND rma_detalles.precio_unitario != ''
         """, (fecha_inicio, fecha_fin, *ESTADOS_MAL_ESTADO))
         stats['total_euros_mal_estado'] = float(cursor.fetchone()[0] or 0.0)
         
-        # 7. Producto con más incidencias (referencia más frecuente)
+        # 7. Producto con más incidencias (referencia más frecuente, solo contabilizables)
         cursor.execute("""
             SELECT rma_detalles.referencia_articulo, COUNT(*) as cantidad
             FROM rma_detalles
             INNER JOIN rma_maestro ON rma_detalles.rma_id = rma_maestro.id
             WHERE rma_maestro.fecha_emision BETWEEN ? AND ?
+            AND COALESCE(rma_detalles.contabilizar, 1) = 1
             AND rma_detalles.referencia_articulo IS NOT NULL
             AND rma_detalles.referencia_articulo != ''
             GROUP BY rma_detalles.referencia_articulo

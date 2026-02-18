@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.47"
+APP_VERSION = "v1.0.48"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -572,6 +572,21 @@ def connect_db(timeout: float | None = None):
                                         value = cell.get("value")
                                         if value is None:
                                             value = cell.get("v")  # Otra posible key
+                                        
+                                        # IMPORTANTE: Convertir según el tipo para mantener tipos correctos
+                                        cell_type = cell.get("type", "").lower()
+                                        if value is not None:
+                                            if cell_type == "integer":
+                                                try:
+                                                    value = int(value)
+                                                except (ValueError, TypeError):
+                                                    pass  # Mantener el valor original si falla
+                                            elif cell_type == "real" or cell_type == "float":
+                                                try:
+                                                    value = float(value)
+                                                except (ValueError, TypeError):
+                                                    pass
+                                        
                                         values.append(value)
                                     else:
                                         values.append(cell)
@@ -6011,7 +6026,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "precio_unitario": precio_unitario,
             "precio_final": precio_final,
             "depreciacion": 1 if tiene_depreciacion else 0,
-            "porcentaje_depreciacion": porcentaje_depreciacion
+            "porcentaje_depreciacion": porcentaje_depreciacion,
+            "contabilizar": 1  # Por defecto, todos los artículos nuevos contabilizan
         }
         
         self.articulos_data.append(nuevo_articulo)
@@ -6156,6 +6172,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
             messagebox.showwarning("Error", "La referencia es obligatoria.")
             return
 
+        # Preservar el valor de contabilizar del artículo existente
+        articulo_antiguo = self.articulos_data[idx]
+        contabilizar_actual = articulo_antiguo.get('contabilizar', 1)
+        
         nuevo_articulo = {
             "referencia_articulo": referencia,
             "cantidad_segun_documento": cant_doc,
@@ -6164,7 +6184,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             "precio_unitario": precio_unitario,
             "precio_final": precio_final,
             "depreciacion": 1 if tiene_depreciacion else 0,
-            "porcentaje_depreciacion": porcentaje_depreciacion
+            "porcentaje_depreciacion": porcentaje_depreciacion,
+            "contabilizar": contabilizar_actual  # Preservar estado del checkbox
         }
         # Reemplazar en la lista
         try:
@@ -6207,8 +6228,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return
             
         # Dibujar encabezados y filas usando grid directamente en el contenedor principal
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Precio Final", "Deprec.", "% Deprec.", "Acción", ""]
-        weights = [2, 1, 1, 2, 1, 1, 0, 1, 0, 0]
+        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Precio Final", "Deprec.", "% Deprec.", "✓ Contabiliza", "Acción", ""]
+        weights = [2, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0]
         header_font = ctk.CTkFont(weight="bold", size=12)
 
         # Configurar columnas del contenedor para que se alineen entre filas
@@ -6264,12 +6285,47 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 lbl_porc = ctk.CTkLabel(frames_fila[7], text=porcentaje_text)
                 lbl_porc.pack(anchor="w", padx=5, pady=2)
 
+                # Checkbox de contabilizar (solo editable por Admin y Dpto. Técnico)
+                contabilizar_value = item.get("contabilizar", 1)
+                
+                # Convertir explícitamente a int para evitar problemas con strings
+                # Si viene "0" como string, bool("0") sería True, pero int("0") es 0
+                try:
+                    contabilizar_int = int(contabilizar_value)
+                except (ValueError, TypeError):
+                    contabilizar_int = 1
+                    logger.warning(f"Valor de contabilizar inválido: {contabilizar_value} (tipo: {type(contabilizar_value).__name__}), usando 1")
+                
+                # LOG: Debug del valor convertido
+                logger.debug(f"[RENDER] Artículo {item.get('referencia_articulo')}: contabilizar_value={contabilizar_value} -> int={contabilizar_int} -> bool={bool(contabilizar_int)}")
+                
+                var_contabilizar = ctk.BooleanVar(value=bool(contabilizar_int))
+                
+                # Determinar si el usuario puede modificar
+                puede_modificar = self.rol in ["admin", "administrador", "Dpto. Tecnico"]
+                
+                def _toggle_contabilizar(idx_art=idx, var_chk=var_contabilizar):
+                    # Actualizar el valor en articulos_data
+                    nuevo_valor = 1 if var_chk.get() else 0
+                    self.articulos_data[idx_art]['contabilizar'] = nuevo_valor
+                    logger.info(f"Artículo {self.articulos_data[idx_art]['referencia_articulo']} - Contabilizar: {nuevo_valor} (checkbox: {var_chk.get()})")
+                
+                chk_contabilizar = ctk.CTkCheckBox(
+                    self.articulos_list_frame, 
+                    text="", 
+                    variable=var_contabilizar,
+                    command=_toggle_contabilizar,
+                    width=30,
+                    state="normal" if puede_modificar else "disabled"
+                )
+                chk_contabilizar.grid(row=row, column=8, padx=5, pady=2, sticky="w")
+
                 # Acciones: Eliminar y Editar (sin eventos de selección)
                 ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
-                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=8, padx=5, pady=2, sticky="w")
+                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=9, padx=5, pady=2, sticky="w")
                 try:
                     ctk.CTkButton(self.articulos_list_frame, text="✏️", width=30,
-                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=9, padx=2, pady=2, sticky="w")
+                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=10, padx=2, pady=2, sticky="w")
                 except Exception:
                     pass
                 
@@ -6853,6 +6909,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 columnas_detalle = ', '.join(primer_articulo.keys())
                 placeholders_detalle = ', '.join('?' * len(primer_articulo))
                 
+                # LOG: Debug de valores de contabilizar
+                for i, art in enumerate(self.articulos_data):
+                    logger.debug(f"Guardando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
+                
                 # Preparar lista de valores para executemany
                 valores_batch = []
                 for articulo in self.articulos_data:
@@ -7336,9 +7396,14 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.datos_rma_maestro = datos_maestro
             
             # 2. Cargar RMA Detalles (Artículos)
-            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario, precio_final, depreciacion, porcentaje_depreciacion FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario, precio_final, depreciacion, porcentaje_depreciacion, COALESCE(contabilizar, 1) as contabilizar FROM rma_detalles WHERE rma_id = ?", (rma_id,))
             columnas_detalle = [col[0] for col in cursor.description]
             articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
+            
+            # LOG: Debug de valores cargados desde DB
+            for i, art in enumerate(articulos_db):
+                cont_val = art.get('contabilizar')
+                logger.debug(f"[CARGA DB] Artículo {i}: ref={art.get('referencia_articulo')} contabilizar={cont_val} (tipo: {type(cont_val).__name__})")
             
             # 3. Cargar Número de Orden desde rma_orders
             cursor.execute("SELECT num_order FROM rma_orders WHERE rma_id = ?", (rma_id,))
@@ -7872,6 +7937,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
                     columnas_detalle = ', '.join(primer_articulo.keys())
                     placeholders_detalle = ', '.join('?' * len(primer_articulo))
+
+                    # LOG: Debug de valores de contabilizar en UPDATE
+                    for i, art in enumerate(self.articulos_data):
+                        logger.debug(f"Actualizando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
 
                     # Preparar lista de valores para executemany
                     valores_batch = []

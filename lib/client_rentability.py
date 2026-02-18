@@ -184,10 +184,10 @@ def mostrar_rentabilidad_clientes(app):
             return
 
         where_clause, params = construir_where_and_params()
-        # Subconsulta que calcula el total por expediente a partir de rma_detalles
+        # Subconsulta que calcula el total por expediente a partir de rma_detalles (solo contabilizables)
         sub_calc = (
             "(SELECT rma_id, SUM(COALESCE(cantidad_entregada,0) * COALESCE(precio_final, precio_unitario,0)) as calc_total "
-            "FROM rma_detalles GROUP BY rma_id) AS calc"
+            "FROM rma_detalles WHERE COALESCE(contabilizar, 1) = 1 GROUP BY rma_id) AS calc"
         )
 
         # Seleccionamos por cliente: contamos expedientes y sumamos el valor definitivo,
@@ -314,10 +314,27 @@ def mostrar_rentabilidad_clientes(app):
         # Construimos WHERE similar pero forzando cliente
         where = [where_clause] if where_clause else ["1=1"]
         params_local = list(params)
-        where.append("cliente = ?")
+        where.append("m.cliente = ?")
         params_local.append(cliente_nombre)
 
-        sql = f"SELECT id, codigo_rma, precio_total_expediente, resultado_expediente, fecha_gestion FROM rma_maestro WHERE {' AND '.join(where)} ORDER BY fecha_gestion DESC"
+        # Calcular total contabilizable para cada expediente
+        sql = f"""
+            SELECT 
+                m.id, 
+                m.codigo_rma, 
+                COALESCE(
+                    (SELECT SUM(d.precio_final * d.cantidad_entregada)
+                     FROM rma_detalles d
+                     WHERE d.rma_id = m.id AND COALESCE(d.contabilizar, 1) = 1),
+                    m.precio_total_expediente,
+                    0
+                ) as total_contabilizable,
+                m.resultado_expediente, 
+                m.fecha_gestion 
+            FROM rma_maestro m
+            WHERE {' AND '.join(where)} 
+            ORDER BY m.fecha_gestion DESC
+        """
         
         logger.debug(f"Consultando expedientes de {cliente_nombre}: {sql}")
         logger.debug(f"Parámetros: {params_local}")

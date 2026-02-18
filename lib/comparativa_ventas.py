@@ -228,7 +228,7 @@ class VentanaComparativaVentas(ctk.CTkToplevel):
             # Crear placeholders para la consulta SQL
             placeholders = ','.join(['?' for _ in estados_problematicos])
             
-            # Query para obtener cantidad de incidencias por referencia (solo estados problemáticos)
+            # Query para obtener cantidad de incidencias por referencia (solo estados problemáticos y contabilizables)
             cursor.execute(f"""
                 SELECT 
                     referencia_articulo,
@@ -238,6 +238,7 @@ class VentanaComparativaVentas(ctk.CTkToplevel):
                 WHERE referencia_articulo IS NOT NULL 
                 AND referencia_articulo != ''
                 AND estado_producto IN ({placeholders})
+                AND COALESCE(contabilizar, 1) = 1
                 GROUP BY referencia_articulo
             """, estados_problematicos)
             

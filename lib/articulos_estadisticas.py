@@ -144,7 +144,7 @@ def mostrar_estadisticas_articulos(ventana_principal):
                 m.resultado_expediente
             FROM rma_detalles d
             INNER JOIN rma_maestro m ON d.rma_id = m.id
-            WHERE 1=1
+            WHERE COALESCE(d.contabilizar, 1) = 1
         """
         
         params = []
