@@ -1,6 +1,6 @@
 {
   "global": {
-    "theme": "themes/BH_rime.json",
+    "theme": "themes/w11_blue.json",
     "date_format": "YYYY-MM-DD",
     "show_tooltips": true,
     "compact_mode": true,
@@ -15,7 +15,7 @@
       "show_tooltips": true,
       "compact_mode": true,
       "icon_size": 24,
-      "theme": "themes/BH_rime.json",
+      "theme": "themes/w11_blue.json",
       "appearance_mode": "light",
       "mostrar_aviso": true,
       "tiene_firma": false,
