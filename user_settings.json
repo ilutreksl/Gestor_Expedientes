@@ -79,7 +79,12 @@
       "appearance_mode": "light",
       "tiene_firma": true,
       "mostrar_aviso": true,
-      "notificaciones_sonoras": true
+      "notificaciones_sonoras": true,
+      "notificar_al_iniciar": true,
+      "dias_anticipacion_vencimiento": 7,
+      "dias_notificar_sin_gestionar": 15,
+      "volumen_notificaciones": 70,
+      "modo_debug": false
     }
   }
 }
