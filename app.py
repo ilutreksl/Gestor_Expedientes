@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.45"
+APP_VERSION = "v1.0.46"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1340,10 +1340,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
         ruta_icons = os.path.join(os.path.dirname(__file__), "icons")
         # Mantener referencias para evitar GC (ImageTk objects must be referenced)
         self._icon_refs = {}
+        
+        # Obtener tamaño de iconos desde configuración
+        icon_size = self.user_settings.get("icon_size", 24)
 
         def _ensure_icon_png(fname, shape="rect", fg=(43,108,176,255)):
             """Asegura que exista un PNG válido en icons/fname. Si no existe o está corrupto,
-            genera uno simple de 24x24 y lo guarda en disco.
+            genera uno simple y lo guarda en disco.
             """
             path = os.path.join(ruta_icons, fname)
             try:
@@ -1361,22 +1364,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
             except Exception:
                 pass
 
-            # Generar imagen sencilla
+            # Generar imagen sencilla usando el tamaño configurado
             try:
-                img = Image.new("RGBA", (24, 24), (0, 0, 0, 0))
+                img = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 0))
                 from PIL import ImageDraw
                 draw = ImageDraw.Draw(img)
+                margin = icon_size // 6
                 if shape == "list":
-                    draw.line([4, 7, 20, 7], fill=fg, width=2)
-                    draw.line([4, 12, 20, 12], fill=fg, width=2)
-                    draw.line([4, 17, 20, 17], fill=fg, width=2)
+                    y1, y2, y3 = icon_size // 3, icon_size // 2, (icon_size * 2) // 3
+                    draw.line([margin, y1, icon_size - margin, y1], fill=fg, width=2)
+                    draw.line([margin, y2, icon_size - margin, y2], fill=fg, width=2)
+                    draw.line([margin, y3, icon_size - margin, y3], fill=fg, width=2)
                 elif shape == "dot":
-                    draw.ellipse([6, 6, 18, 18], outline=fg, width=2)
+                    draw.ellipse([margin, margin, icon_size - margin, icon_size - margin], outline=fg, width=2)
                 elif shape == "pencil":
-                    draw.line([6, 17, 17, 6], fill=fg, width=2)
-                    draw.polygon([(17,6),(19,8),(15,10)], fill=fg)
+                    draw.line([margin, icon_size - margin, icon_size - margin, margin], fill=fg, width=2)
+                    tip_size = icon_size // 6
+                    draw.polygon([(icon_size - margin, margin),(icon_size - margin + tip_size, margin + tip_size),(icon_size - margin - tip_size, margin + tip_size)], fill=fg)
                 else:
-                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+                    draw.rectangle([margin, margin, icon_size - margin, icon_size - margin], outline=fg, width=2)
 
                 img.save(path, format="PNG")
                 return True
@@ -1389,13 +1395,13 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 return None
             try:
                 # Prefer CTkImage (works well with customtkinter)
-                img = ctk.CTkImage(light_image=Image.open(path), dark_image=Image.open(path), size=(24, 24))
+                img = ctk.CTkImage(light_image=Image.open(path), dark_image=Image.open(path), size=(icon_size, icon_size))
                 self._icon_refs[fname] = img
                 return img
             except Exception:
                 try:
                     # Fallback to ImageTk.PhotoImage if CTkImage fails
-                    pil = Image.open(path).resize((24, 24), Image.LANCZOS)
+                    pil = Image.open(path).resize((icon_size, icon_size), Image.LANCZOS)
                     tkimg = ImageTk.PhotoImage(pil)
                     self._icon_refs[fname] = tkimg
                     return tkimg
@@ -1403,32 +1409,35 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     return None
 
         def _make_placeholder_icon(key=None, shape="rect", fg="#2b6cb0", bg=None):
-            """Genera un icono simple de 24x24 con PIL y lo convierte a PhotoImage/CTkImage.
+            """Genera un icono simple con PIL y lo convierte a PhotoImage/CTkImage.
             shape: 'rect', 'dot', 'pencil' (simple), 'list'
             """
             try:
-                img = Image.new("RGBA", (24, 24), bg if bg is not None else (0, 0, 0, 0))
+                img = Image.new("RGBA", (icon_size, icon_size), bg if bg is not None else (0, 0, 0, 0))
                 from PIL import ImageDraw
                 draw = ImageDraw.Draw(img)
+                margin = icon_size // 6
                 if shape == "rect":
-                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+                    draw.rectangle([margin, margin, icon_size - margin, icon_size - margin], outline=fg, width=2)
                 elif shape == "dot":
-                    draw.ellipse([6, 6, 18, 18], outline=fg, width=2)
+                    draw.ellipse([margin, margin, icon_size - margin, icon_size - margin], outline=fg, width=2)
                 elif shape == "list":
                     # three horizontal lines
-                    draw.line([5, 7, 19, 7], fill=fg, width=2)
-                    draw.line([5, 12, 19, 12], fill=fg, width=2)
-                    draw.line([5, 17, 19, 17], fill=fg, width=2)
+                    y1, y2, y3 = icon_size // 3, icon_size // 2, (icon_size * 2) // 3
+                    draw.line([margin, y1, icon_size - margin, y1], fill=fg, width=2)
+                    draw.line([margin, y2, icon_size - margin, y2], fill=fg, width=2)
+                    draw.line([margin, y3, icon_size - margin, y3], fill=fg, width=2)
                 elif shape == "pencil":
                     # simple pencil: diagonal line + tip
-                    draw.line([6, 17, 17, 6], fill=fg, width=2)
-                    draw.polygon([(17,6),(19,8),(15,10)], fill=fg)
+                    draw.line([margin, icon_size - margin, icon_size - margin, margin], fill=fg, width=2)
+                    tip_size = icon_size // 6
+                    draw.polygon([(icon_size - margin, margin),(icon_size - margin + tip_size, margin + tip_size),(icon_size - margin - tip_size, margin + tip_size)], fill=fg)
                 else:
-                    draw.rectangle([4, 4, 20, 20], outline=fg, width=2)
+                    draw.rectangle([margin, margin, icon_size - margin, icon_size - margin], outline=fg, width=2)
 
                 # Try CTkImage first
                 try:
-                    ctki = ctk.CTkImage(light_image=img, dark_image=img, size=(24, 24))
+                    ctki = ctk.CTkImage(light_image=img, dark_image=img, size=(icon_size, icon_size))
                     keyname = f"gen-{key or shape}"
                     self._icon_refs[keyname] = ctki
                     return ctki
@@ -2215,436 +2224,14 @@ class VentanaPrincipal(ctk.CTkToplevel):
         return display
 
     def mostrar_ajustes(self):
-        """Abre un diálogo modal para que el usuario modifique sus preferencias."""
+        """Abre la ventana de ajustes del usuario."""
         try:
-            dlg = ctk.CTkToplevel(self)
-            dlg.transient(self)
-            dlg.grab_set()
-            dlg.title("Ajustes")
-            
-            # Agregar icono personalizado
-            try:
-                dlg.iconbitmap("Icono_Ilutrek.ico")
-            except Exception:
-                pass
-
-            frm = ctk.CTkFrame(dlg, fg_color="transparent")
-            frm.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
-            frm.grid_columnconfigure(1, weight=1)
-
-            # Date format
-            ctk.CTkLabel(frm, text="Formato de fecha:").grid(row=0, column=0, sticky="w", padx=6, pady=6)
-            date_values = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"]
-            date_menu = ctk.CTkOptionMenu(frm, values=date_values, width=180)
-            date_menu.set(self.user_settings.get("date_format", "YYYY-MM-DD"))
-            date_menu.grid(row=0, column=1, sticky="e", padx=6, pady=6)
-
-            # Tooltips
-            ctk.CTkLabel(frm, text="Mostrar tooltips:").grid(row=1, column=0, sticky="w", padx=6, pady=6)
-            var_tooltips = tk.BooleanVar(value=self.user_settings.get("show_tooltips", True))
-            switch_tooltips = ctk.CTkSwitch(frm, text="", variable=var_tooltips, width=40)
-            switch_tooltips.grid(row=1, column=1, sticky="w", padx=6, pady=6)
-
-            # Compact mode
-            ctk.CTkLabel(frm, text="Modo compacto:").grid(row=2, column=0, sticky="w", padx=6, pady=6)
-            var_compact = tk.BooleanVar(value=self.user_settings.get("compact_mode", True))
-            switch_compact = ctk.CTkSwitch(frm, text="", variable=var_compact, width=40)
-            switch_compact.grid(row=2, column=1, sticky="w", padx=6, pady=6)
-
-            # Tema de la aplicación
-            ctk.CTkLabel(frm, text="Tema:").grid(row=3, column=0, sticky="w", padx=6, pady=6)
-            temas_disponibles = self.obtener_temas_disponibles()
-            tema_menu = ctk.CTkOptionMenu(frm, values=temas_disponibles, width=250)
-            # Obtener tema actual del usuario
-            tema_actual = self.user_settings.get("theme", "themes/BH_rime.json")
-            tema_display_actual = self.archivo_a_tema_display(tema_actual.replace("themes/", ""))
-            if tema_display_actual in temas_disponibles:
-                tema_menu.set(tema_display_actual)
-            else:
-                tema_menu.set("BH Rime (Predeterminado)")
-            tema_menu.grid(row=3, column=1, sticky="ew", padx=6, pady=6)
-
-            # Modo claro/oscuro (solo para temas que no sean BH_rime)
-            ctk.CTkLabel(frm, text="Modo:").grid(row=4, column=0, sticky="w", padx=6, pady=6)
-            modo_values = ["Claro", "Oscuro"]
-            modo_menu = ctk.CTkOptionMenu(frm, values=modo_values, width=150)
-            modo_actual = self.user_settings.get("appearance_mode", "light")
-            modo_menu.set("Claro" if modo_actual == "light" else "Oscuro")
-            modo_menu.grid(row=4, column=1, sticky="w", padx=6, pady=6)
-
-            # Función para habilitar/deshabilitar el selector de modo según el tema
-            def actualizar_modo_disponible(*args):
-                tema_seleccionado = tema_menu.get()
-                if tema_seleccionado == "BH Rime (Predeterminado)":
-                    # BH_rime solo funciona en modo claro
-                    modo_menu.set("Claro")
-                    modo_menu.configure(state="disabled")
-                else:
-                    modo_menu.configure(state="normal")
-            
-            # Conectar el evento de cambio de tema
-            tema_menu.configure(command=actualizar_modo_disponible)
-            # Aplicar estado inicial
-            actualizar_modo_disponible()
-
-            # Email
-            ctk.CTkLabel(frm, text="Email:").grid(row=5, column=0, sticky="w", padx=6, pady=6)
-            entry_email = ctk.CTkEntry(frm, width=300)
-            # Try to prefill from DB if exists
-            try:
-                conn, cursor = self.master.conectar_db()
-                if conn and cursor:
-                    cursor.execute("PRAGMA table_info('usuarios')")
-                    cols = [r[1] for r in cursor.fetchall()]
-                    if 'email' in cols:
-                        cursor.execute("SELECT email FROM usuarios WHERE nombre_usuario = ?", (self.username,))
-                        row = cursor.fetchone()
-                        if row and row[0]:
-                            entry_email.insert(0, row[0])
-                    # close connection
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            entry_email.grid(row=5, column=1, sticky="ew", padx=6, pady=6)
-
-            # New password
-            ctk.CTkLabel(frm, text="Nueva contraseña:").grid(row=6, column=0, sticky="w", padx=6, pady=6)
-            entry_password = ctk.CTkEntry(frm, width=300, show="*")
-            entry_password.grid(row=6, column=1, sticky="ew", padx=6, pady=6)
-
-            ctk.CTkLabel(frm, text="Confirmar contraseña:").grid(row=7, column=0, sticky="w", padx=6, pady=6)
-            entry_password2 = ctk.CTkEntry(frm, width=300, show="*")
-            entry_password2.grid(row=7, column=1, sticky="ew", padx=6, pady=6)
-
-            # Separador
-            sep1 = ctk.CTkFrame(frm, height=2, fg_color="gray40")
-            sep1.grid(row=8, column=0, columnspan=2, sticky="ew", padx=6, pady=12)
-
-            # --- Sección de Firma ---
-            ctk.CTkLabel(frm, text="Gestión de Firma:", font=("Arial", 12, "bold")).grid(row=9, column=0, columnspan=2, sticky="w", padx=6, pady=(6,3))
-
-            # Checkbox "Tiene Firma?" (solo lectura)
-            var_tiene_firma = tk.BooleanVar(value=self.user_settings.get("tiene_firma", False))
-            switch_firma = ctk.CTkSwitch(frm, text="¿Tiene Firma?", variable=var_tiene_firma, width=40, state="disabled")
-            switch_firma.grid(row=10, column=0, columnspan=2, sticky="w", padx=6, pady=3)
-
-            # Frame para botones de firma
-            firma_btns_frame = ctk.CTkFrame(frm, fg_color="transparent")
-            firma_btns_frame.grid(row=11, column=0, columnspan=2, sticky="ew", padx=6, pady=3)
-
-            def adjuntar_firma():
-                """Permite al usuario adjuntar su firma"""
-                # Mostrar mensaje con requisitos
-                messagebox.showinfo(
-                    "Requisitos de la Firma",
-                    "La firma debe cumplir los siguientes requisitos:\n\n"
-                    "• Formato: Solo archivos .PNG\n"
-                    "• Dimensiones máximas: 810x740 px\n"
-                    "• Tamaño máximo: 2 MB\n"
-                    "• Fondo transparente (recomendado)\n"
-                )
-
-                # Selector de archivo
-                import tkinter.filedialog as filedialog
-                ruta = filedialog.askopenfilename(
-                    title="Seleccionar imagen de firma",
-                    filetypes=[("Imágenes PNG", "*.png")]
-                )
-                
-                if not ruta:
-                    return
-
-                # Validar que es PNG
-                if not ruta.lower().endswith('.png'):
-                    messagebox.showerror("Error", "Solo se aceptan archivos PNG.")
-                    return
-
-                # Validar imagen con PIL
-                try:
-                    from PIL import Image
-                    with Image.open(ruta) as img:
-                        ancho, alto = img.size
-                        
-                        # Validar dimensiones
-                        if ancho < 100 or alto < 50:
-                            messagebox.showwarning(
-                                "Dimensiones pequeñas",
-                                f"La imagen es muy pequeña ({ancho}x{alto} px).\n"
-                                "Se recomienda al menos 300x150 px para mejor calidad."
-                            )
-                        
-                        if ancho > 810 or alto > 740:
-                            messagebox.showerror(
-                                "Dimensiones excedidas",
-                                f"La imagen excede las dimensiones máximas ({ancho}x{alto} px).\n"
-                                "Las dimensiones máximas permitidas son 810x740 px."
-                            )
-                            return
-
-                        # Validar tamaño de archivo
-                        tamanio_mb = os.path.getsize(ruta) / (1024 * 1024)
-                        if tamanio_mb > 2:
-                            messagebox.showerror(
-                                "Archivo muy grande",
-                                f"El archivo pesa {tamanio_mb:.2f} MB.\n"
-                                "El tamaño máximo es 2 MB."
-                            )
-                            return
-
-                except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo leer la imagen:\n{e}")
-                    return
-
-                # Subir a B2
-                try:
-                    exito, resultado = subir_firma_usuario_b2(self.username, ruta, get_b2_client)
-                    
-                    if exito:
-                        # Actualizar settings
-                        self.user_settings["tiene_firma"] = True
-                        save_user_settings(self.user_settings, self.username)
-                        
-                        # Actualizar checkbox
-                        var_tiene_firma.set(True)
-                        
-                        messagebox.showinfo(
-                            "Éxito",
-                            "Su firma ha sido guardada correctamente.\n"
-                            f"Archivo: {resultado}"
-                        )
-                        logger.info(f"Usuario {self.username} adjuntó su firma")
-                    else:
-                        messagebox.showerror("Error", f"No se pudo subir la firma:\n{resultado}")
-                        
-                except Exception as e:
-                    messagebox.showerror("Error", f"Error al procesar la firma:\n{e}")
-
-            def eliminar_firma():
-                """Elimina la firma del usuario"""
-                if not var_tiene_firma.get():
-                    messagebox.showinfo("Información", "No tiene firma registrada.")
-                    return
-
-                # Confirmación
-                respuesta = messagebox.askyesno(
-                    "Confirmar Eliminación",
-                    "¿Está seguro de que desea eliminar su firma?\n\n"
-                    "Esta acción no se puede deshacer."
-                )
-                
-                if not respuesta:
-                    return
-
-                # Eliminar de B2
-                try:
-                    exito = eliminar_firma_usuario_b2(self.username, get_b2_client)
-                    
-                    if exito:
-                        # Actualizar settings
-                        self.user_settings["tiene_firma"] = False
-                        save_user_settings(self.user_settings, self.username)
-                        
-                        # Actualizar checkbox
-                        var_tiene_firma.set(False)
-                        
-                        messagebox.showinfo("Éxito", "Su firma ha sido eliminada correctamente.")
-                        logger.info(f"Usuario {self.username} eliminó su firma")
-                    else:
-                        messagebox.showwarning(
-                            "Advertencia",
-                            "No se pudo eliminar la firma del almacenamiento.\n"
-                            "Es posible que ya no exista."
-                        )
-                        # Actualizar settings de todos modos
-                        self.user_settings["tiene_firma"] = False
-                        save_user_settings(self.user_settings, self.username)
-                        var_tiene_firma.set(False)
-                        
-                except Exception as e:
-                    messagebox.showerror("Error", f"Error al eliminar la firma:\n{e}")
-
-            def cambiar_firma():
-                """Permite cambiar la firma existente"""
-                if not var_tiene_firma.get():
-                    # Si no tiene firma, actuar como adjuntar
-                    adjuntar_firma()
-                    return
-
-                # Mensaje de confirmación
-                respuesta = messagebox.askyesno(
-                    "Cambiar Firma",
-                    "¿Desea reemplazar su firma actual por una nueva?\n\n"
-                    "La firma anterior será eliminada."
-                )
-                
-                if respuesta:
-                    adjuntar_firma()
-
-            # Botones de gestión de firma
-            ctk.CTkButton(
-                firma_btns_frame,
-                text="📎 Adjuntar Firma",
-                command=adjuntar_firma,
-                width=140,
-                height=32
-            ).grid(row=0, column=0, padx=3, pady=3)
-
-            ctk.CTkButton(
-                firma_btns_frame,
-                text="🔄 Cambiar Firma",
-                command=cambiar_firma,
-                width=140,
-                height=32
-            ).grid(row=0, column=1, padx=3, pady=3)
-
-            ctk.CTkButton(
-                firma_btns_frame,
-                text="🗑️ Eliminar Firma",
-                command=eliminar_firma,
-                width=140,
-                height=32,
-                fg_color="darkred",
-                hover_color="red"
-            ).grid(row=0, column=2, padx=3, pady=3)
-
-            # Separador
-            sep2 = ctk.CTkFrame(frm, height=2, fg_color="gray40")
-            sep2.grid(row=12, column=0, columnspan=2, sticky="ew", padx=6, pady=12)
-
-            # --- Sección de Notificaciones ---
-            ctk.CTkLabel(frm, text="Notificaciones:", font=("Arial", 12, "bold")).grid(row=13, column=0, columnspan=2, sticky="w", padx=6, pady=(6,3))
-
-            # Checkbox para notificaciones sonoras
-            var_sonido_notif = tk.BooleanVar(value=self.user_settings.get("notificaciones_sonoras", True))
-            switch_sonido = ctk.CTkSwitch(frm, text="Habilitar sonido en notificaciones de tareas", variable=var_sonido_notif, width=40)
-            switch_sonido.grid(row=14, column=0, columnspan=2, sticky="w", padx=6, pady=3)
-
-            # Buttons
-            btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
-            btn_frame.grid(row=99, column=0, sticky="ew", padx=12, pady=(6,12))
-            btn_frame.grid_columnconfigure(0, weight=1)
-
-            def guardar():
-                # Obtener archivo del tema seleccionado
-                tema_seleccionado = tema_menu.get()
-                archivo_tema = self.tema_display_a_archivo(tema_seleccionado)
-                
-                # Obtener modo seleccionado
-                modo_seleccionado = modo_menu.get()
-                appearance_mode = "light" if modo_seleccionado == "Claro" else "dark"
-                
-                # Guardar valores actuales para comparar
-                tema_anterior = self.user_settings.get("theme", "")
-                modo_anterior = self.user_settings.get("appearance_mode", "")
-                
-                new = {
-                    "date_format": date_menu.get(),
-                    "show_tooltips": bool(var_tooltips.get()),
-                    "compact_mode": bool(var_compact.get()),
-                    "theme": f"themes/{archivo_tema}",
-                    "appearance_mode": appearance_mode,
-                    "notificaciones_sonoras": bool(var_sonido_notif.get())
-                }
-                
-                # Actualizar configuraciones
-                self.user_settings.update(new)
-                ok = save_user_settings(self.user_settings, self.username)
-                
-                # Exponer globalmente y persistir valores en ejecución
-                try:
-                    global USER_SETTINGS
-                    USER_SETTINGS = self.user_settings
-                except Exception:
-                    pass
-                
-                # Mostrar mensaje informativo si se cambió el tema o modo
-                nuevo_tema = new.get("theme", "")
-                nuevo_modo = new.get("appearance_mode", "")
-                
-                if nuevo_tema != tema_anterior or nuevo_modo != modo_anterior:
-                    try:
-                        # Asegurar que el messagebox aparezca en primer plano
-                        dlg.focus_force()
-                        messagebox.showinfo("Ajustes Guardados", 
-                                          "Los cambios de tema y modo se aplicarán al reiniciar la aplicación.",
-                                          parent=dlg)
-                    except Exception:
-                        # Fallback sin parent
-                        try:
-                            messagebox.showinfo("Ajustes Guardados", 
-                                              "Los cambios de tema y modo se aplicarán al reiniciar la aplicación.")
-                        except Exception:
-                            pass
-                
-                # Redibujar listado para aplicar compact mode
-                try:
-                    self.mostrar_lista_rma()
-                except Exception:
-                    pass
-                # Update email/password in DB if provided
-                try:
-                    # Update email column if present (and value provided)
-                    email_val = entry_email.get().strip()
-                    pw = entry_password.get()
-                    pw2 = entry_password2.get()
-                    conn_cursor = self.master.conectar_db()
-                    if conn_cursor:
-                        conn, cursor = conn_cursor
-                        try:
-                            # Ensure email column exists
-                            cursor.execute("PRAGMA table_info('usuarios')")
-                            cols = [r[1] for r in cursor.fetchall()]
-                            if 'email' not in cols:
-                                try:
-                                    cursor.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
-                                except Exception:
-                                    pass
-                            if email_val:
-                                try:
-                                    cursor.execute("UPDATE usuarios SET email = ? WHERE nombre_usuario = ?", (email_val, self.username))
-                                except Exception as e:
-                                    print(f"Error actualizando email: {e}")
-                            # If password fields provided and match, update hash
-                            if pw:
-                                if pw != pw2:
-                                    messagebox.showerror("Error", "Las contraseñas no coinciden.")
-                                else:
-                                    try:
-                                        hashed = bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt())
-                                        cursor.execute("UPDATE usuarios SET password_hash = ? WHERE nombre_usuario = ?", (hashed.decode('utf-8'), self.username))
-                                    except Exception as e:
-                                        print(f"Error actualizando contraseña: {e}")
-                            try:
-                                conn.commit()
-                            except Exception:
-                                pass
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
-                        except Exception as e:
-                            print(f"Error actualizando credenciales en DB: {e}")
-                except Exception:
-                    pass
-                dlg.destroy()
-
-            def cancelar():
-                dlg.destroy()
-            
-            def abrir_ayuda():
-                """Abre el manual de usuario en una ventana nueva."""
-                self.mostrar_manual_usuario()
-
-            ctk.CTkButton(btn_frame, text="Cancelar", command=cancelar).grid(row=0, column=0, padx=6)
-            ctk.CTkButton(btn_frame, text="Ver cambios", command=lambda: mostrar_ventana_cambios(dlg)).grid(row=0, column=1, padx=6)
-            ctk.CTkButton(btn_frame, text="Ayuda", command=abrir_ayuda).grid(row=0, column=2, padx=6)
-            ctk.CTkButton(btn_frame, text="Guardar", command=guardar).grid(row=0, column=3, padx=6)
-
+            from lib.settings_window import SettingsWindow
+            logger.info(f"Abriendo ventana de ajustes para usuario: {self.username}")
+            SettingsWindow(self, self)
         except Exception as e:
-            print(f"Error abriendo diálogo de ajustes: {e}")
+            logger.error(f"Error abriendo ventana de ajustes: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir la ventana de ajustes:\n{e}")
     
     def mostrar_manual_usuario(self):
         """Abre una ventana con el contenido del manual de usuario organizado por secciones."""
@@ -14298,8 +13885,39 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 usuario=self.username,
                 mostrar_messagebox_func=lambda title, msg: messagebox.showinfo(title, msg),
                 icono=icono,
-                habilitar_sonido=self.user_settings.get("notificaciones_sonoras", True)
+                habilitar_sonido=self.user_settings.get("notificaciones_sonoras", True),
+                dias_anticipacion=self.user_settings.get("dias_anticipacion_vencimiento", 7),
+                volumen=self.user_settings.get("volumen_notificaciones", 50)
             )
+            
+            # Chequear expedientes sin gestionar
+            dias_sin_gestionar = self.user_settings.get("dias_notificar_sin_gestionar", 30)
+            if dias_sin_gestionar > 0:
+                expedientes = tareas_notificaciones.obtener_expedientes_sin_gestionar(
+                    connect_db_func=self.conectar_db,
+                    dias_sin_gestionar=dias_sin_gestionar
+                )
+                
+                if expedientes:
+                    mensaje_lines = [f"⚠️ {len(expedientes)} expediente(s) sin gestionar por más de {dias_sin_gestionar} días:"]
+                    for exp in expedientes[:5]:  # Mostrar máximo 5
+                        dias = exp.get('dias_sin_gestionar', '?')
+                        mensaje_lines.append(f"  • {exp['codigo_rma']} - {exp['cliente']} ({dias} días)")
+                    
+                    if len(expedientes) > 5:
+                        mensaje_lines.append(f"  ... y {len(expedientes) - 5} más")
+                    
+                    mensaje_completo = "\n".join(mensaje_lines)
+                    
+                    tareas_notificaciones.enviar_notificacion_nativa(
+                        titulo="📋 Expedientes Pendientes",
+                        mensaje=mensaje_completo,
+                        icono=icono,
+                        timeout=15,
+                        reproducir_sonido=self.user_settings.get("notificaciones_sonoras", True),
+                        volumen=self.user_settings.get("volumen_notificaciones", 50)
+                    )
+                    
         except Exception as e:
             logger.error(f"Error en comprobar_tareas_vencidas: {e}", exc_info=True)
 

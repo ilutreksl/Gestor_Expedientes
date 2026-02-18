@@ -1205,6 +1205,267 @@ Este checkbox es de solo lectura - no puedes marcarlo o desmarcarlo manualmente.
 
 ---
 
+## Ventana de Ajustes y Preferencias
+
+La ventana de ajustes proporciona un control completo sobre la personalización de la aplicación. Se accede haciendo clic en **🎨 Ajustes** en el menú lateral y está organizada en **5 pestañas** para una navegación fácil.
+
+### 📋 Pestaña General
+
+Configuración básica de la interfaz y comportamiento de la aplicación.
+
+#### Formato de Fecha
+- **Descripción**: Selecciona cómo se mostrarán las fechas en toda la aplicación
+- **Opciones disponibles**:
+  - `DD/MM/YYYY` (26/01/2026) - Formato español estándar
+  - `MM/DD/YYYY` (01/26/2026) - Formato estadounidense
+  - `YYYY-MM-DD` (2026-01-26) - Formato ISO internacional
+- **Por defecto**: `DD/MM/YYYY`
+- 💡 **Consejo**: El formato ISO es ideal para ordenación cronológica automática
+
+#### Mostrar Tooltips
+- **Descripción**: Activa o desactiva los mensajes de ayuda que aparecen al pasar el ratón sobre botones y controles
+- **Opciones**: Activado / Desactivado
+- **Por defecto**: Activado
+- 💡 **Consejo**: Si ya conoces bien la aplicación, desactívalos para una interfaz más limpia
+
+#### Modo Compacto
+- **Descripción**: Reduce el espaciado entre elementos para mostrar más información en pantalla
+- **Opciones**: Activado / Desactivado
+- **Por defecto**: Desactivado
+- 💡 **Consejo**: Útil para pantallas pequeñas o si trabajas con muchos expedientes simultáneamente
+
+#### Tamaño de Iconos
+- **Descripción**: Ajusta el tamaño de los iconos en la barra lateral y botones
+- **Rango**: 16px - 32px (deslizador)
+- **Por defecto**: 24px
+- ⚠️ **Nota**: Requiere reiniciar la aplicación para aplicar los cambios
+- 💡 **Consejo**: Iconos más grandes (28-32px) mejoran la visibilidad en pantallas de alta resolución
+
+---
+
+### 🎨 Pestaña Apariencia
+
+Personalización visual de la aplicación.
+
+#### Tema Actual
+- **Descripción**: Selecciona el esquema de colores de la aplicación
+- **Temas disponibles**:
+  - **Rime** - Tema claro profesional (por defecto)
+  - **Midnight** - Tema oscuro elegante
+  - **Autumn** - Tonos cálidos otoñales
+  - **Lavender** - Tonos púrpuras relajantes
+  - **Sky** - Azules cielo
+  - **Cherry** - Rojos vibrantes
+  - **Teal Corporate** - Verde corporativo
+  - **W11 Modern** - Estilo Windows 11
+  - Y más de 15 temas adicionales...
+- ⚠️ **Nota**: El cambio de tema requiere reiniciar la aplicación
+- 💡 **Consejo**: Para trabajo nocturno, elige "Midnight" o "Metal"
+
+#### Modo de Apariencia
+- **Descripción**: Controla el modo claro/oscuro del tema base
+- **Opciones**:
+  - 🌞 **Claro** - Interfaz con fondo brillante
+  - 🌙 **Oscuro** - Interfaz con fondo oscuro
+  - 🔄 **Sistema** - Sigue la configuración del sistema operativo
+- **Por defecto**: Sistema
+- 💡 **Consejo**: El modo "Sistema" se adapta automáticamente al horario (claro de día, oscuro de noche)
+
+#### Restablecer Valores Predeterminados
+- **Descripción**: Restaura todos los ajustes visuales a su configuración original
+- **Botón**: 🔄 Restablecer Valores Predeterminados
+- ⚠️ **Advertencia**: Esta acción no se puede deshacer. Se restaurarán TODOS los ajustes visuales.
+
+---
+
+### 🔔 Pestaña Notificaciones
+
+Control completo del sistema de alertas y recordatorios.
+
+#### Notificaciones Sonoras
+- **Descripción**: Activa o desactiva los sonidos al recibir notificaciones de tareas y expedientes
+- **Opciones**: Activado / Desactivado
+- **Por defecto**: Activado
+- 💡 **Consejo**: Si trabajas en una oficina compartida, considera usar volumen bajo o desactivar
+
+#### Notificar al Inicio
+- **Descripción**: Muestra notificaciones de tareas pendientes al abrir la aplicación
+- **Opciones**: Activado / Desactivado
+- **Por defecto**: Activado
+- 💡 **Consejo**: Útil para no olvidar tareas urgentes al comenzar la jornada
+
+#### Días de Anticipación (Vencimiento)
+- **Descripción**: Con cuántos días de antelación deseas recibir alertas de tareas próximas a vencer
+- **Rango**: 0 - 30 días (deslizador)
+- **Por defecto**: 7 días
+- **Ejemplo**: Con 7 días, recibirás notificaciones de tareas que vencen en los próximos 7 días
+- 💡 **Consejo**: Para tareas críticas, configura 14-30 días. Para tareas rutinarias, 3-5 días es suficiente
+
+#### Días Sin Gestionar
+- **Descripción**: Notifica cuando un expediente lleva muchos días sin actividad (sin fecha de gestión actualizada)
+- **Rango**: 0 - 60 días (deslizador)
+- **Por defecto**: 30 días
+- **Ejemplo**: Con 30 días, recibirás alertas de expedientes que no han sido gestionados en el último mes
+- 💡 **Consejo**: Valores típicos:
+  - **15 días**: Para equipos con respuesta rápida
+  - **30 días**: Balance estándar
+  - **45-60 días**: Para expedientes de larga duración
+- ⚠️ **Nota**: Si configuras 0 días, esta notificación se desactiva
+
+#### Volumen de Notificaciones
+- **Descripción**: Ajusta el volumen del sonido de las notificaciones
+- **Rango**: 0% - 100% (deslizador)
+- **Por defecto**: 50%
+- **Niveles**:
+  - **0%**: Sin sonido (silencioso)
+  - **1-49%**: Sonido suave (tono discreto)
+  - **50-100%**: Sonido normal (tono estándar)
+- ⚠️ **Limitación técnica**: Windows solo permite 2 niveles de sonido, por lo que el cambio es notable en el umbral del 50%
+- 💡 **Consejo**: Para entornos ruidosos, usa 100%. Para oficinas tranquilas, 25-40%
+
+---
+
+### 🔒 Pestaña Seguridad
+
+Gestión de credenciales y firma digital.
+
+#### Email para Notificaciones
+- **Descripción**: Dirección de correo electrónico para recibir alertas del sistema (futuras versiones)
+- **Formato**: usuario@ejemplo.com
+- **Validación**: Se verifica que sea un email válido al guardar
+- ⚠️ **Error común**: "Email inválido" si falta el @ o el dominio
+
+#### Cambiar Contraseña
+- **Botón**: 🔑 Cambiar Contraseña
+- **Proceso**:
+  1. Introduce tu contraseña actual
+  2. Introduce la nueva contraseña (mínimo 4 caracteres)
+  3. Confirma la nueva contraseña
+  4. Si coinciden, la contraseña se actualiza inmediatamente
+- ⚠️ **Importante**: 
+  - La contraseña actual debe ser correcta
+  - Las contraseñas nuevas deben coincidir
+  - Mínimo 4 caracteres (recomendado 8+)
+- 💡 **Seguridad**: Usa combinación de letras, números y símbolos
+
+#### Gestión de Firma Digital
+- **Descripción**: Administra tu firma personal para documentos de autorización
+- **Ver sección completa**: [Gestión de Firma Digital Personal](#gestión-de-firma-digital-personal)
+- **Botones disponibles**:
+  - **📎 Adjuntar Firma**: Sube tu primera firma (PNG, máx 810x740px, 2MB)
+  - **🔄 Cambiar Firma**: Reemplaza tu firma existente
+  - **🗑️ Eliminar Firma**: Borra tu firma del sistema
+- **Indicador**: ✅ ¿Tiene Firma? (solo lectura)
+
+---
+
+### ⚙️ Pestaña Avanzado
+
+Opciones para usuarios avanzados y mantenimiento del sistema.
+
+#### Modo Debug
+- **Descripción**: Activa el registro detallado de todas las operaciones de la aplicación
+- **Opciones**: Activado / Desactivado
+- **Por defecto**: Desactivado
+- **Efecto**: 
+  - **Activado**: Los logs en consola muestran nivel DEBUG (muy detallado)
+  - **Desactivado**: Los logs muestran solo nivel INFO (información importante)
+- 💡 **Cuándo activarlo**:
+  - Al reportar errores al administrador
+  - Para diagnosticar problemas de rendimiento
+  - Durante desarrollo o pruebas
+- ⚠️ **Advertencia**: El modo debug genera MUCHOS mensajes. Úsalo solo cuando sea necesario.
+
+#### Exportar Configuración
+- **Botón**: 📤 Exportar Config
+- **Descripción**: Guarda todos tus ajustes personales en un archivo JSON
+- **Utilidad**:
+  - Hacer backup de tu configuración
+  - Transferir ajustes entre ordenadores
+  - Compartir configuración con compañeros
+- **Proceso**:
+  1. Haz clic en "Exportar Config"
+  2. Selecciona dónde guardar el archivo
+  3. Se crea un archivo `config_backup_USUARIO_FECHA.json`
+- 💡 **Consejo**: Exporta regularmente si has personalizado mucho la aplicación
+
+#### Importar Configuración
+- **Botón**: 📥 Importar Config
+- **Descripción**: Carga ajustes desde un archivo JSON previamente exportado
+- **Proceso**:
+  1. Haz clic en "Importar Config"
+  2. Selecciona el archivo JSON de configuración
+  3. Se valida el archivo
+  4. Si es válido, tus ajustes actuales se reemplazan
+  5. Reinicia la aplicación para aplicar todos los cambios
+- ⚠️ **Advertencia**: Esta acción sobrescribe tu configuración actual
+- 💡 **Consejo**: Exporta tu configuración actual antes de importar otra
+
+#### Limpiar Historial de Búsquedas
+- **Botón**: 🗑️ Limpiar Historial
+- **Descripción**: Elimina todo el historial de búsquedas recientes guardado
+- **Efecto**: El campo de búsqueda ya no sugerirá búsquedas anteriores
+- 💡 **Utilidad**:
+  - Por privacidad (si otros usan tu sesión)
+  - Por orden (si el historial está desorganizado)
+  - Por rendimiento (si hay cientos de búsquedas guardadas)
+
+#### Limpiar Caché de Datos
+- **Botón**: 🗑️ Limpiar Caché
+- **Descripción**: Elimina la caché temporal de consultas a la base de datos
+- **Efecto**: 
+  - La primera carga después será más lenta
+  - Se fuerza la recarga de todos los datos desde el servidor
+  - Resuelve problemas de datos "antiguos" que no se actualizan
+- **Cantidad eliminada**: El sistema informa cuántas entradas se borraron
+- 💡 **Cuándo usarlo**:
+  - Si ves datos que no se actualizan
+  - Después de importar datos masivamente
+  - Si la aplicación se comporta de forma extraña
+- ⚠️ **Nota**: La caché se reconstruye automáticamente al usar la aplicación
+
+---
+
+### 💾 Guardado de Ajustes
+
+#### Indicador de Cambios
+- Cuando modificas cualquier ajuste, el título de la ventana mostrará un **asterisco (*)**: 
+  ```
+  Ajustes de Usuario *
+  ```
+- Esto indica que hay cambios sin guardar
+
+#### Botones de Guardado
+
+**Guardar Cambios** (✅)
+- **Atajo de teclado**: `Ctrl + S`
+- Guarda todos los ajustes modificados en `user_settings.json`
+- Muestra confirmación: "✅ Configuración guardada correctamente"
+- El asterisco (*) desaparece del título
+
+**Cancelar** (❌)
+- **Atajo de teclado**: `Esc`
+- Cierra la ventana SIN guardar cambios
+- Si hay cambios sin guardar, pregunta confirmación:
+  ```
+  ⚠️ Cambios Sin Guardar
+  ¿Desea salir sin guardar los cambios?
+  ```
+
+#### Reinicio Necesario
+
+Algunos ajustes requieren reiniciar la aplicación para aplicarse completamente:
+- 🔄 Cambio de tema
+- 📐 Tamaño de iconos
+- 🎨 Modo de apariencia
+
+El sistema te informará con un mensaje:
+```
+ℹ️ Algunos cambios requieren reiniciar la aplicación
+```
+
+---
+
 ## Documentos de Autorización de Devolución
 
 ### ¿Qué es un Documento de Autorización?

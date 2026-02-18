@@ -1,4 +1,9 @@
-Cambio V.1.0.45 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.46 - ✨ Últimas mejoras implementadas:
+
+- Ventana de ajustes de usuario mejorada por pestañas y añadidas nuevas funcionalidades.
+
+
+Cambio V.1.0.45
 
 - Sistema de Tareas mejorada. Asignacion de tareas y notificaciones sonoras. Se pueden deshabilitar desde los ajustes de cada usuario.
 - Corregido bug al actualizar expediente cuando se generaba autorizacion, abria en ventana principal. (1.0.44)

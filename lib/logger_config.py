@@ -184,4 +184,23 @@ def set_current_user(username):
 def get_logger():
     """Obtiene el logger para usar en módulos"""
     logger_manager = get_app_logger()
-    return logger_manager.get_logger()
+    logger = logger_manager.get_logger()
+    
+    # Ajustar nível según modo_debug del usuario
+    try:
+        import json
+        from pathlib import Path
+        settings_path = Path("user_settings.json")
+        if settings_path.exists():
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                modo_debug = settings.get("modo_debug", False)
+                
+                # Ajustar nivel de los handlers de consola
+                for handler in logger.handlers:
+                    if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                        handler.setLevel(logging.DEBUG if modo_debug else logging.INFO)
+    except Exception:
+        pass  # Si hay error, usar nivel por defecto
+    
+    return logger
