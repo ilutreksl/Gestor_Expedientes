@@ -1,6 +1,7 @@
-Cambio V.1.0.48 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.49 - ✨ Últimas mejoras implementadas:
 
-- Añadido checkbox a la linea de los articulos de la ficha de expedientes, para incluirlo o no en la contabilizacion. Por defecto siempre lo incluye.
+- Añadida nueva estadistica para contabilizar fallos en fabrica, para mantener una trazabilidad de los pedidos. (1.0.49)
+- Añadido checkbox a la linea de los articulos de la ficha de expedientes, para incluirlo o no en la contabilizacion. Por defecto siempre lo incluye. (1.0.48)
 - Ventana de ajustes de usuario mejorada por pestañas y añadidas nuevas funcionalidades. (1.0.46)
 - Corregido bug de guardado  de usuario en menu contextual. (1.0.47)
 

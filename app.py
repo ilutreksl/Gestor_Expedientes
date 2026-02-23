@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.48"
+APP_VERSION = "v1.0.49"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -14061,6 +14061,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             "📅 Expedientes por Quincena": self.mostrar_expedientes_quincena_menu,
             "Rentabilidad por Cliente": self.mostrar_expedientes_completados,
             "Referencia (Incidencia)": self.mostrar_articulos_incidencia,
+            "👤 Incidencias por Persona": self.mostrar_incidencias_personas_menu,
             "⏱️ Tiempos de Tramitación": self.mostrar_estadisticas_tiempos,
             "📦 Artículos - Estadísticas": self.mostrar_estadisticas_articulos_menu,
             "📋 Resolución de Expedientes": self.mostrar_estadisticas_resolucion_menu,
@@ -14115,6 +14116,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             mostrar_rentabilidad_clientes(self)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la estadística de rentabilidad: {e}")
+
+    def mostrar_incidencias_personas_menu(self):
+        """Wrapper que delega la creación de la estadística de incidencias por persona
+        al módulo externo `lib.incidencias_personas`.
+        Restringido a roles: Dpto. Tecnico, Administracion, admin, Contabilidad
+        """
+        # Verificar permisos de rol
+        roles_permitidos = ["admin", "administrador", "Dpto. Tecnico", "Administracion", "Contabilidad"]
+        if self.rol not in roles_permitidos:
+            messagebox.showwarning(
+                "Acceso Denegado",
+                f"No tiene permisos para acceder a esta estadística.\n\nRol actual: {self.rol}\nRoles permitidos: {', '.join(roles_permitidos)}"
+            )
+            return
+        
+        try:
+            from lib.incidencias_personas import mostrar_incidencias_personas
+            mostrar_incidencias_personas(self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la estadística de incidencias: {e}")
 
     def mostrar_articulos_incidencia(self):
         """
