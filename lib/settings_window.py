@@ -1151,8 +1151,16 @@ class SettingsWindow(ctk.CTkToplevel):
             self.user_settings.update(config)
             
             # Guardar a archivo
-            from app import save_user_settings
-            ok = save_user_settings(self.user_settings, self.username)
+            # En instalaciones compartidas puede que el módulo `app` no exista en el path
+            # usamos la instancia de la aplicación si está disponible, evitando import directo.
+            if hasattr(self.app, 'save_user_settings'):
+                ok = self.app.save_user_settings(self.user_settings, self.username)
+            else:
+                try:
+                    from app import save_user_settings
+                    ok = save_user_settings(self.user_settings, self.username)
+                except Exception:
+                    ok = False
             
             if not ok:
                 messagebox.showerror("Error", "No se pudieron guardar los ajustes.", parent=self)
@@ -1161,12 +1169,15 @@ class SettingsWindow(ctk.CTkToplevel):
             # Actualizar aplicación
             self.app.user_settings = self.user_settings.copy()
             
-            # Exponer globalmente
-            try:
-                import app
-                app.USER_SETTINGS = self.user_settings
-            except Exception:
-                pass
+            # Exponer globalmente (puede que no exista el módulo app en copy-exported)
+            if hasattr(self.app, 'USER_SETTINGS'):
+                self.app.USER_SETTINGS = self.user_settings
+            else:
+                try:
+                    import app
+                    app.USER_SETTINGS = self.user_settings
+                except Exception:
+                    pass
             
             # Redibujar listado si cambió compact mode
             try:
