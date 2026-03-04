@@ -1153,16 +1153,60 @@ class SettingsWindow(ctk.CTkToplevel):
             # Guardar a archivo
             # En instalaciones compartidas puede que el módulo `app` no exista en el path
             # usamos la instancia de la aplicación si está disponible, evitando import directo.
+            ok = False
             if hasattr(self.app, 'save_user_settings'):
-                ok = self.app.save_user_settings(self.user_settings, self.username)
+                try:
+                    ok = self.app.save_user_settings(self.user_settings, self.username)
+                except Exception as e:
+                    logger.error(f"Error llamando a self.app.save_user_settings: {e}", exc_info=True)
+                    ok = False
             else:
                 try:
                     from app import save_user_settings
                     ok = save_user_settings(self.user_settings, self.username)
-                except Exception:
+                except Exception as e:
+                    logger.error(f"No se pudo importar save_user_settings desde app: {e}", exc_info=True)
                     ok = False
+                    # Fallback: intentar guardar directamente sin depender de app
+                    try:
+                        from pathlib import Path
+                        import json, os
+                        def local_save(settings: dict, username: str = None) -> bool:
+                            settings_to_save = settings.copy()
+                            settings_to_save.pop("attachments_dir", None)
+                            # compute path same as app._get_user_settings_path()
+                            path = os.path.join(os.getcwd(), "user_settings.json")
+                            try:
+                                root = {}
+                                if os.path.exists(path):
+                                    try:
+                                        with open(path, "r", encoding="utf-8") as fh:
+                                            root = json.load(fh) or {}
+                                    except Exception:
+                                        root = {}
+                                if not isinstance(root, dict):
+                                    root = {}
+                                if "global" not in root or not isinstance(root.get("global"), dict):
+                                    flat_keys = {k: v for k, v in root.items() if k not in ("users", "global")}
+                                    root = {"global": flat_keys, "users": {}}
+                                if username:
+                                    users = root.setdefault("users", {})
+                                    users[username] = settings_to_save
+                                else:
+                                    root["global"] = settings_to_save
+                                with open(path, "w", encoding="utf-8") as fh:
+                                    json.dump(root, fh, indent=2, ensure_ascii=False)
+                                return True
+                            except Exception as ee:
+                                logger.error(f"Error guardando settings (fallback local): {ee}", exc_info=True)
+                                return False
+                        ok = local_save(self.user_settings, self.username)
+                    except Exception as ee:
+                        logger.error(f"Error inicializando fallback de guardado: {ee}", exc_info=True)
+                        ok = False
             
             if not ok:
+                logger.error("save_user_settings devolvió False, imposible guardar ajustes")
                 messagebox.showerror("Error", "No se pudieron guardar los ajustes.", parent=self)
                 return False
             
