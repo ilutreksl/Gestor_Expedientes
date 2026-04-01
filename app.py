@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.49"
+APP_VERSION = "v1.0.50"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5737,7 +5737,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.btn_enviar_email.pack(side="left", padx=(5, 15))
             
             # Botón de generar autorización (solo para roles autorizados)
-            if self.rol in ["administrador", "admin", "Dpto. Tecnico"]:
+            if self.rol in ["administrador", "admin", "Dpto. Tecnico", "Administracion"]:
                 self.btn_autorizacion = ctk.CTkButton(
                     btn_action_frame,
                     text="📋 Autorización",

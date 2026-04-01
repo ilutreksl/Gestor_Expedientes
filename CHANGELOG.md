@@ -1,4 +1,9 @@
-Cambio V.1.0.49 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.50 - ✨ Últimas mejoras implementadas:
+
+- Añadido rol de Administracion para boton de Autorizacion.
+
+
+Cambio V.1.0.49
 
 - Añadida nueva estadistica para contabilizar fallos en fabrica, para mantener una trazabilidad de los pedidos. (1.0.49)
 - Añadido checkbox a la linea de los articulos de la ficha de expedientes, para incluirlo o no en la contabilizacion. Por defecto siempre lo incluye. (1.0.48)
