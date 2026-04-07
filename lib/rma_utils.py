@@ -386,6 +386,12 @@ def cambiar_estado_expediente(conn, rma_id, nuevo_estado, usuario, fecha=None):
         campo_fecha = None
         if nuevo_estado == "Autorizado":
             campo_fecha = "fecha_autorizacion"
+            # También actualizar quién autoriza
+            cursor.execute("""
+                UPDATE rma_maestro 
+                SET fecha_autorizacion = ?, autorizado_por = ?
+                WHERE id = ?
+            """, (fecha, usuario.upper(), rma_id))
         elif nuevo_estado == "Recibido":
             campo_fecha = "fecha_recepcion"
         elif nuevo_estado == "En Proceso":
@@ -393,7 +399,7 @@ def cambiar_estado_expediente(conn, rma_id, nuevo_estado, usuario, fecha=None):
         elif nuevo_estado == "Completado":
             campo_fecha = "fecha_gestion"
         
-        if campo_fecha:
+        if campo_fecha and nuevo_estado != "Autorizado":
             cursor.execute(f"""
                 UPDATE rma_maestro 
                 SET {campo_fecha} = ?
