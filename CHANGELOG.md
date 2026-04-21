@@ -1,4 +1,4 @@
-Cambio V.1.0.51 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.52 - ✨ Últimas mejoras implementadas:
 
 - Ahora al crear un nuevo expediente, se necesita que el cliente este previamente creado. De esta manera se evitaran nombres de clientes errores.
 Se abre una ventana de advertencia y desde esa ventana se puede crear el nuevo cliente.

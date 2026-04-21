@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.51"
+APP_VERSION = "v1.0.52"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6737,7 +6737,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         conn_check.close()
                         
                         if not resultado:
-                            # Cliente no existe - mostrar mensaje con opción de crear
+                            # Cliente no existe - mostrar mensaje de advertencia
                             self._mostrar_dialogo_cliente_no_existe(nombre_cliente)
                             return  # Cancelar el guardado
                 except Exception as e:
@@ -7798,7 +7798,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 resultado = cursor.fetchone()
                 
                 if not resultado:
-                    # Cliente no existe - mostrar mensaje
+                    # Cliente no existe - mostrar mensaje de advertencia
                     conn.close()
                     self._mostrar_dialogo_cliente_no_existe(cliente_nuevo)
                     return
@@ -8950,9 +8950,18 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         ventana.geometry("500x250")
         ventana.resizable(False, False)
         
-        # Centrar ventana
+        # Centrar ventana en la pantalla
+        ventana.update_idletasks()
+        x = (ventana.winfo_screenwidth() // 2) - (500 // 2)
+        y = (ventana.winfo_screenheight() // 2) - (250 // 2)
+        ventana.geometry(f"500x250+{x}+{y}")
+        
+        # Hacer la ventana modal - se muestra por encima de la ventana actual
         ventana.transient(self)
         ventana.grab_set()
+        
+        # Asegurar que la ventana del expediente quede detrás del diálogo
+        self.lift()
         
         # Frame principal
         main_frame = ctk.CTkFrame(ventana)
@@ -8985,14 +8994,13 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
         
         def crear_cliente():
             """Cierra el diálogo y abre el formulario de nuevo cliente."""
+            # Cerrar el diálogo
             ventana.destroy()
-            # Ir a la sección de clientes
-            self.mostrar_clientes()
-            # Abrir el formulario de nuevo cliente
+            # Abrir directamente el formulario de nuevo cliente
             self.nuevo_cliente()
         
         def cancelar():
-            """Cierra el diálogo sin hacer nada."""
+            """Cierra el diálogo."""
             ventana.destroy()
         
         # Botón Crear Nuevo Cliente (recomendado)
