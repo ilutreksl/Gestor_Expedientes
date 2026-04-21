@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.50"
+APP_VERSION = "v1.0.51"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6714,6 +6714,36 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
     def guardar_nuevo_rma(self):
         """Valida los campos y realiza la inserción en rma_maestro y rma_detalles."""
         
+        # 0. Validar que el cliente existe en la base de datos de clientes
+        # Obtener el nombre del cliente primero
+        entry_cliente = getattr(self, 'entry_Cliente', None)
+        if entry_cliente:
+            nombre_cliente = ""
+            try:
+                if hasattr(entry_cliente, 'get'):
+                    nombre_cliente = entry_cliente.get().strip()
+                elif hasattr(entry_cliente, 'cget'):
+                    nombre_cliente = entry_cliente.cget("text").strip()
+            except Exception:
+                nombre_cliente = ""
+            
+            if nombre_cliente:
+                # Verificar si el cliente existe en la tabla clientes
+                try:
+                    conn_check, cursor_check = self.master.conectar_db()
+                    if conn_check:
+                        cursor_check.execute("SELECT cliente_id FROM clientes WHERE nombre = ?", (nombre_cliente,))
+                        resultado = cursor_check.fetchone()
+                        conn_check.close()
+                        
+                        if not resultado:
+                            # Cliente no existe - mostrar mensaje con opción de crear
+                            self._mostrar_dialogo_cliente_no_existe(nombre_cliente)
+                            return  # Cancelar el guardado
+                except Exception as e:
+                    print(f"Error verificando cliente: {e}")
+                    # Si hay error, permitir continuar (no bloquear por error de verificación)
+        
         # 1. Recolección y Validación de campos obligatorios
         datos_maestro = {}
         campos_a_insertar = [
@@ -7757,6 +7787,24 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         if datos_nuevos is None:
             conn.close()
             return
+        
+        # 2.1. Validar que el cliente existe en la base de datos (solo si ha cambiado)
+        cliente_antiguo = datos_antiguos.get('cliente', '')
+        cliente_nuevo = datos_nuevos.get('cliente', '')
+        if str(cliente_antiguo).strip() != str(cliente_nuevo).strip() and cliente_nuevo:
+            # El cliente ha cambiado, verificar que existe
+            try:
+                cursor.execute("SELECT cliente_id FROM clientes WHERE nombre = ?", (cliente_nuevo,))
+                resultado = cursor.fetchone()
+                
+                if not resultado:
+                    # Cliente no existe - mostrar mensaje
+                    conn.close()
+                    self._mostrar_dialogo_cliente_no_existe(cliente_nuevo)
+                    return
+            except Exception as e:
+                print(f"Error verificando cliente: {e}")
+                # Si hay error, permitir continuar
 
         # ⚠️ ADVERTENCIA ADMIN: Cambios en campos críticos
         if self.username.lower() == "admin":
@@ -8882,6 +8930,90 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         except Exception as e:
             logger.error(f"Error descargando autorización: {e}", exc_info=True)
             messagebox.showerror("Error", f"No se pudo descargar el archivo de autorización:\n{e}")
+    
+    def _mostrar_dialogo_cliente_no_existe(self, nombre_cliente):
+        """
+        Muestra un diálogo indicando que el cliente no existe en la base de datos.
+        Ofrece opciones: Cancelar o Crear Nuevo Cliente.
+        
+        Args:
+            nombre_cliente (str): Nombre del cliente que se intentó usar
+        """
+        # Si es admin, permitir crear el cliente sin restricciones
+        if self.username.lower() == "admin":
+            # El admin puede crear el cliente, no mostrar diálogo de restricción
+            return
+        
+        # Crear ventana de diálogo
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Cliente No Registrado")
+        ventana.geometry("500x250")
+        ventana.resizable(False, False)
+        
+        # Centrar ventana
+        ventana.transient(self)
+        ventana.grab_set()
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(ventana)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Icono y título
+        ctk.CTkLabel(
+            main_frame,
+            text="⚠️ Cliente No Encontrado",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="orange"
+        ).pack(pady=(0, 15))
+        
+        # Mensaje
+        mensaje = f"""El cliente '{nombre_cliente}' no existe en la base de datos de clientes.
+
+Para crear un expediente, el cliente debe estar registrado previamente en la sección de Clientes."""
+        
+        ctk.CTkLabel(
+            main_frame,
+            text=mensaje,
+            font=ctk.CTkFont(size=12),
+            justify="left",
+            wraplength=450
+        ).pack(pady=(0, 20))
+        
+        # Botones
+        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        botones_frame.pack(pady=10)
+        
+        def crear_cliente():
+            """Cierra el diálogo y abre el formulario de nuevo cliente."""
+            ventana.destroy()
+            # Ir a la sección de clientes
+            self.mostrar_clientes()
+            # Abrir el formulario de nuevo cliente
+            self.nuevo_cliente()
+        
+        def cancelar():
+            """Cierra el diálogo sin hacer nada."""
+            ventana.destroy()
+        
+        # Botón Crear Nuevo Cliente (recomendado)
+        ctk.CTkButton(
+            botones_frame,
+            text="➕ Crear Nuevo Cliente",
+            command=crear_cliente,
+            width=180,
+            fg_color="#27ae60",
+            hover_color="#229954"
+        ).pack(side="left", padx=10)
+        
+        # Botón Cancelar
+        ctk.CTkButton(
+            botones_frame,
+            text="✗ Cancelar",
+            command=cancelar,
+            width=120,
+            fg_color="#95a5a6",
+            hover_color="#7f8c8d"
+        ).pack(side="left", padx=10)
     
     def confirmar_cambio_estado(self, rma_id, codigo_rma, nuevo_estado):
         """
