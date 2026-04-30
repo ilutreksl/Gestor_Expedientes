@@ -1,7 +1,8 @@
-Cambio V.1.0.52 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.53 - ✨ Últimas mejoras implementadas:
 
 - Ahora al crear un nuevo expediente, se necesita que el cliente este previamente creado. De esta manera se evitaran nombres de clientes errores.
 Se abre una ventana de advertencia y desde esa ventana se puede crear el nuevo cliente.
+- En la ficha de cliente, se puede desactivar. Si esta desactivado, no se puede crear un expediente hasta que vuelva a estar activo.
 
 
 Cambio V.1.0.50

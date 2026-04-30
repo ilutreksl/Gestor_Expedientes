@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.52"
+APP_VERSION = "v1.0.53"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -6732,13 +6732,22 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 try:
                     conn_check, cursor_check = self.master.conectar_db()
                     if conn_check:
-                        cursor_check.execute("SELECT cliente_id FROM clientes WHERE nombre = ?", (nombre_cliente,))
+                        cursor_check.execute("SELECT cliente_id, activo FROM clientes WHERE nombre = ?", (nombre_cliente,))
                         resultado = cursor_check.fetchone()
                         conn_check.close()
                         
                         if not resultado:
                             # Cliente no existe - mostrar mensaje de advertencia
                             self._mostrar_dialogo_cliente_no_existe(nombre_cliente)
+                            return  # Cancelar el guardado
+                        elif resultado and resultado[1] == 0:
+                            # Cliente existe pero está inactivo
+                            messagebox.showerror(
+                                "Cliente Inactivo",
+                                f"El cliente '{nombre_cliente}' está inactivo y no puede ser usado para nuevos expedientes.\n\n"
+                                "Por favor, contacte con el administrador para reactivarlo.",
+                                icon="warning"
+                            )
                             return  # Cancelar el guardado
                 except Exception as e:
                     print(f"Error verificando cliente: {e}")
@@ -10966,7 +10975,7 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
         # Crear ventana de menú
         menu_window = ctk.CTkToplevel(self)
         menu_window.title("Menú de Administración")
-        menu_window.geometry("300x600")
+        menu_window.geometry("650x550")
         menu_window.resizable(False, False)
         
         # Centrar la ventana
@@ -10978,83 +10987,46 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                              font=ctk.CTkFont(size=16, weight="bold"))
         titulo.pack(pady=20)
         
-        # Frame para botones
+        # Frame para botones con grid
         buttons_frame = ctk.CTkFrame(menu_window)
         buttons_frame.pack(pady=10, padx=20, fill="both", expand=True)
         
-        # Botón Eliminar RMA
-        btn_eliminar = ctk.CTkButton(buttons_frame,
-                                    text="🗑️ Eliminar RMA",
-                                    width=240,
-                                    height=40,
-                                    fg_color="#dc3545",
-                                    hover_color="#c82333",
-                                    command=lambda: [menu_window.destroy(), self.mostrar_eliminar_rma()])
-        btn_eliminar.pack(pady=10)
+        # Configurar columnas del grid (2 columnas)
+        buttons_frame.columnconfigure(0, weight=1)
+        buttons_frame.columnconfigure(1, weight=1)
         
-        # Botón Generar Número Manual
-        btn_numero_manual = ctk.CTkButton(buttons_frame,
-                                         text="🔢 Generar Número Manual",
-                                         width=240,
-                                         height=40,
-                                         command=lambda: [menu_window.destroy(), self.mostrar_generar_numero_manual()])
-        btn_numero_manual.pack(pady=10)
+        # Lista de botones para distribuir en 2 columnas
+        botones = [
+            ("🗑️ Eliminar RMA", "#dc3545", "#c82333", lambda: [menu_window.destroy(), self.mostrar_eliminar_rma()]),
+            ("🔢 Generar Número Manual", None, None, lambda: [menu_window.destroy(), self.mostrar_generar_numero_manual()]),
+            ("📢 Administrar Avisos", None, None, lambda: [menu_window.destroy(), self.mostrar_admin_avisos()]),
+            ("📋 Gestionar Estados Artículos", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_estados()]),
+            ("👥 Gestionar Personas", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas()]),
+            ("👤 Gestionar Personas Recepción", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()]),
+            ("📊 Gestionar Resultado Expediente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()]),
+            ("🏢 Gestionar Tipos de Cliente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()]),
+        ]
         
-        # Botón Administrar Avisos
-        btn_avisos = ctk.CTkButton(buttons_frame,
-                                  text="📢 Administrar Avisos",
-                                  width=240,
-                                  height=40,
-                                  command=lambda: [menu_window.destroy(), self.mostrar_admin_avisos()])
-        btn_avisos.pack(pady=10)
+        # Crear botones en 2 columnas
+        for idx, (texto, fg_color, hover_color, comando) in enumerate(botones):
+            fila = idx // 2
+            columna = idx % 2
+            btn = ctk.CTkButton(buttons_frame,
+                               text=texto,
+                               width=280,
+                               height=45,
+                               fg_color=fg_color,
+                               hover_color=hover_color,
+                               command=comando)
+            btn.grid(row=fila, column=columna, padx=10, pady=8, sticky="ew")
         
-        # Botón Gestionar Estados de Artículos
-        btn_estados = ctk.CTkButton(buttons_frame,
-                                    text="📋 Gestionar Estados Artículos",
-                                    width=240,
-                                    height=40,
-                                    command=lambda: [menu_window.destroy(), self.mostrar_gestor_estados()])
-        btn_estados.pack(pady=10)
-        
-        # Botón Gestionar Personas
-        btn_personas = ctk.CTkButton(buttons_frame,
-                                     text="👥 Gestionar Personas",
-                                     width=240,
-                                     height=40,
-                                     command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas()])
-        btn_personas.pack(pady=10)
-        
-        # Botón Gestionar Personas Recepción
-        btn_personas_recepcion = ctk.CTkButton(buttons_frame,
-                                               text="👤 Gestionar Personas Recepción",
-                                               width=240,
-                                               height=40,
-                                               command=lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()])
-        btn_personas_recepcion.pack(pady=10)
-        
-        # Botón Gestionar Resultado Expediente
-        btn_resultado = ctk.CTkButton(buttons_frame,
-                                      text="📊 Gestionar Resultado Expediente",
-                                      width=240,
-                                      height=40,
-                                      command=lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()])
-        btn_resultado.pack(pady=10)
-        
-        # Botón Gestionar Tipos de Cliente
-        btn_tipos_cliente = ctk.CTkButton(buttons_frame,
-                                          text="🏢 Gestionar Tipos de Cliente",
-                                          width=240,
-                                          height=40,
-                                          command=lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()])
-        btn_tipos_cliente.pack(pady=10)
-        
-        # Botón Cerrar
+        # Botón Cerrar (ocupa ambas columnas)
         btn_cerrar = ctk.CTkButton(buttons_frame,
                                   text="❌ Cerrar",
-                                  width=240,
-                                  height=32,
+                                  width=280,
+                                  height=35,
                                   command=menu_window.destroy)
-        btn_cerrar.pack(pady=(20, 10))
+        btn_cerrar.grid(row=(len(botones) // 2) + 1, column=0, columnspan=2, padx=10, pady=(20, 10))
     
     def mostrar_admin_avisos(self):
         """Muestra el panel de administración de avisos (solo para admin)."""
@@ -17617,6 +17589,71 @@ Versión de la App: {APP_VERSION}
                                  width=140)
         btn_guardar.pack(side="left", padx=(0,10))
         
+        # Botón Desactivar (visible para todos los usuarios)
+        if cliente[7] == 0:  # cliente[7] es el campo activo
+            # Cliente ya inactivo - mostrar indicador
+            ctk.CTkLabel(botones_frame, text="⚠️ INACTIVO", 
+                        text_color="red", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(10, 5))
+        else:
+            # Cliente activo - mostrar botón de desactivar
+            def desactivar_cliente_confirmado():
+                respuesta = messagebox.askyesno(
+                    "⚠️ Confirmar Desactivación",
+                    f"¿Está seguro de que desea desactivar el cliente '{cliente[1]}'?\n\n"
+                    "El cliente quedará inactivo y no podrá ser usado para nuevos expedientes.\n"
+                    "Podrá reactivarlo más adelante desde el panel de administración.",
+                    icon="warning"
+                )
+                if respuesta:
+                    if self.eliminar_cliente(cliente_id):
+                        messagebox.showinfo("Éxito", f"Cliente '{cliente[1]}' desactivado correctamente")
+                        ventana.destroy()
+                    else:
+                        messagebox.showerror("Error", "No se pudo desactivar el cliente")
+            
+            btn_desactivar = ctk.CTkButton(botones_frame, text="🚫 Desactivar", 
+                                           command=desactivar_cliente_confirmado,
+                                           width=120,
+                                           fg_color="#6c757d",
+                                           hover_color="#5a6268")
+            btn_desactivar.pack(side="left", padx=(0,10))
+        
+        # Botón Eliminar Permanentemente (solo para admin)
+        if str(self.rol).strip().lower() in ("admin", "administrador"):
+            def eliminar_cliente_permanente():
+                respuesta = messagebox.askyesno(
+                    "⚠️ ELIMINAR PERMANENTEMENTE",
+                    f"¿Está seguro de que desea ELIMINAR PERMANENTEMENTE el cliente '{cliente[1]}'?\n\n"
+                    "⚠️ Esta acción es IRREVERSIBLE y eliminará todos los datos del cliente de la base de datos.\n\n"
+                    "Se eliminarán:\n"
+                    "- Datos del cliente\n"
+                    "- Contactos asociados\n"
+                    "- Condiciones comerciales\n\n"
+                    "Los expedientes RMAs asociados no se eliminarán pero perderán la referencia al cliente.",
+                    icon="error"
+                )
+                if respuesta:
+                    # Segunda confirmación
+                    respuesta2 = messagebox.askyesno(
+                        "⚠️ Confirmación Final",
+                        f"¿Está COMPLETAMENTE seguro?\n\n"
+                        "El cliente '{cliente[1]}' será eliminado DEFINITIVAMENTE.",
+                        icon="error"
+                    )
+                    if respuesta2:
+                        if self.eliminar_cliente_permanente(cliente_id):
+                            messagebox.showinfo("Éxito", f"Cliente '{cliente[1]}' eliminado permanentemente")
+                            ventana.destroy()
+                        else:
+                            messagebox.showerror("Error", "No se pudo eliminar el cliente")
+            
+            btn_eliminar = ctk.CTkButton(botones_frame, text="🗑️ Eliminar", 
+                                       command=eliminar_cliente_permanente,
+                                       width=120,
+                                       fg_color="#dc3545",
+                                       hover_color="#c82333")
+            btn_eliminar.pack(side="left", padx=(0,10))
+        
         btn_cerrar = ctk.CTkButton(botones_frame, text="❌ Cerrar", 
                                  command=ventana.destroy,
                                  width=100)
@@ -20082,6 +20119,37 @@ Versión de la App: {APP_VERSION}
             
         except Exception as e:
             print(f"Error eliminando cliente: {e}")
+            return False
+    
+    def eliminar_cliente_permanente(self, cliente_id):
+        """Elimina permanentemente un cliente de la base de datos."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn: 
+                return False
+            
+            # Primero eliminar contactos asociados
+            cursor.execute("DELETE FROM contactos_cliente WHERE cliente_id = ?", (cliente_id,))
+            
+            # Eliminar condiciones comerciales
+            cursor.execute("DELETE FROM condiciones_comerciales WHERE cliente_id = ?", (cliente_id,))
+            
+            # Actualizar RMAs asociados para quitar referencia al cliente
+            cursor.execute("""
+                UPDATE rma_maestro 
+                SET cliente_id = NULL 
+                WHERE cliente_id = ?
+            """, (cliente_id,))
+            
+            # Finalmente eliminar el cliente
+            cursor.execute("DELETE FROM clientes WHERE cliente_id = ?", (cliente_id,))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            print(f"Error eliminando cliente permanentemente: {e}")
             return False
     
     def obtener_contactos_cliente(self, cliente_id):
