@@ -8356,7 +8356,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 return False
         
         # Verificar permisos
-        if self.rol not in ["administrador", "admin", "Dpto. Tecnico"]:
+        if self.rol not in ["administrador", "admin", "Dpto. Tecnico", "Administracion"]:
             messagebox.showwarning(
                 "Permiso Denegado",
                 "No tiene permisos para generar autorizaciones."
