@@ -1,4 +1,8 @@
-Cambio V.1.0.54 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.55 - ✨ Últimas mejoras implementadas:
+
+- Añadido editor de texto al campo Observacion tecnicas de la fichas de los expedientes.
+
+Cambio V.1.0.54
 
 - Nuevo boton cuando se cierra un expediente, para poder reabrir el expediente cerrado. Se debe de indicar el motivo de la reapertura del expediente. La informacion se guarda en el historial los cambios y el motivo.
 

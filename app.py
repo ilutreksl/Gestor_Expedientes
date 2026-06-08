@@ -38,6 +38,7 @@ from lib import github_issue_manager
 from lib import rma_asociaciones
 from lib import tareas_notificaciones
 from lib.tareas_panel import TareasBadge, PanelTareas
+from lib.rich_text_editor import RichTextEditor
 
 # Sistema de logging
 from lib.logger_config import setup_logging, set_current_user, get_logger
@@ -327,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.54"
+APP_VERSION = "v1.0.55"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5476,10 +5477,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
         self.crear_campo(info_tecnica_frame, 3, "Ref. Proveedor:", "Ref_Proveedor")
         # Fila 4: Número de Orden/Partida
         self.crear_campo(info_tecnica_frame, 4, "Nº ORDER:", "Num_Order")
-        # Fila 5: Observaciones Técnicas (caja de texto mayor)
-        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(row=5, column=0, padx=10, pady=5, sticky="w")
-        self.entry_Obs_Tecnica = ctk.CTkTextbox(info_tecnica_frame, height=120, wrap="word")
-        self.entry_Obs_Tecnica.grid(row=5, column=1, padx=10, pady=5, sticky="ew")
+        # Fila 5: Observaciones Técnicas — Editor enriquecido
+        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(
+            row=5, column=0, padx=10, pady=5, sticky="nw"
+        )
+        info_tecnica_frame.grid_rowconfigure(5, weight=1)
+
+        obs_container = tk.Frame(info_tecnica_frame)
+        obs_container.grid(row=5, column=1, padx=10, pady=5, sticky="nsew")
+
+        self.entry_Obs_Tecnica = RichTextEditor(
+            obs_container,
+            get_adjuntos_fn       = self._get_adjuntos_imagenes,
+            get_b2_client_fn      = get_b2_client,
+            b2_root_folder        = B2_ROOT_FOLDER,
+            normalizar_ruta_b2_fn = normalizar_ruta_b2,
+            usar_b2_fn            = usar_b2,
+            height                = 16,
+        )
+        self.entry_Obs_Tecnica.pack(fill="both", expand=True)
 
         # Botón para generar la Solicitud de RMA desde la plantilla PDF
         ctk.CTkButton(
@@ -7097,6 +7113,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             pass
 
         # 3. Inserción en la Base de Datos
+        # ── Editor enriquecido: sobreescribir obs_tecnica con JSON completo ──
+        if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
+            datos_maestro['obs_tecnica'] = self.entry_Obs_Tecnica.get_content()
+
         conn, cursor = self.master.conectar_db()
         if not conn: return
         cursor = conn.cursor()
@@ -7307,6 +7327,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
         
+        # ── Editor enriquecido: sobreescribir obs_tecnica con JSON completo ──
+        if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
+            datos_maestro['obs_tecnica'] = self.entry_Obs_Tecnica.get_content()
+
         # Num_Order se maneja por separado ya que está en la tabla rma_orders
         if hasattr(self, 'entry_Num_Order'):
             try:
@@ -7368,6 +7392,19 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 return
             
             codigo_bd, modelo, n_serie, obs_tecnica = datos_rma
+            
+            # ── Si obs_tecnica es JSON del editor enriquecido, extraer texto plano ──
+            if obs_tecnica and '"version"' in str(obs_tecnica):
+                try:
+                    import json as _json
+                    _data = _json.loads(obs_tecnica)
+                    obs_tecnica = " ".join(
+                        seg.get("content", "")
+                        for seg in _data.get("segments", [])
+                        if seg.get("type") == "text"
+                    ).strip()
+                except Exception:
+                    pass  # Si falla el parse, usar el valor tal cual
             
             # Debug: Mostrar datos obtenidos de Turso
             print(f"DEBUG PDF - Datos desde TURSO para {codigo_bd}:")
@@ -7886,6 +7923,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         except Exception:
                             # algunos widgets CTkTextbox pueden tener métodos distintos; ignorar si falla
                             pass
+                    # Tratamiento para RichTextEditor (editor enriquecido de Obs_Tecnica)
+                    elif hasattr(entry, 'set_content'):
+                        entry.set_content(valor or "")
             
             # --- NUEVO: Actualizar la etiqueta del total ---
             precio_total = datos_maestro.get('precio_total_expediente', 0.0) # Obtener el valor
@@ -10176,6 +10216,41 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                     os.remove(ruta_completa)
             except:
                 pass  # No importa si falla la limpieza
+    def _get_adjuntos_imagenes(self):
+        """
+        Devuelve lista de adjuntos de imagen del expediente actual.
+        Usada por el RichTextEditor para poblar el selector 'Desde adjuntos'.
+        Incluye tipo_almacenamiento para que el editor sepa si descargar desde B2 o local.
+        """
+        if not getattr(self, 'current_rma_id', None):
+            return []
+
+        ext_img = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
+
+        try:
+            conn, cursor = self.master.conectar_db()
+            cursor.execute(
+                "SELECT nombre_archivo, ruta_relativa, tipo_almacenamiento "
+                "FROM rma_adjuntos WHERE rma_id = ?",
+                (self.current_rma_id,)
+            )
+            filas = cursor.fetchall()
+            conn.close()
+        except Exception:
+            return []
+
+        resultado = []
+        for nombre, ruta_rel, tipo_alm in filas:
+            if os.path.splitext(nombre)[1].lower() not in ext_img:
+                continue
+            resultado.append({
+                'nombre':              nombre,
+                'ruta_relativa':       ruta_rel,
+                'tipo_almacenamiento': tipo_alm or 'local',
+                'adjuntos_root':       ADJUNTOS_ROOT_DIR,
+            })
+        return resultado
+
     def cargar_lista_adjuntos(self, rma_id):
         """Consulta y muestra el listado de adjuntos para un RMA específico."""
         

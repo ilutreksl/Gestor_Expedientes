@@ -1,0 +1,766 @@
+"""
+lib/rich_text_editor.py
+Editor de texto enriquecido para el campo Observaciones Técnicas.
+Soporta: negrita, cursiva, subrayado, tamaño de fuente, color de fuente,
+inserción de imágenes (desde archivo y desde adjuntos Backblaze B2).
+
+Almacenamiento: JSON serializado en el campo obs_tecnica de rma_maestro.
+Compatibilidad hacia atrás: texto plano existente se carga sin formato.
+"""
+
+import tkinter as tk
+from tkinter import colorchooser, filedialog, messagebox
+import customtkinter as ctk
+import json
+import base64
+import io
+import os
+import tempfile
+import threading
+
+try:
+    from PIL import Image, ImageTk
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+
+# ── Constantes ────────────────────────────────────────────────────────────────
+FONT_SIZES       = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36]
+DEFAULT_SIZE     = 11
+MAX_IMAGE_WIDTH  = 800
+MAX_IMAGE_HEIGHT = 600
+THUMBNAIL_SIZE   = (130, 100)
+JSON_MARKER      = '"version"'
+
+
+class RichTextEditor(tk.Frame):
+    """
+    Widget editor de texto enriquecido embebible en CustomTkinter.
+
+    Uso:
+        editor = RichTextEditor(
+            parent,
+            get_adjuntos_fn=self._get_adjuntos_imagenes,   # opcional
+            get_b2_client_fn=get_b2_client,                 # opcional
+            b2_root_folder=B2_ROOT_FOLDER,                  # opcional
+            normalizar_ruta_b2_fn=normalizar_ruta_b2,       # opcional
+        )
+        editor.pack(fill="both", expand=True)
+
+        json_str = editor.get_content()      # para guardar en BD
+        plain    = editor.get_plain_text()   # para PDF/búsqueda
+        editor.set_content(raw)              # cargar (JSON o texto plano)
+    """
+
+    def __init__(self, parent,
+                 get_adjuntos_fn=None,
+                 get_b2_client_fn=None,
+                 b2_root_folder=None,
+                 normalizar_ruta_b2_fn=None,
+                 usar_b2_fn=None,
+                 **kwargs):
+        height = kwargs.pop("height", 16)
+        super().__init__(parent, **kwargs)
+
+        self._get_adjuntos_fn      = get_adjuntos_fn
+        self._get_b2_client_fn     = get_b2_client_fn
+        self._b2_root_folder       = b2_root_folder
+        self._normalizar_ruta_b2   = normalizar_ruta_b2_fn
+        self._usar_b2_fn           = usar_b2_fn
+
+        self._image_refs  = []   # PhotoImage vivos
+        self._image_data  = {}   # {img_id: {b64, width, height}}
+        self._temp_files  = []   # temporales B2 a limpiar al destruir
+        self._current_color = "#000000"
+        self._current_size  = DEFAULT_SIZE
+
+        self._build_toolbar()
+        self._build_text_area(height)
+        self._configure_tags()
+        self.bind("<Destroy>", self._cleanup_temps)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Tema
+    # ──────────────────────────────────────────────────────────────────────────
+    def _theme(self):
+        try:
+            dark = ctk.get_appearance_mode() == "Dark"
+        except Exception:
+            dark = False
+        if dark:
+            return dict(tb="#2b2b2b", btn="#3d3d3d", fg="#ffffff",
+                        act="#4d4d4d", txt_bg="#1a1a1a", txt_fg="#ffffff",
+                        sel="#4a4a8a", ins="#ffffff")
+        return dict(tb="#e0e0e0", btn="#d0d0d0", fg="#1a1a1a",
+                    act="#c0c0c0", txt_bg="#ffffff", txt_fg="#1a1a1a",
+                    sel="#aaccff", ins="#000000")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Construcción UI
+    # ──────────────────────────────────────────────────────────────────────────
+    def _build_toolbar(self):
+        t = self._theme()
+        toolbar = tk.Frame(self, bg=t["tb"], pady=3)
+        toolbar.pack(fill="x", side="top")
+
+        base = dict(bg=t["btn"], fg=t["fg"], activebackground=t["act"],
+                    activeforeground=t["fg"], relief="flat", bd=0,
+                    padx=6, pady=2, cursor="hand2",
+                    font=("Segoe UI", 9))
+
+        def btn(parent, text, cmd, **extra):
+            kw = {**base, **extra}
+            b = tk.Button(parent, text=text, command=cmd, **kw)
+            b.pack(side="left", padx=2)
+            return b
+
+        def sep():
+            tk.Frame(toolbar, width=1, bg="#888").pack(
+                side="left", fill="y", padx=4, pady=2)
+
+        # Formato de texto
+        btn(toolbar, "N", self._toggle_bold,
+            font=("Segoe UI", 9, "bold"))
+        btn(toolbar, "I", self._toggle_italic,
+            font=("Segoe UI", 9, "italic"))
+        btn(toolbar, "S̲", self._toggle_underline)
+        sep()
+
+        # Tamaño
+        tk.Label(toolbar, text="Tam:", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(4, 1))
+        self._size_var = tk.StringVar(value=str(DEFAULT_SIZE))
+        om = tk.OptionMenu(toolbar, self._size_var,
+                           *[str(s) for s in FONT_SIZES],
+                           command=self._change_size)
+        om.config(bg=t["btn"], fg=t["fg"], activebackground=t["act"],
+                  activeforeground=t["fg"], relief="flat", bd=0,
+                  highlightthickness=0, font=("Segoe UI", 9), width=3)
+        om["menu"].config(bg=t["btn"], fg=t["fg"])
+        om.pack(side="left", padx=2)
+        sep()
+
+        # Color
+        self._color_btn = tk.Button(
+            toolbar, text="A", width=2, command=self._pick_color,
+            bg=t["btn"], fg=self._current_color,
+            activebackground=t["act"], relief="flat", bd=0,
+            padx=6, pady=2, cursor="hand2",
+            font=("Segoe UI", 9, "bold"))
+        self._color_btn.pack(side="left", padx=2)
+        tk.Label(toolbar, text="Color", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(0, 4))
+        sep()
+
+        # Imágenes
+        if PILLOW_AVAILABLE:
+            btn(toolbar, "🖼 Imagen", self._insert_image_from_file)
+            if self._get_adjuntos_fn is not None:
+                btn(toolbar, "📎 Desde adjuntos",
+                    self._insert_image_from_adjuntos)
+        else:
+            tk.Label(toolbar, text="(instala Pillow para imágenes)",
+                     bg=t["tb"], fg="#ff8800",
+                     font=("Segoe UI", 8)).pack(side="left", padx=4)
+        sep()
+
+        btn(toolbar, "✕ Limpiar formato", self._clear_format)
+
+    def _build_text_area(self, height):
+        t = self._theme()
+        frame = tk.Frame(self)
+        frame.pack(fill="both", expand=True)
+
+        self.text = tk.Text(
+            frame,
+            wrap="word",
+            height=height,
+            font=("Segoe UI", DEFAULT_SIZE),
+            bg=t["txt_bg"], fg=t["txt_fg"],
+            insertbackground=t["ins"],
+            selectbackground=t["sel"],
+            relief="flat",
+            padx=8, pady=6,
+            undo=True,
+            spacing3=2,
+        )
+        sb = tk.Scrollbar(frame, command=self.text.yview)
+        self.text.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.text.pack(side="left", fill="both", expand=True)
+
+        # Atajos de teclado
+        self.text.bind("<Control-b>", lambda e: (self._toggle_bold(),   "break")[1])
+        self.text.bind("<Control-B>", lambda e: (self._toggle_bold(),   "break")[1])
+        self.text.bind("<Control-i>", lambda e: (self._toggle_italic(),  "break")[1])
+        self.text.bind("<Control-I>", lambda e: (self._toggle_italic(),  "break")[1])
+        self.text.bind("<Control-u>", lambda e: (self._toggle_underline(),"break")[1])
+        self.text.bind("<Control-U>", lambda e: (self._toggle_underline(),"break")[1])
+        self.text.bind("<Control-z>", lambda e: (self.text.edit_undo(),  "break")[1])
+        self.text.bind("<Control-y>", lambda e: (self.text.edit_redo(),  "break")[1])
+
+        # ── Copiar/Pegar mejorado ──────────────────────────────────────────
+        # Ctrl+C y Ctrl+X: comportamiento nativo de tk.Text (ya funciona)
+        # Ctrl+V: interceptamos para limpiar texto del portapapeles antes de pegar
+        self.text.bind("<Control-v>", self._on_paste)
+        self.text.bind("<Control-V>", self._on_paste)
+        # Clic derecho: menú contextual con copiar/pegar/cortar
+        self.text.bind("<Button-3>", self._context_menu)
+
+    def _configure_tags(self):
+        self.text.tag_configure("bold",      font=("Segoe UI", DEFAULT_SIZE, "bold"))
+        self.text.tag_configure("italic",    font=("Segoe UI", DEFAULT_SIZE, "italic"))
+        self.text.tag_configure("underline", underline=True)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Copiar / Pegar / Menú contextual
+    # ──────────────────────────────────────────────────────────────────────────
+    def _on_paste(self, event=None):
+        """
+        Pega texto plano desde el portapapeles aplicando el formato activo.
+        Elimina caracteres de control extraños que algunos programas añaden.
+        """
+        try:
+            text = self.text.clipboard_get()
+        except tk.TclError:
+            return "break"   # portapapeles vacío o no texto
+
+        # Eliminar \r (retornos de carro de Windows/Outlook)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+        # Si hay selección, reemplazarla
+        try:
+            self.text.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+
+        insert_idx = self.text.index(tk.INSERT)
+        self.text.insert(tk.INSERT, text)
+        end_idx = self.text.index(tk.INSERT)
+
+        # Aplicar formato activo al texto pegado
+        if self._current_color != "#000000":
+            tag = self._ensure_color_tag(self._current_color)
+            self.text.tag_add(tag, insert_idx, end_idx)
+        if self._current_size != DEFAULT_SIZE:
+            tag = self._ensure_size_tag(self._current_size)
+            self.text.tag_add(tag, insert_idx, end_idx)
+
+        return "break"   # evitar el paste doble nativo de Tk
+
+    def _context_menu(self, event):
+        """Menú contextual con Cortar / Copiar / Pegar."""
+        t = self._theme()
+        menu = tk.Menu(self.text, tearoff=0,
+                       bg=t["btn"], fg=t["fg"],
+                       activebackground=t["act"],
+                       activeforeground=t["fg"],
+                       relief="flat", bd=0)
+
+        menu.add_command(label="✂  Cortar",   command=lambda: self.text.event_generate("<<Cut>>"))
+        menu.add_command(label="⎘  Copiar",   command=lambda: self.text.event_generate("<<Copy>>"))
+        menu.add_command(label="⎗  Pegar",    command=self._on_paste)
+        menu.add_separator()
+        menu.add_command(label="Seleccionar todo",
+                         command=lambda: self.text.tag_add("sel", "1.0", "end"))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Tags helpers
+    # ──────────────────────────────────────────────────────────────────────────
+    def _has_tag(self, tag):
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+        except tk.TclError:
+            return False
+        for i in range(0, len(self.text.tag_ranges(tag)), 2):
+            r = self.text.tag_ranges(tag)
+            if (self.text.compare(r[i], "<=", s) and
+                    self.text.compare(r[i+1], ">=", e)):
+                return True
+        return False
+
+    def _apply_or_remove_tag(self, tag):
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+        except tk.TclError:
+            return
+        if self._has_tag(tag):
+            self.text.tag_remove(tag, s, e)
+        else:
+            self.text.tag_add(tag, s, e)
+
+    def _ensure_size_tag(self, size):
+        tag = f"size_{size}"
+        try:
+            self.text.tag_cget(tag, "font")
+        except tk.TclError:
+            self.text.tag_configure(tag, font=("Segoe UI", size))
+        return tag
+
+    def _ensure_color_tag(self, color):
+        tag = f"color_{color.lstrip('#')}"
+        try:
+            self.text.tag_cget(tag, "foreground")
+        except tk.TclError:
+            self.text.tag_configure(tag, foreground=color)
+        return tag
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Acciones barra de herramientas
+    # ──────────────────────────────────────────────────────────────────────────
+    def _toggle_bold(self):
+        self._apply_or_remove_tag("bold");      self.text.focus_set()
+
+    def _toggle_italic(self):
+        self._apply_or_remove_tag("italic");    self.text.focus_set()
+
+    def _toggle_underline(self):
+        self._apply_or_remove_tag("underline"); self.text.focus_set()
+
+    def _change_size(self, value):
+        try:
+            size = int(value)
+            self._current_size = size
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+            for sz in FONT_SIZES:
+                self.text.tag_remove(f"size_{sz}", s, e)
+            self.text.tag_add(self._ensure_size_tag(size), s, e)
+        except (tk.TclError, ValueError):
+            pass
+        self.text.focus_set()
+
+    def _pick_color(self):
+        color = colorchooser.askcolor(
+            color=self._current_color,
+            title="Seleccionar color de fuente")
+        if color and color[1]:
+            self._current_color = color[1]
+            self._color_btn.config(fg=self._current_color)
+            try:
+                s = self.text.index("sel.first")
+                e = self.text.index("sel.last")
+                self.text.tag_add(self._ensure_color_tag(self._current_color), s, e)
+            except tk.TclError:
+                pass   # sin selección: solo cambia el color activo
+        self.text.focus_set()
+
+    def _clear_format(self):
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+        except tk.TclError:
+            s, e = "1.0", "end"
+        for tag in self.text.tag_names():
+            self.text.tag_remove(tag, s, e)
+        self.text.focus_set()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Inserción de imágenes
+    # ──────────────────────────────────────────────────────────────────────────
+    def _insert_pil_image(self, pil_img):
+        """Redimensiona, embebe en base64 y la inserta en el cursor."""
+        if not PILLOW_AVAILABLE:
+            return
+        # Convertir a RGB si tiene canal alpha
+        if pil_img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", pil_img.size, (255, 255, 255))
+            try:
+                bg.paste(pil_img, mask=pil_img.split()[-1])
+            except Exception:
+                bg.paste(pil_img)
+            pil_img = bg
+
+        w, h = pil_img.size
+        if w > MAX_IMAGE_WIDTH or h > MAX_IMAGE_HEIGHT:
+            ratio = min(MAX_IMAGE_WIDTH / w, MAX_IMAGE_HEIGHT / h)
+            pil_img = pil_img.resize(
+                (max(1, int(w*ratio)), max(1, int(h*ratio))),
+                Image.LANCZOS)
+
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        photo  = ImageTk.PhotoImage(pil_img)
+        self._image_refs.append(photo)
+
+        idx    = self.text.index(tk.INSERT)
+        self.text.image_create(idx, image=photo, padx=4, pady=4)
+
+        img_id = f"img_{len(self._image_data)}"
+        self._image_data[img_id] = {
+            "b64": b64, "width": pil_img.width, "height": pil_img.height}
+        self.text.tag_add(img_id, idx)
+
+    def _insert_image_from_file(self):
+        if not PILLOW_AVAILABLE:
+            messagebox.showwarning("Pillow no disponible",
+                                   "Instala Pillow:\npip install Pillow")
+            return
+        path = filedialog.askopenfilename(
+            title="Seleccionar imagen",
+            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp"),
+                       ("Todos", "*.*")])
+        if not path:
+            return
+        try:
+            self._insert_pil_image(Image.open(path))
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar la imagen:\n{e}")
+
+    def _insert_image_from_adjuntos(self):
+        """Abre ventana con miniaturas descargando desde B2 si es necesario."""
+        if not PILLOW_AVAILABLE:
+            messagebox.showwarning("Pillow no disponible",
+                                   "Instala Pillow:\npip install Pillow")
+            return
+        if not self._get_adjuntos_fn:
+            messagebox.showinfo("No disponible",
+                                "Esta función requiere el expediente abierto.")
+            return
+
+        adjuntos = self._get_adjuntos_fn()
+        ext_img  = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
+        imagenes = [a for a in adjuntos
+                    if os.path.splitext(a.get("nombre", ""))[1].lower() in ext_img]
+
+        if not imagenes:
+            messagebox.showinfo("Sin adjuntos de imagen",
+                                "No hay imágenes adjuntas en este expediente.")
+            return
+
+        self._abrir_selector_adjuntos(imagenes)
+
+    # ── Descarga B2 ──────────────────────────────────────────────────────────
+    def _descargar_adjunto_b2_temp(self, ruta_relativa):
+        """
+        Descarga un adjunto de Backblaze B2 a un fichero temporal.
+        Devuelve la ruta local del temporal, o None si falla.
+        """
+        if not self._get_b2_client_fn:
+            return None
+        try:
+            from b2sdk.v2.exception import B2Error
+        except ImportError:
+            B2Error = Exception
+
+        try:
+            b2_api, bucket = self._get_b2_client_fn()
+            if not b2_api or not bucket:
+                return None
+
+            if self._normalizar_ruta_b2 and self._b2_root_folder:
+                ruta_b2 = self._normalizar_ruta_b2(
+                    f"{self._b2_root_folder}/{ruta_relativa}")
+            else:
+                ruta_b2 = ruta_relativa
+
+            nombre   = os.path.basename(ruta_relativa)
+            ext      = os.path.splitext(nombre)[1]
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, prefix="rte_img_")
+            os.close(tmp_fd)
+
+            downloaded = bucket.download_file_by_name(ruta_b2)
+            downloaded.save_to(tmp_path)
+
+            self._temp_files.append(tmp_path)   # limpiar al destruir
+            return tmp_path
+
+        except Exception as e:
+            print(f"[RichTextEditor] Error descargando B2: {e}")
+            return None
+
+    def _descargar_adjunto_local(self, ruta_relativa, adjuntos_root):
+        """Devuelve ruta local si existe."""
+        ruta = os.path.join(adjuntos_root, ruta_relativa)
+        return ruta if os.path.exists(ruta) else None
+
+    # ── Selector de adjuntos ─────────────────────────────────────────────────
+    def _abrir_selector_adjuntos(self, imagenes):
+        """
+        Ventana modal con miniaturas.
+        Los adjuntos se descargan desde B2 en segundo plano mientras se muestra
+        un spinner, para no congelar la UI.
+        """
+        t = self._theme()
+        win = tk.Toplevel(self)
+        win.title("Seleccionar imagen de adjuntos")
+        win.geometry("680x480")
+        win.grab_set()
+        win.resizable(True, True)
+        win.configure(bg=t["tb"])
+
+        tk.Label(win,
+                 text="Doble clic en una imagen para insertarla  "
+                      "(descargando desde Backblaze B2...)",
+                 bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 10)).pack(pady=(10, 4))
+
+        # Área scroll
+        cf = tk.Frame(win, bg=t["tb"])
+        cf.pack(fill="both", expand=True, padx=10, pady=6)
+        canvas = tk.Canvas(cf, bg=t["tb"], highlightthickness=0)
+        sb2    = tk.Scrollbar(cf, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb2.set)
+        sb2.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = tk.Frame(canvas, bg=t["tb"])
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        MAX_COLS   = 4
+        thumb_refs = []
+
+        def _place_thumb(adj, pil_thumb, col, row):
+            """Coloca una miniatura en la cuadrícula (llamado desde hilo principal)."""
+            photo = ImageTk.PhotoImage(pil_thumb)
+            thumb_refs.append(photo)
+
+            cell = tk.Frame(inner, bg=t["tb"], padx=4, pady=4)
+            cell.grid(row=row, column=col, padx=6, pady=6)
+
+            nombre = adj.get("nombre", "")
+            lbl = tk.Label(cell, image=photo, bg=t["tb"],
+                           cursor="hand2", relief="solid", bd=1)
+            lbl.pack()
+            tk.Label(cell,
+                     text=(nombre[:18] + "…" if len(nombre) > 18 else nombre),
+                     bg=t["tb"], fg=t["fg"],
+                     font=("Segoe UI", 7)).pack()
+
+            def _doble_clic(e, a=adj):
+                _insertar_desde_adjunto(a)
+
+            lbl.bind("<Double-Button-1>", _doble_clic)
+            inner.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _insertar_desde_adjunto(adj):
+            """Descarga imagen completa e inserta en el editor."""
+            ruta_rel  = adj.get("ruta_relativa", "")
+            tipo_alm  = adj.get("tipo_almacenamiento", "local")
+            adj_root  = adj.get("adjuntos_root", "")
+
+            def _do():
+                if tipo_alm in ("backblaze", "b2") or (
+                        self._usar_b2_fn and self._usar_b2_fn()):
+                    local = self._descargar_adjunto_b2_temp(ruta_rel)
+                else:
+                    local = self._descargar_adjunto_local(ruta_rel, adj_root)
+
+                if local and os.path.exists(local):
+                    try:
+                        img = Image.open(local)
+                        win.after(0, lambda: (self._insert_pil_image(img),
+                                              win.destroy()))
+                    except Exception as ex:
+                        win.after(0, lambda: messagebox.showerror(
+                            "Error", f"No se pudo cargar la imagen:\n{ex}",
+                            parent=win))
+                else:
+                    win.after(0, lambda: messagebox.showerror(
+                        "Error", "No se pudo descargar la imagen.",
+                        parent=win))
+
+            threading.Thread(target=_do, daemon=True).start()
+
+        # ── Carga de miniaturas en segundo plano ─────────────────────────────
+        col_ref = [0]
+        row_ref = [0]
+
+        def _cargar_miniatura(adj):
+            ruta_rel  = adj.get("ruta_relativa", "")
+            tipo_alm  = adj.get("tipo_almacenamiento", "local")
+            adj_root  = adj.get("adjuntos_root", "")
+
+            if tipo_alm in ("backblaze", "b2") or (
+                    self._usar_b2_fn and self._usar_b2_fn()):
+                local = self._descargar_adjunto_b2_temp(ruta_rel)
+            else:
+                local = self._descargar_adjunto_local(ruta_rel, adj_root)
+
+            if not local or not os.path.exists(local):
+                return
+
+            try:
+                thumb = Image.open(local).convert("RGB")
+                thumb.thumbnail(THUMBNAIL_SIZE, Image.LANCZOS)
+                c = col_ref[0]
+                r = row_ref[0]
+                col_ref[0] += 1
+                if col_ref[0] >= MAX_COLS:
+                    col_ref[0] = 0
+                    row_ref[0] += 1
+                if win.winfo_exists():
+                    win.after(0, lambda th=thumb, a=adj, cc=c, rr=r:
+                              _place_thumb(a, th, cc, rr))
+            except Exception:
+                pass
+
+        def _cargar_todas():
+            for adj in imagenes:
+                _cargar_miniatura(adj)
+            if win.winfo_exists():
+                win.after(0, _actualizar_scroll)
+
+        def _actualizar_scroll():
+            inner.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        threading.Thread(target=_cargar_todas, daemon=True).start()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Serialización / Deserialización
+    # ──────────────────────────────────────────────────────────────────────────
+    def get_content(self):
+        """Serializa a JSON para guardar en BD."""
+        segments = []
+        if not self.text.get("1.0", "end-1c") and not self._image_data:
+            return ""
+
+        image_positions = {}
+        for img_id in self._image_data:
+            ranges = self.text.tag_ranges(img_id)
+            if ranges:
+                image_positions[str(ranges[0])] = img_id
+
+        idx = "1.0"
+        while True:
+            if self.text.compare(idx, ">=", "end-1c"):
+                break
+            char = self.text.get(idx)
+
+            if char == "\ufffc":   # carácter de objeto embebido
+                img_id = image_positions.get(str(idx))
+                if img_id and img_id in self._image_data:
+                    d = self._image_data[img_id]
+                    segments.append({"type": "image",
+                                     "b64": d["b64"],
+                                     "width": d["width"],
+                                     "height": d["height"]})
+                idx = self.text.index(f"{idx}+1c")
+                continue
+
+            tags_at   = set(self.text.tag_names(idx))
+            run_chars = []
+            while True:
+                c = self.text.get(idx)
+                if not c or self.text.compare(idx, ">=", "end-1c"):
+                    break
+                if c == "\ufffc":
+                    break
+                if set(self.text.tag_names(idx)) != tags_at:
+                    break
+                run_chars.append(c)
+                idx = self.text.index(f"{idx}+1c")
+
+            if run_chars:
+                size  = DEFAULT_SIZE
+                color = None
+                for tag in tags_at:
+                    if tag.startswith("size_"):
+                        try: size = int(tag[5:])
+                        except ValueError: pass
+                    elif tag.startswith("color_"):
+                        color = "#" + tag[6:]
+                segments.append({
+                    "type":      "text",
+                    "content":   "".join(run_chars),
+                    "bold":      "bold"      in tags_at,
+                    "italic":    "italic"    in tags_at,
+                    "underline": "underline" in tags_at,
+                    "size":      size,
+                    "color":     color,
+                })
+            else:
+                idx = self.text.index(f"{idx}+1c")
+
+        return json.dumps({"version": 1, "segments": segments},
+                          ensure_ascii=False)
+
+    def get_plain_text(self):
+        """Texto plano para PDF/búsqueda (sin imágenes ni formato)."""
+        return self.text.get("1.0", "end-1c").replace("\ufffc", "[IMAGEN]").strip()
+
+    def set_content(self, raw):
+        """Carga contenido: JSON propio o texto plano (retrocompatibilidad)."""
+        self.text.delete("1.0", "end")
+        self._image_refs.clear()
+        self._image_data.clear()
+
+        if not raw:
+            return
+        raw = str(raw).strip()
+
+        if JSON_MARKER in raw:
+            try:
+                data = json.loads(raw)
+                if data.get("version") == 1:
+                    self._load_from_json(data)
+                    return
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        self.text.insert("1.0", raw)   # texto plano
+
+    def _load_from_json(self, data):
+        for seg in data.get("segments", []):
+            if seg.get("type") == "image":
+                if not PILLOW_AVAILABLE:
+                    self.text.insert("end", "[IMAGEN]\n")
+                    continue
+                try:
+                    img = Image.open(
+                        io.BytesIO(base64.b64decode(seg["b64"]))
+                    ).convert("RGB")
+                    self._insert_pil_image(img)
+                except Exception as e:
+                    self.text.insert("end", f"[Error imagen: {e}]\n")
+            elif seg.get("type") == "text":
+                content = seg.get("content", "")
+                s = self.text.index("end-1c")
+                self.text.insert("end", content)
+                e = self.text.index("end-1c")
+                if seg.get("bold"):      self.text.tag_add("bold",      s, e)
+                if seg.get("italic"):    self.text.tag_add("italic",    s, e)
+                if seg.get("underline"): self.text.tag_add("underline", s, e)
+                sz = seg.get("size", DEFAULT_SIZE)
+                if sz != DEFAULT_SIZE:
+                    self.text.tag_add(self._ensure_size_tag(sz), s, e)
+                col = seg.get("color")
+                if col:
+                    self.text.tag_add(self._ensure_color_tag(col), s, e)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Limpieza temporales
+    # ──────────────────────────────────────────────────────────────────────────
+    def _cleanup_temps(self, event=None):
+        for p in self._temp_files:
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # API pública de conveniencia
+    # ──────────────────────────────────────────────────────────────────────────
+    def clear(self):
+        self.text.delete("1.0", "end")
+        self._image_refs.clear()
+        self._image_data.clear()
+
+    def focus_set(self):
+        self.text.focus_set()
+
+    def get(self, *args):
+        """Alias de get_plain_text() para compatibilidad con código existente."""
+        return self.get_plain_text()
