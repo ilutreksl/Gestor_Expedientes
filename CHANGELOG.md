@@ -1,4 +1,9 @@
-Cambio V.1.0.53 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.54 - ✨ Últimas mejoras implementadas:
+
+- Nuevo boton cuando se cierra un expediente, para poder reabrir el expediente cerrado. Se debe de indicar el motivo de la reapertura del expediente. La informacion se guarda en el historial los cambios y el motivo.
+
+
+Cambio V.1.0.53
 
 - Ahora al crear un nuevo expediente, se necesita que el cliente este previamente creado. De esta manera se evitaran nombres de clientes errores.
 Se abre una ventana de advertencia y desde esa ventana se puede crear el nuevo cliente.

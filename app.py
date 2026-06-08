@@ -327,7 +327,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.53"
+APP_VERSION = "v1.0.54"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5767,6 +5767,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
             command=self.guardar_rma_placeholder
         )
         self.btn_guardar_rma.pack(side="left", padx=(0, 5))
+
+        # ── Botón Reabrir (solo en modo edición; visibilidad gestionada dinámicamente) ──
+        if es_edicion:
+            self.btn_reabrir_expediente = ctk.CTkButton(
+                btn_action_frame,
+                text="🔓 Reabrir",
+                fg_color="#e67e22",
+                hover_color="#ca6f1e",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                command=self.reabrir_expediente
+            )
+            # No se hace .pack() aquí; lo gestiona _actualizar_botones_segun_estado()
         
         # Botón de eliminar expediente (solo para admin en modo edición)
         if es_edicion and self.username.lower() == "admin":
@@ -5868,6 +5880,175 @@ class VentanaPrincipal(ctk.CTkToplevel):
             
         except sqlite3.Error as e:
             messagebox.showerror("Error de Base de Datos", f"Error al guardar el comentario: {e}")
+    
+    def reabrir_expediente(self):
+        """
+        Muestra una ventana modal para reabrir un expediente cerrado.
+        Solicita el motivo, registra en historial y limpia los campos de cierre.
+        """
+        if not self.rma_actual_id:
+            return
+
+        # Crear ventana modal
+        ventana = ctk.CTkToplevel(self.content_frame.winfo_toplevel())
+        ventana.title("Reabrir Expediente")
+        ventana.geometry("480x260")
+        ventana.resizable(False, False)
+        ventana.grab_set()  # Modal
+        ventana.focus_set()
+
+        # Centrar la ventana respecto a la principal
+        ventana.update_idletasks()
+        x = ventana.winfo_toplevel().winfo_x() + (ventana.winfo_toplevel().winfo_width() // 2) - 240
+        y = ventana.winfo_toplevel().winfo_y() + (ventana.winfo_toplevel().winfo_height() // 2) - 130
+        ventana.geometry(f"+{x}+{y}")
+
+        # Título e instrucción
+        ctk.CTkLabel(
+            ventana,
+            text="🔓 Reabrir Expediente",
+            font=ctk.CTkFont(size=16, weight="bold")
+        ).pack(pady=(20, 5))
+
+        ctk.CTkLabel(
+            ventana,
+            text="Indica el motivo por el que se reabre este expediente:",
+            font=ctk.CTkFont(size=13)
+        ).pack(pady=(0, 8))
+
+        # Campo de texto para el motivo
+        entry_motivo = ctk.CTkTextbox(ventana, height=70, width=420)
+        entry_motivo.pack(padx=20, pady=(0, 12))
+        entry_motivo.focus_set()
+
+        # Frame de botones
+        btn_frame = ctk.CTkFrame(ventana, fg_color="transparent")
+        btn_frame.pack(pady=(0, 15))
+
+        def aceptar():
+            motivo = entry_motivo.get("1.0", "end-1c").strip()
+            if not motivo:
+                messagebox.showwarning(
+                    "Motivo requerido",
+                    "⚠️ Debes indicar el motivo para reabrir el expediente.",
+                    parent=ventana
+                )
+                return
+
+            try:
+                conn = connect_db()
+                cursor = conn.cursor()
+
+                # 1. Limpiar campos de cierre en la BD
+                cursor.execute("""
+                    UPDATE rma_maestro
+                    SET fecha_gestion = NULL,
+                        gestionado_por = NULL,
+                        fecha_para_factura = NULL
+                    WHERE id = ?
+                """, (self.rma_actual_id,))
+
+                # 2. Registrar en historial
+                descripcion_historial = f"EXPEDIENTE REABIERTO. Motivo: {motivo}"
+                cursor.execute("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    self.rma_actual_id,
+                    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    self.username,
+                    descripcion_historial
+                ))
+
+                conn.commit()
+                conn.close()
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al reabrir el expediente:\n{e}", parent=ventana)
+                return
+
+            # 3. Limpiar campos en la interfaz (sin guardar, BD ya actualizada)
+            try:
+                # Limpiar Fecha Gestión
+                widget_fg = getattr(self, "entry_Fecha_Gestion", None)
+                if widget_fg:
+                    if hasattr(widget_fg, 'set_date'):
+                        widget_fg.set_date(None)
+                    elif hasattr(widget_fg, 'delete'):
+                        widget_fg.delete(0, 'end')
+
+                # Limpiar Gestionado Por (volver al primer valor del optionmenu)
+                widget_gp = getattr(self, "entry_Gestionado_Por", None)
+                if widget_gp and hasattr(widget_gp, 'set'):
+                    opciones = self.OPCIONES.get("Gestionado_Por", [""])
+                    widget_gp.set(opciones[0])
+
+                # Limpiar Fecha para Factura (volver a "Seleccionar...")
+                widget_fpf = getattr(self, "entry_Fecha_para_factura", None)
+                if widget_fpf and hasattr(widget_fpf, 'set'):
+                    widget_fpf.set("Seleccionar...")
+
+            except Exception as e:
+                print(f"Error limpiando widgets tras reapertura: {e}")
+
+            # 4. Refrescar historial si está visible
+            if hasattr(self, 'historial_tab'):
+                try:
+                    self.mostrar_historial(self.historial_tab)
+                except Exception:
+                    pass
+
+            # 5. Actualizar botones de acción (ocultar "Reabrir", mostrar guardado normal)
+            self._actualizar_botones_segun_estado()
+
+            ventana.destroy()
+            messagebox.showinfo("Expediente reabierto", "✅ El expediente ha sido reabierto correctamente.")
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✅ Aceptar",
+            fg_color="green",
+            hover_color="darkgreen",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=140,
+            command=aceptar
+        ).pack(side="left", padx=(0, 15))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✖️ Cancelar",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=140,
+            command=ventana.destroy
+        ).pack(side="left")
+    
+    def _actualizar_botones_segun_estado(self):
+        """
+        Muestra u oculta el botón 'Reabrir' según si el expediente tiene Fecha Gestión.
+        Llamar tras cargar datos y tras reabrir.
+        """
+        if not hasattr(self, 'btn_reabrir_expediente'):
+            return
+
+        try:
+            widget_fg = getattr(self, "entry_Fecha_Gestion", None)
+            if widget_fg:
+                if hasattr(widget_fg, 'get_date'):
+                    fecha = widget_fg.get_date()
+                else:
+                    fecha = widget_fg.get()
+            else:
+                fecha = ""
+
+            esta_cerrado = bool(fecha and str(fecha).strip())
+
+            if esta_cerrado:
+                self.btn_reabrir_expediente.pack(side="left", padx=(5, 0))
+            else:
+                self.btn_reabrir_expediente.pack_forget()
+
+        except Exception as e:
+            print(f"Error actualizando botones según estado: {e}")
     
     def toggle_porcentaje_depreciacion(self):
         """Habilita o deshabilita el campo de porcentaje de depreciación según el checkbox."""
@@ -7734,6 +7915,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # Desactivar bandera de carga SIEMPRE, incluso si hay error
             self._cargando_datos = False
             conn.close()
+            self._actualizar_botones_segun_estado()
             
     def guardar_cambio_historial(self, rma_id, campo, valor_antiguo, valor_nuevo):
         """Registra un cambio de un campo en la tabla de historial SOLO si hay cambio real."""
