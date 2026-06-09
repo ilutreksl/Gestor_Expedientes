@@ -27,6 +27,23 @@ except ImportError:
 # ── Constantes ────────────────────────────────────────────────────────────────
 FONT_SIZES       = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36]
 DEFAULT_SIZE     = 11
+DEFAULT_FAMILY   = "Segoe UI"
+FONT_FAMILIES    = [
+    "Segoe UI",
+    "Arial",
+    "Calibri",
+    "Cambria",
+    "Comic Sans MS",
+    "Consolas",
+    "Courier New",
+    "Georgia",
+    "Helvetica",
+    "Impact",
+    "Tahoma",
+    "Times New Roman",
+    "Trebuchet MS",
+    "Verdana",
+]
 MAX_IMAGE_WIDTH  = 800
 MAX_IMAGE_HEIGHT = 600
 THUMBNAIL_SIZE   = (130, 100)
@@ -71,8 +88,9 @@ class RichTextEditor(tk.Frame):
         self._image_refs  = []   # PhotoImage vivos
         self._image_data  = {}   # {img_id: {b64, width, height}}
         self._temp_files  = []   # temporales B2 a limpiar al destruir
-        self._current_color = "#000000"
-        self._current_size  = DEFAULT_SIZE
+        self._current_color  = "#000000"
+        self._current_size   = DEFAULT_SIZE
+        self._current_family = DEFAULT_FAMILY
 
         self._build_toolbar()
         self._build_text_area(height)
@@ -124,6 +142,20 @@ class RichTextEditor(tk.Frame):
         btn(toolbar, "I", self._toggle_italic,
             font=("Segoe UI", 9, "italic"))
         btn(toolbar, "S̲", self._toggle_underline)
+        sep()
+
+        # Familia de fuente
+        tk.Label(toolbar, text="Fuente:", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(4, 1))
+        self._family_var = tk.StringVar(value=DEFAULT_FAMILY)
+        family_cb = tk.OptionMenu(toolbar, self._family_var,
+                                  *FONT_FAMILIES,
+                                  command=self._change_family)
+        family_cb.config(bg=t["btn"], fg=t["fg"], activebackground=t["act"],
+                         activeforeground=t["fg"], relief="flat", bd=0,
+                         highlightthickness=0, font=("Segoe UI", 9), width=14)
+        family_cb["menu"].config(bg=t["btn"], fg=t["fg"])
+        family_cb.pack(side="left", padx=2)
         sep()
 
         # Tamaño
@@ -250,6 +282,9 @@ class RichTextEditor(tk.Frame):
         if self._current_size != DEFAULT_SIZE:
             tag = self._ensure_size_tag(self._current_size)
             self.text.tag_add(tag, insert_idx, end_idx)
+        if self._current_family != DEFAULT_FAMILY:
+            tag = self._ensure_family_tag(self._current_family)
+            self.text.tag_add(tag, insert_idx, end_idx)
 
         return "break"   # evitar el paste doble nativo de Tk
 
@@ -306,7 +341,15 @@ class RichTextEditor(tk.Frame):
         try:
             self.text.tag_cget(tag, "font")
         except tk.TclError:
-            self.text.tag_configure(tag, font=("Segoe UI", size))
+            self.text.tag_configure(tag, font=(DEFAULT_FAMILY, size))
+        return tag
+
+    def _ensure_family_tag(self, family):
+        tag = f"family_{family.replace(' ', '_')}"
+        try:
+            self.text.tag_cget(tag, "font")
+        except tk.TclError:
+            self.text.tag_configure(tag, font=(family, DEFAULT_SIZE))
         return tag
 
     def _ensure_color_tag(self, color):
@@ -328,6 +371,19 @@ class RichTextEditor(tk.Frame):
 
     def _toggle_underline(self):
         self._apply_or_remove_tag("underline"); self.text.focus_set()
+
+    def _change_family(self, value):
+        self._current_family = value
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+            # Quitar otros tags de familia en la selección
+            for fam in FONT_FAMILIES:
+                self.text.tag_remove(f"family_{fam.replace(' ', '_')}", s, e)
+            self.text.tag_add(self._ensure_family_tag(value), s, e)
+        except tk.TclError:
+            pass   # sin selección: solo cambia la familia activa
+        self.text.focus_set()
 
     def _change_size(self, value):
         try:
@@ -365,6 +421,8 @@ class RichTextEditor(tk.Frame):
             s, e = "1.0", "end"
         for tag in self.text.tag_names():
             self.text.tag_remove(tag, s, e)
+        self._family_var.set(DEFAULT_FAMILY)
+        self._size_var.set(str(DEFAULT_SIZE))
         self.text.focus_set()
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -668,14 +726,17 @@ class RichTextEditor(tk.Frame):
                 idx = self.text.index(f"{idx}+1c")
 
             if run_chars:
-                size  = DEFAULT_SIZE
-                color = None
+                size   = DEFAULT_SIZE
+                color  = None
+                family = None
                 for tag in tags_at:
                     if tag.startswith("size_"):
                         try: size = int(tag[5:])
                         except ValueError: pass
                     elif tag.startswith("color_"):
                         color = "#" + tag[6:]
+                    elif tag.startswith("family_"):
+                        family = tag[7:].replace("_", " ")
                 segments.append({
                     "type":      "text",
                     "content":   "".join(run_chars),
@@ -684,6 +745,7 @@ class RichTextEditor(tk.Frame):
                     "underline": "underline" in tags_at,
                     "size":      size,
                     "color":     color,
+                    "family":    family,
                 })
             else:
                 idx = self.text.index(f"{idx}+1c")
@@ -743,6 +805,9 @@ class RichTextEditor(tk.Frame):
                 col = seg.get("color")
                 if col:
                     self.text.tag_add(self._ensure_color_tag(col), s, e)
+                fam = seg.get("family")
+                if fam:
+                    self.text.tag_add(self._ensure_family_tag(fam), s, e)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Limpieza temporales
