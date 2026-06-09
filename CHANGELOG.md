@@ -1,6 +1,8 @@
 Cambio V.1.0.55 - ✨ Últimas mejoras implementadas:
 
 - Añadido editor de texto al campo Observacion tecnicas de la fichas de los expedientes.
+- Boton de "Expandir" en el editor de texto, para abrir en una ventana de mayor tamaño el editor de texto.
+- Integracion con el boton de "Generar Informe" añadiendo el texto+imagenes de este bloque.
 
 Cambio V.1.0.54
 

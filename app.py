@@ -10883,10 +10883,180 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                                     for clave, valor in mapeo.items():
                                         if clave in run.text:
                                             run.text = run.text.replace(clave, str(valor))
-            
-            # 4.1. Aplicar reemplazos preservando formato
+
+            # 4.2. Función auxiliar para insertar Obs_Tecnica enriquecida (texto + imágenes)
+            def insertar_obs_tecnica_enriquecida(document, marcador='[[OBS_TECNICA]]'):
+                """
+                Localiza el párrafo que contiene el marcador [[OBS_TECNICA]], lo elimina
+                e inserta en su lugar el contenido del editor enriquecido (texto con formato
+                e imágenes) leyendo directamente del widget self.entry_Obs_Tecnica.
+                Si el editor no existe o está vacío, elimina el marcador sin dejar rastro.
+                """
+                import json as _json
+                import base64 as _base64
+                import io as _io
+                from docx.shared import Pt, RGBColor
+                from docx.oxml.ns import qn
+                from docx.oxml import OxmlElement
+                from PIL import Image as _PILImage
+
+                # Obtener JSON del editor
+                obs_json = ""
+                if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
+                    obs_json = self.entry_Obs_Tecnica.get_content() or ""
+
+                # Localizar el párrafo con el marcador
+                parrafo_marcador = None
+                idx_marcador = None
+                for i, p in enumerate(document.paragraphs):
+                    if marcador in p.text:
+                        parrafo_marcador = p
+                        idx_marcador = i
+                        break
+
+                if parrafo_marcador is None:
+                    return  # Marcador no encontrado en la plantilla, no hacer nada
+
+                # Si no hay contenido en el editor, eliminar el párrafo marcador y salir
+                if not obs_json:
+                    parrafo_marcador._element.getparent().remove(parrafo_marcador._element)
+                    return
+
+                # Intentar parsear el JSON
+                try:
+                    data = _json.loads(obs_json)
+                    segmentos = data.get("segments", [])
+                except Exception:
+                    # Si falla el parse, insertar como texto plano
+                    segmentos = [{"type": "text", "content": obs_json,
+                                  "bold": False, "italic": False,
+                                  "underline": False, "size": 11, "color": None}]
+
+                if not segmentos:
+                    parrafo_marcador._element.getparent().remove(parrafo_marcador._element)
+                    return
+
+                # Referencia al elemento padre XML y posición del marcador
+                parent_elem = parrafo_marcador._element.getparent()
+                pos_insercion = list(parent_elem).index(parrafo_marcador._element)
+
+                # Insertar los segmentos en orden inverso para mantener la posición correcta
+                # (cada nuevo elemento se inserta en pos_insercion, empujando los anteriores)
+                elementos_nuevos = []
+
+                # Agrupar segmentos consecutivos de texto en un mismo párrafo,
+                # cada imagen va en su propio párrafo
+                grupos = []       # lista de listas: cada sublista es un párrafo
+                grupo_actual = []
+                for seg in segmentos:
+                    if seg.get("type") == "image":
+                        if grupo_actual:
+                            grupos.append(("texto", grupo_actual))
+                            grupo_actual = []
+                        grupos.append(("imagen", seg))
+                    else:
+                        # Dividir por saltos de línea dentro del mismo segmento de texto
+                        contenido = seg.get("content", "")
+                        lineas = contenido.split("\n")
+                        for j, linea in enumerate(lineas):
+                            seg_linea = dict(seg)
+                            seg_linea["content"] = linea
+                            grupo_actual.append(seg_linea)
+                            if j < len(lineas) - 1:
+                                # Salto de línea → nuevo párrafo
+                                grupos.append(("texto", grupo_actual))
+                                grupo_actual = []
+                if grupo_actual:
+                    grupos.append(("texto", grupo_actual))
+
+                def _nuevo_parrafo_docx():
+                    """Crea un elemento <w:p> vacío."""
+                    return OxmlElement('w:p')
+
+                def _aplicar_formato_run(run, seg):
+                    """Aplica negrita, cursiva, subrayado, color y tamaño a un run."""
+                    if seg.get("bold"):
+                        run.bold = True
+                    if seg.get("italic"):
+                        run.italic = True
+                    if seg.get("underline"):
+                        run.underline = True
+                    size = seg.get("size")
+                    if size and size != 11:
+                        run.font.size = Pt(size)
+                    color = seg.get("color")
+                    if color and color.startswith("#") and len(color) == 7:
+                        try:
+                            r = int(color[1:3], 16)
+                            g = int(color[3:5], 16)
+                            b = int(color[5:7], 16)
+                            run.font.color.rgb = RGBColor(r, g, b)
+                        except ValueError:
+                            pass
+
+                from docx import Document as _DocxDocument
+                from docx.text.paragraph import Paragraph as _Paragraph
+
+                for tipo, contenido in grupos:
+                    if tipo == "texto":
+                        # Crear párrafo nuevo con python-docx y extraer su elemento XML
+                        p_elem = OxmlElement('w:p')
+                        # Añadir temporalmente al documento para poder usar la API de runs
+                        # Usamos un párrafo temporal vinculado al documento real
+                        p_temp = parrafo_marcador._p.__class__(p_elem)
+                        parrafo_docx = _Paragraph(p_elem, document)
+                        for seg in contenido:
+                            texto = seg.get("content", "")
+                            run = parrafo_docx.add_run(texto)
+                            _aplicar_formato_run(run, seg)
+                        elementos_nuevos.append(p_elem)
+
+                    elif tipo == "imagen":
+                        try:
+                            b64 = contenido.get("b64", "")
+                            if not b64:
+                                continue
+                            img_bytes = _base64.b64decode(b64)
+                            img_stream = _io.BytesIO(img_bytes)
+
+                            # Calcular tamaño razonable para el documento (máx 14cm de ancho)
+                            from docx.shared import Cm
+                            pil_img = _PILImage.open(_io.BytesIO(img_bytes))
+                            w_px, h_px = pil_img.size
+                            max_cm = 14.0
+                            # Asumiendo 96 dpi para convertir px → cm
+                            w_cm = w_px / 96 * 2.54
+                            h_cm = h_px / 96 * 2.54
+                            if w_cm > max_cm:
+                                factor = max_cm / w_cm
+                                w_cm = max_cm
+                                h_cm = h_cm * factor
+
+                            p_elem = OxmlElement('w:p')
+                            parrafo_docx = _Paragraph(p_elem, document)
+                            run = parrafo_docx.add_run()
+                            run.add_picture(img_stream, width=Cm(w_cm), height=Cm(h_cm))
+                            elementos_nuevos.append(p_elem)
+                        except Exception as img_err:
+                            # Si falla una imagen, insertar texto indicativo
+                            p_elem = OxmlElement('w:p')
+                            parrafo_docx = _Paragraph(p_elem, document)
+                            parrafo_docx.add_run(f"[Error al insertar imagen: {img_err}]")
+                            elementos_nuevos.append(p_elem)
+
+                # Eliminar el párrafo marcador
+                parent_elem.remove(parrafo_marcador._element)
+
+                # Insertar los nuevos párrafos en la posición correcta
+                for offset, elem in enumerate(elementos_nuevos):
+                    parent_elem.insert(pos_insercion + offset, elem)
+
+            # 4.1. Aplicar reemplazos de texto plano preservando formato
             reemplazar_texto_preservando_formato(document, mapeo)
-            
+
+            # 4.3. Insertar contenido enriquecido de Obs_Tecnica en su marcador
+            insertar_obs_tecnica_enriquecida(document)
+
             # 5. Guardar temporalmente para subirlo a Backblaze B2
             temp_dir = tempfile.mkdtemp(prefix="informe_rma_")
             temp_file_path = os.path.join(temp_dir, nombre_archivo_final)

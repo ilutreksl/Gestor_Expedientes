@@ -166,6 +166,11 @@ class RichTextEditor(tk.Frame):
 
         btn(toolbar, "✕ Limpiar formato", self._clear_format)
 
+        # Expandir — alineado a la derecha
+        tk.Frame(toolbar, bg=t["tb"]).pack(side="left", fill="x", expand=True)
+        sep()
+        btn(toolbar, "⛶ Expandir", self._abrir_ventana_expandida)
+
     def _build_text_area(self, height):
         t = self._theme()
         frame = tk.Frame(self)
@@ -764,3 +769,124 @@ class RichTextEditor(tk.Frame):
     def get(self, *args):
         """Alias de get_plain_text() para compatibilidad con código existente."""
         return self.get_plain_text()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Ventana expandida
+    # ──────────────────────────────────────────────────────────────────────────
+    def _abrir_ventana_expandida(self):
+        """Abre el contenido del editor en una ventana grande independiente."""
+        _VentanaExpandida(self)
+
+
+class _VentanaExpandida(tk.Toplevel):
+    """
+    Ventana modal grande que contiene un RichTextEditor completo.
+    Al pulsar 'Guardar y cerrar' vuelca el contenido al editor original.
+    Al pulsar 'Cancelar' cierra sin modificar el original.
+    """
+
+    def __init__(self, editor_origen: RichTextEditor):
+        super().__init__(editor_origen)
+        self._editor_origen = editor_origen
+
+        self.title("Observaciones Técnicas — Editor expandido")
+        self.geometry("1200x750")
+        self.minsize(800, 500)
+        self.resizable(True, True)
+
+        # Centrar en pantalla
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - 1200) // 2
+        y = (sh - 750) // 2
+        self.geometry(f"1200x750+{x}+{y}")
+
+        # Modal: bloquea la ventana principal mientras está abierta
+        self.grab_set()
+        self.focus_set()
+
+        self._build_ui()
+
+        # Cargar contenido actual del editor original
+        contenido_actual = editor_origen.get_content()
+        self._editor.set_content(contenido_actual)
+
+        # Interceptar cierre con la X para preguntar
+        self.protocol("WM_DELETE_WINDOW", self._on_cancelar)
+
+    def _build_ui(self):
+        t = self._editor_origen._theme()
+
+        self.configure(bg=t["tb"])
+
+        # ── Barra inferior con botones ────────────────────────────────────────
+        bar = tk.Frame(self, bg=t["tb"], pady=6)
+        bar.pack(side="bottom", fill="x", padx=12)
+
+        btn_cfg = dict(
+            bg="#2a7a2a", fg="#ffffff",
+            activebackground="#1e5e1e", activeforeground="#ffffff",
+            relief="flat", bd=0, padx=20, pady=6,
+            cursor="hand2", font=("Segoe UI", 10, "bold")
+        )
+        tk.Button(bar, text="💾  Guardar y cerrar",
+                  command=self._on_guardar, **btn_cfg).pack(side="right", padx=(6, 0))
+
+        btn_cfg_cancel = dict(
+            bg="#7a2a2a", fg="#ffffff",
+            activebackground="#5e1e1e", activeforeground="#ffffff",
+            relief="flat", bd=0, padx=20, pady=6,
+            cursor="hand2", font=("Segoe UI", 10)
+        )
+        tk.Button(bar, text="✕  Cancelar",
+                  command=self._on_cancelar, **btn_cfg_cancel).pack(side="right")
+
+        tk.Label(bar,
+                 text="Los cambios se aplicarán al expediente al pulsar 'Guardar y cerrar'",
+                 bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 9)).pack(side="left", padx=4)
+
+        # ── Editor expandido ──────────────────────────────────────────────────
+        o = self._editor_origen
+        self._editor = RichTextEditor(
+            self,
+            get_adjuntos_fn       = o._get_adjuntos_fn,
+            get_b2_client_fn      = o._get_b2_client_fn,
+            b2_root_folder        = o._b2_root_folder,
+            normalizar_ruta_b2_fn = o._normalizar_ruta_b2,
+            usar_b2_fn            = o._usar_b2_fn,
+            height                = 30,
+        )
+        self._editor.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+
+    def _on_guardar(self):
+        """Vuelca el contenido del editor expandido al editor original y cierra."""
+        contenido = self._editor.get_content()
+        self._editor_origen.set_content(contenido)
+        self.grab_release()
+        self.destroy()
+
+    def _on_cancelar(self):
+        """Cierra sin modificar el editor original, pidiendo confirmación si hay cambios."""
+        contenido_actual  = self._editor.get_content()
+        contenido_original = self._editor_origen.get_content()
+
+        if contenido_actual != contenido_original:
+            from tkinter import messagebox as _mb
+            respuesta = _mb.askyesnocancel(
+                "¿Descartar cambios?",
+                "Hay cambios sin guardar en el editor expandido.\n\n"
+                "¿Guardar y cerrar?\n"
+                "(No = cerrar sin guardar, Cancelar = volver al editor)",
+                parent=self
+            )
+            if respuesta is True:       # Sí → guardar y cerrar
+                self._on_guardar()
+                return
+            elif respuesta is None:     # Cancelar → volver al editor
+                return
+            # respuesta is False → cerrar sin guardar
+
+        self.grab_release()
+        self.destroy()
