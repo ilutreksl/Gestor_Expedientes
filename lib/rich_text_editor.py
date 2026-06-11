@@ -29,6 +29,7 @@ FONT_SIZES       = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36]
 DEFAULT_SIZE     = 11
 DEFAULT_FAMILY   = "Segoe UI"
 FONT_FAMILIES    = [
+    "Aptos",
     "Segoe UI",
     "Arial",
     "Calibri",
@@ -75,6 +76,7 @@ class RichTextEditor(tk.Frame):
                  b2_root_folder=None,
                  normalizar_ruta_b2_fn=None,
                  usar_b2_fn=None,
+                 modo_expandido=False,
                  **kwargs):
         height = kwargs.pop("height", 16)
         super().__init__(parent, **kwargs)
@@ -84,15 +86,19 @@ class RichTextEditor(tk.Frame):
         self._b2_root_folder       = b2_root_folder
         self._normalizar_ruta_b2   = normalizar_ruta_b2_fn
         self._usar_b2_fn           = usar_b2_fn
+        self._modo_expandido       = modo_expandido
 
-        self._image_refs  = []   # PhotoImage vivos
-        self._image_data  = {}   # {img_id: {b64, width, height}}
-        self._temp_files  = []   # temporales B2 a limpiar al destruir
-        self._current_color  = "#000000"
-        self._current_size   = DEFAULT_SIZE
-        self._current_family = DEFAULT_FAMILY
+        self._image_refs  = []
+        self._image_data  = {}
+        self._temp_files  = []
+        self._current_color   = "#000000"
+        self._current_bgcolor = None
+        self._current_size    = DEFAULT_SIZE
+        self._current_family  = DEFAULT_FAMILY
 
         self._build_toolbar()
+        if modo_expandido:
+            self._build_toolbar_avanzada()
         self._build_text_area(height)
         self._configure_tags()
         self.bind("<Destroy>", self._cleanup_temps)
@@ -203,6 +209,80 @@ class RichTextEditor(tk.Frame):
         sep()
         btn(toolbar, "⛶ Expandir", self._abrir_ventana_expandida)
 
+    def _build_toolbar_avanzada(self):
+        """Segunda barra de herramientas — solo visible en modo expandido."""
+        t = self._theme()
+        toolbar2 = tk.Frame(self, bg=t["tb"], pady=3)
+        toolbar2.pack(fill="x", side="top")
+
+        base = dict(bg=t["btn"], fg=t["fg"], activebackground=t["act"],
+                    activeforeground=t["fg"], relief="flat", bd=0,
+                    padx=6, pady=2, cursor="hand2",
+                    font=("Segoe UI", 9))
+
+        def btn(parent, text, cmd, **extra):
+            kw = {**base, **extra}
+            b = tk.Button(parent, text=text, command=cmd, **kw)
+            b.pack(side="left", padx=2)
+            return b
+
+        def sep():
+            tk.Frame(toolbar2, width=1, bg="#888").pack(
+                side="left", fill="y", padx=4, pady=2)
+
+        # ── Color de fondo (resaltado) ────────────────────────────────────────
+        self._bgcolor_btn = tk.Button(
+            toolbar2, text="▌A", width=3, command=self._pick_bgcolor,
+            bg=t["btn"], fg=t["fg"],
+            activebackground=t["act"], relief="flat", bd=0,
+            padx=6, pady=2, cursor="hand2",
+            font=("Segoe UI", 9, "bold"))
+        self._bgcolor_btn.pack(side="left", padx=2)
+        tk.Label(toolbar2, text="Resaltado", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(0, 2))
+
+        btn(toolbar2, "✕ Sin resaltado", self._clear_bgcolor)
+        sep()
+
+        # ── Fluorescentes rápidos ─────────────────────────────────────────────
+        tk.Label(toolbar2, text="🖊", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 9)).pack(side="left", padx=(4, 1))
+        FLUORES = [
+            ("Amarillo",  "#FFFF00", "#000000"),
+            ("Verde",     "#00FF7F", "#000000"),
+            ("Cian",      "#00FFFF", "#000000"),
+            ("Rosa",      "#FF69B4", "#000000"),
+            ("Naranja",   "#FFA500", "#000000"),
+        ]
+        for nombre, bg_col, fg_col in FLUORES:
+            tk.Button(
+                toolbar2, text=f"  {nombre[:3]}  ",
+                bg=bg_col, fg=fg_col,
+                activebackground=bg_col, activeforeground=fg_col,
+                relief="flat", bd=1, padx=4, pady=1,
+                cursor="hand2", font=("Segoe UI", 8),
+                command=lambda c=bg_col: self._apply_bgcolor(c)
+            ).pack(side="left", padx=1)
+        sep()
+
+        # ── Alineación ────────────────────────────────────────────────────────
+        tk.Label(toolbar2, text="Alinear:", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(4, 1))
+        btn(toolbar2, "⬅ Izq",    lambda: self._set_align("left"))
+        btn(toolbar2, "≡ Centro", lambda: self._set_align("center"))
+        btn(toolbar2, "➡ Der",    lambda: self._set_align("right"))
+        sep()
+
+        # ── Tachado ───────────────────────────────────────────────────────────
+        btn(toolbar2, "S̶ Tachado", self._toggle_strikethrough)
+        sep()
+
+        # ── Sangría ───────────────────────────────────────────────────────────
+        tk.Label(toolbar2, text="Sangría:", bg=t["tb"], fg=t["fg"],
+                 font=("Segoe UI", 8)).pack(side="left", padx=(4, 1))
+        btn(toolbar2, "→ Aumentar", self._indent_increase)
+        btn(toolbar2, "← Reducir",  self._indent_decrease)
+
     def _build_text_area(self, height):
         t = self._theme()
         frame = tk.Frame(self)
@@ -245,9 +325,10 @@ class RichTextEditor(tk.Frame):
         self.text.bind("<Button-3>", self._context_menu)
 
     def _configure_tags(self):
-        self.text.tag_configure("bold",      font=("Segoe UI", DEFAULT_SIZE, "bold"))
-        self.text.tag_configure("italic",    font=("Segoe UI", DEFAULT_SIZE, "italic"))
-        self.text.tag_configure("underline", underline=True)
+        self.text.tag_configure("bold",          font=("Segoe UI", DEFAULT_SIZE, "bold"))
+        self.text.tag_configure("italic",        font=("Segoe UI", DEFAULT_SIZE, "italic"))
+        self.text.tag_configure("underline",     underline=True)
+        self.text.tag_configure("strikethrough", overstrike=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Copiar / Pegar / Menú contextual
@@ -413,6 +494,133 @@ class RichTextEditor(tk.Frame):
                 pass   # sin selección: solo cambia el color activo
         self.text.focus_set()
 
+    # ── Color de fondo (resaltado) ────────────────────────────────────────────
+    def _pick_bgcolor(self):
+        color = colorchooser.askcolor(
+            color=self._current_bgcolor or "#FFFF00",
+            title="Seleccionar color de resaltado")
+        if color and color[1]:
+            self._apply_bgcolor(color[1])
+        self.text.focus_set()
+
+    def _apply_bgcolor(self, color):
+        self._current_bgcolor = color
+        # Actualizar indicador visual del botón
+        if hasattr(self, '_bgcolor_btn'):
+            self._bgcolor_btn.config(bg=color,
+                                     fg="#000000" if self._luminancia(color) > 0.4 else "#ffffff")
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+            tag = self._ensure_bgcolor_tag(color)
+            self.text.tag_add(tag, s, e)
+        except tk.TclError:
+            pass
+        self.text.focus_set()
+
+    def _clear_bgcolor(self):
+        """Quita el resaltado de la selección actual."""
+        try:
+            s = self.text.index("sel.first")
+            e = self.text.index("sel.last")
+        except tk.TclError:
+            s, e = "1.0", "end"
+        for tag in self.text.tag_names():
+            if tag.startswith("bgcolor_"):
+                self.text.tag_remove(tag, s, e)
+        if hasattr(self, '_bgcolor_btn'):
+            t = self._theme()
+            self._bgcolor_btn.config(bg=t["btn"], fg=t["fg"])
+        self._current_bgcolor = None
+        self.text.focus_set()
+
+    def _luminancia(self, hex_color):
+        """Devuelve luminancia aproximada (0-1) para elegir fg blanco o negro."""
+        try:
+            r = int(hex_color[1:3], 16) / 255
+            g = int(hex_color[3:5], 16) / 255
+            b = int(hex_color[5:7], 16) / 255
+            return 0.299 * r + 0.587 * g + 0.114 * b
+        except Exception:
+            return 0.5
+
+    def _ensure_bgcolor_tag(self, color):
+        tag = f"bgcolor_{color.lstrip('#')}"
+        try:
+            self.text.tag_cget(tag, "background")
+        except tk.TclError:
+            self.text.tag_configure(tag, background=color)
+        return tag
+
+    # ── Alineación ────────────────────────────────────────────────────────────
+    def _set_align(self, justify):
+        """Aplica alineación al párrafo o párrafos seleccionados."""
+        try:
+            s = self.text.index("sel.first linestart")
+            e = self.text.index("sel.last lineend")
+        except tk.TclError:
+            s = self.text.index("insert linestart")
+            e = self.text.index("insert lineend")
+        # Quitar alineaciones previas
+        for j in ("left", "center", "right"):
+            self.text.tag_remove(f"align_{j}", s, e)
+        tag = f"align_{justify}"
+        try:
+            self.text.tag_cget(tag, "justify")
+        except tk.TclError:
+            self.text.tag_configure(tag, justify=justify)
+        self.text.tag_add(tag, s, e)
+        self.text.focus_set()
+
+    # ── Tachado ───────────────────────────────────────────────────────────────
+    def _toggle_strikethrough(self):
+        self._apply_or_remove_tag("strikethrough")
+        self.text.focus_set()
+
+    # ── Sangría ───────────────────────────────────────────────────────────────
+    _INDENT_STEP = 30   # píxeles por nivel de sangría
+
+    def _indent_increase(self):
+        self._change_indent(+self._INDENT_STEP)
+
+    def _indent_decrease(self):
+        self._change_indent(-self._INDENT_STEP)
+
+    def _change_indent(self, delta):
+        try:
+            s = self.text.index("sel.first linestart")
+            e = self.text.index("sel.last lineend")
+        except tk.TclError:
+            s = self.text.index("insert linestart")
+            e = self.text.index("insert lineend")
+
+        # Obtener sangría actual sumando todos los tags de sangría activos
+        current = 0
+        for tag in self.text.tag_names(s):
+            if tag.startswith("indent_"):
+                try:
+                    current = int(tag[7:])
+                except ValueError:
+                    pass
+
+        new_indent = max(0, current + delta)
+
+        # Quitar tags de sangría anteriores en el rango
+        for tag in self.text.tag_names():
+            if tag.startswith("indent_"):
+                self.text.tag_remove(tag, s, e)
+
+        if new_indent > 0:
+            tag = f"indent_{new_indent}"
+            try:
+                self.text.tag_cget(tag, "lmargin1")
+            except tk.TclError:
+                self.text.tag_configure(tag,
+                                        lmargin1=new_indent,
+                                        lmargin2=new_indent)
+            self.text.tag_add(tag, s, e)
+        self.text.focus_set()
+
     def _clear_format(self):
         try:
             s = self.text.index("sel.first")
@@ -423,6 +631,10 @@ class RichTextEditor(tk.Frame):
             self.text.tag_remove(tag, s, e)
         self._family_var.set(DEFAULT_FAMILY)
         self._size_var.set(str(DEFAULT_SIZE))
+        if hasattr(self, '_bgcolor_btn'):
+            t = self._theme()
+            self._bgcolor_btn.config(bg=t["btn"], fg=t["fg"])
+        self._current_bgcolor = None
         self.text.focus_set()
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -729,6 +941,9 @@ class RichTextEditor(tk.Frame):
                 size   = DEFAULT_SIZE
                 color  = None
                 family = None
+                bgcolor = None
+                align   = None
+                indent  = 0
                 for tag in tags_at:
                     if tag.startswith("size_"):
                         try: size = int(tag[5:])
@@ -737,15 +952,26 @@ class RichTextEditor(tk.Frame):
                         color = "#" + tag[6:]
                     elif tag.startswith("family_"):
                         family = tag[7:].replace("_", " ")
+                    elif tag.startswith("bgcolor_"):
+                        bgcolor = "#" + tag[8:]
+                    elif tag.startswith("align_"):
+                        align = tag[6:]
+                    elif tag.startswith("indent_"):
+                        try: indent = int(tag[7:])
+                        except ValueError: pass
                 segments.append({
-                    "type":      "text",
-                    "content":   "".join(run_chars),
-                    "bold":      "bold"      in tags_at,
-                    "italic":    "italic"    in tags_at,
-                    "underline": "underline" in tags_at,
-                    "size":      size,
-                    "color":     color,
-                    "family":    family,
+                    "type":          "text",
+                    "content":       "".join(run_chars),
+                    "bold":          "bold"          in tags_at,
+                    "italic":        "italic"        in tags_at,
+                    "underline":     "underline"     in tags_at,
+                    "strikethrough": "strikethrough" in tags_at,
+                    "size":          size,
+                    "color":         color,
+                    "family":        family,
+                    "bgcolor":       bgcolor,
+                    "align":         align,
+                    "indent":        indent,
                 })
             else:
                 idx = self.text.index(f"{idx}+1c")
@@ -796,9 +1022,10 @@ class RichTextEditor(tk.Frame):
                 s = self.text.index("end-1c")
                 self.text.insert("end", content)
                 e = self.text.index("end-1c")
-                if seg.get("bold"):      self.text.tag_add("bold",      s, e)
-                if seg.get("italic"):    self.text.tag_add("italic",    s, e)
-                if seg.get("underline"): self.text.tag_add("underline", s, e)
+                if seg.get("bold"):          self.text.tag_add("bold",          s, e)
+                if seg.get("italic"):        self.text.tag_add("italic",        s, e)
+                if seg.get("underline"):     self.text.tag_add("underline",     s, e)
+                if seg.get("strikethrough"): self.text.tag_add("strikethrough", s, e)
                 sz = seg.get("size", DEFAULT_SIZE)
                 if sz != DEFAULT_SIZE:
                     self.text.tag_add(self._ensure_size_tag(sz), s, e)
@@ -808,6 +1035,25 @@ class RichTextEditor(tk.Frame):
                 fam = seg.get("family")
                 if fam:
                     self.text.tag_add(self._ensure_family_tag(fam), s, e)
+                bgcol = seg.get("bgcolor")
+                if bgcol:
+                    self.text.tag_add(self._ensure_bgcolor_tag(bgcol), s, e)
+                align = seg.get("align")
+                if align:
+                    tag_a = f"align_{align}"
+                    try:
+                        self.text.tag_cget(tag_a, "justify")
+                    except tk.TclError:
+                        self.text.tag_configure(tag_a, justify=align)
+                    self.text.tag_add(tag_a, s, e)
+                indent = seg.get("indent", 0)
+                if indent:
+                    tag_i = f"indent_{indent}"
+                    try:
+                        self.text.tag_cget(tag_i, "lmargin1")
+                    except tk.TclError:
+                        self.text.tag_configure(tag_i, lmargin1=indent, lmargin2=indent)
+                    self.text.tag_add(tag_i, s, e)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Limpieza temporales
@@ -921,6 +1167,7 @@ class _VentanaExpandida(tk.Toplevel):
             b2_root_folder        = o._b2_root_folder,
             normalizar_ruta_b2_fn = o._normalizar_ruta_b2,
             usar_b2_fn            = o._usar_b2_fn,
+            modo_expandido        = True,
             height                = 30,
         )
         self._editor.pack(fill="both", expand=True, padx=8, pady=(8, 4))

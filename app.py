@@ -10974,37 +10974,82 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                     return OxmlElement('w:p')
 
                 def _aplicar_formato_run(run, seg):
-                    """Aplica negrita, cursiva, subrayado, color y tamaño a un run."""
+                    """Aplica todo el formato de carácter del segmento al run de docx."""
                     if seg.get("bold"):
                         run.bold = True
                     if seg.get("italic"):
                         run.italic = True
                     if seg.get("underline"):
                         run.underline = True
+                    if seg.get("strikethrough"):
+                        run.font.strike = True
+                    # Familia de fuente
+                    family = seg.get("family")
+                    if family:
+                        run.font.name = family
+                    # Tamaño
                     size = seg.get("size")
                     if size and size != 11:
                         run.font.size = Pt(size)
+                    # Color de fuente
                     color = seg.get("color")
                     if color and color.startswith("#") and len(color) == 7:
                         try:
-                            r = int(color[1:3], 16)
-                            g = int(color[3:5], 16)
-                            b = int(color[5:7], 16)
-                            run.font.color.rgb = RGBColor(r, g, b)
+                            run.font.color.rgb = RGBColor(
+                                int(color[1:3], 16),
+                                int(color[3:5], 16),
+                                int(color[5:7], 16))
                         except ValueError:
                             pass
+                    # Color de fondo / resaltado
+                    bgcolor = seg.get("bgcolor")
+                    if bgcolor and bgcolor.startswith("#") and len(bgcolor) == 7:
+                        try:
+                            from docx.oxml.ns import qn as _qn
+                            from docx.oxml import OxmlElement as _OE
+                            # python-docx no expone highlight directamente,
+                            # pero sí permite color de sombreado (shd) en el XML del run
+                            rPr = run._r.get_or_add_rPr()
+                            shd = _OE('w:shd')
+                            shd.set(_qn('w:val'),   'clear')
+                            shd.set(_qn('w:color'), 'auto')
+                            shd.set(_qn('w:fill'),  bgcolor.lstrip('#').upper())
+                            rPr.append(shd)
+                        except Exception:
+                            pass
+
+                def _aplicar_formato_parrafo(parrafo_docx, seg):
+                    """Aplica alineación y sangría a nivel de párrafo."""
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                    from docx.shared import Pt as _Pt, Cm as _Cm
+
+                    align = seg.get("align")
+                    if align:
+                        mapa = {
+                            "left":   WD_ALIGN_PARAGRAPH.LEFT,
+                            "center": WD_ALIGN_PARAGRAPH.CENTER,
+                            "right":  WD_ALIGN_PARAGRAPH.RIGHT,
+                        }
+                        if align in mapa:
+                            parrafo_docx.alignment = mapa[align]
+
+                    indent_px = seg.get("indent", 0)
+                    if indent_px:
+                        # Convertir px a cm (96 dpi: 1px = 2.54/96 cm)
+                        indent_cm = indent_px * 2.54 / 96
+                        parrafo_docx.paragraph_format.left_indent = _Cm(indent_cm)
 
                 from docx import Document as _DocxDocument
                 from docx.text.paragraph import Paragraph as _Paragraph
 
                 for tipo, contenido in grupos:
                     if tipo == "texto":
-                        # Crear párrafo nuevo con python-docx y extraer su elemento XML
                         p_elem = OxmlElement('w:p')
-                        # Añadir temporalmente al documento para poder usar la API de runs
-                        # Usamos un párrafo temporal vinculado al documento real
-                        p_temp = parrafo_marcador._p.__class__(p_elem)
                         parrafo_docx = _Paragraph(p_elem, document)
+                        # Aplicar formato de párrafo tomando los atributos del primer segmento
+                        # (alineación y sangría son iguales para todos los segs del mismo párrafo)
+                        if contenido:
+                            _aplicar_formato_parrafo(parrafo_docx, contenido[0])
                         for seg in contenido:
                             texto = seg.get("content", "")
                             run = parrafo_docx.add_run(texto)
