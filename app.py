@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.55"
+APP_VERSION = "v1.0.56"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -10973,87 +10973,129 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                     """Crea un elemento <w:p> vacío."""
                     return OxmlElement('w:p')
 
-                def _aplicar_formato_run(run, seg):
-                    """Aplica todo el formato de carácter del segmento al run de docx."""
-                    if seg.get("bold"):
-                        run.bold = True
-                    if seg.get("italic"):
-                        run.italic = True
-                    if seg.get("underline"):
-                        run.underline = True
-                    if seg.get("strikethrough"):
-                        run.font.strike = True
-                    # Familia de fuente
-                    family = seg.get("family")
-                    if family:
-                        run.font.name = family
-                    # Tamaño
-                    size = seg.get("size")
-                    if size and size != 11:
-                        run.font.size = Pt(size)
-                    # Color de fuente
-                    color = seg.get("color")
-                    if color and color.startswith("#") and len(color) == 7:
-                        try:
-                            run.font.color.rgb = RGBColor(
-                                int(color[1:3], 16),
-                                int(color[3:5], 16),
-                                int(color[5:7], 16))
-                        except ValueError:
-                            pass
-                    # Color de fondo / resaltado
-                    bgcolor = seg.get("bgcolor")
-                    if bgcolor and bgcolor.startswith("#") and len(bgcolor) == 7:
-                        try:
-                            from docx.oxml.ns import qn as _qn
-                            from docx.oxml import OxmlElement as _OE
-                            # python-docx no expone highlight directamente,
-                            # pero sí permite color de sombreado (shd) en el XML del run
-                            rPr = run._r.get_or_add_rPr()
+                from docx.text.paragraph import Paragraph as _Paragraph
+                from docx.oxml.ns import qn as _qn
+                from docx.oxml import OxmlElement as _OE
+
+                def _hex_to_rgb_str(hex_color):
+                    """Convierte #RRGGBB a 'RRGGBB' en mayúsculas."""
+                    return hex_color.lstrip('#').upper()
+
+                def _make_parrafo_xml(grupo_segs):
+                    """
+                    Construye un elemento <w:p> completo en XML puro para un grupo
+                    de segmentos de texto. Esto garantiza que el formato se aplica
+                    correctamente aunque el párrafo se inserte manualmente en el body.
+                    """
+                    p = _OE('w:p')
+
+                    # ── Propiedades de párrafo (pPr) ──────────────────────────
+                    seg0 = grupo_segs[0] if grupo_segs else {}
+                    align  = seg0.get("align")
+                    indent_px = seg0.get("indent", 0)
+
+                    if align or indent_px:
+                        pPr = _OE('w:pPr')
+                        if align:
+                            jc = _OE('w:jc')
+                            jc.set(_qn('w:val'), align)
+                            pPr.append(jc)
+                        if indent_px:
+                            # 1 pt = 20 twips; 1 px @ 96dpi ≈ 0.75 pt → 15 twips
+                            twips = str(int(indent_px * 15))
+                            ind = _OE('w:ind')
+                            ind.set(_qn('w:left'), twips)
+                            pPr.append(ind)
+                        p.append(pPr)
+
+                    # ── Runs ──────────────────────────────────────────────────
+                    for seg in grupo_segs:
+                        texto = seg.get("content", "")
+                        r = _OE('w:r')
+
+                        # rPr — propiedades del run
+                        rPr = _OE('w:rPr')
+                        tiene_formato = False
+
+                        # Familia de fuente
+                        family = seg.get("family")
+                        if family:
+                            rFonts = _OE('w:rFonts')
+                            rFonts.set(_qn('w:ascii'),    family)
+                            rFonts.set(_qn('w:hAnsi'),    family)
+                            rFonts.set(_qn('w:eastAsia'), family)
+                            rPr.append(rFonts)
+                            tiene_formato = True
+
+                        # Negrita
+                        if seg.get("bold"):
+                            rPr.append(_OE('w:b'))
+                            rPr.append(_OE('w:bCs'))
+                            tiene_formato = True
+
+                        # Cursiva
+                        if seg.get("italic"):
+                            rPr.append(_OE('w:i'))
+                            rPr.append(_OE('w:iCs'))
+                            tiene_formato = True
+
+                        # Subrayado
+                        if seg.get("underline"):
+                            u = _OE('w:u')
+                            u.set(_qn('w:val'), 'single')
+                            rPr.append(u)
+                            tiene_formato = True
+
+                        # Tachado
+                        if seg.get("strikethrough"):
+                            rPr.append(_OE('w:strike'))
+                            tiene_formato = True
+
+                        # Tamaño (en half-points: pt * 2)
+                        size = seg.get("size")
+                        if size and size != 11:
+                            sz = _OE('w:sz')
+                            sz.set(_qn('w:val'), str(int(size * 2)))
+                            szCs = _OE('w:szCs')
+                            szCs.set(_qn('w:val'), str(int(size * 2)))
+                            rPr.append(sz)
+                            rPr.append(szCs)
+                            tiene_formato = True
+
+                        # Color de fuente
+                        color = seg.get("color")
+                        if color and color.startswith("#") and len(color) == 7:
+                            clr = _OE('w:color')
+                            clr.set(_qn('w:val'), _hex_to_rgb_str(color))
+                            rPr.append(clr)
+                            tiene_formato = True
+
+                        # Color de fondo / resaltado (shd)
+                        bgcolor = seg.get("bgcolor")
+                        if bgcolor and bgcolor.startswith("#") and len(bgcolor) == 7:
                             shd = _OE('w:shd')
                             shd.set(_qn('w:val'),   'clear')
                             shd.set(_qn('w:color'), 'auto')
-                            shd.set(_qn('w:fill'),  bgcolor.lstrip('#').upper())
+                            shd.set(_qn('w:fill'),  _hex_to_rgb_str(bgcolor))
                             rPr.append(shd)
-                        except Exception:
-                            pass
+                            tiene_formato = True
 
-                def _aplicar_formato_parrafo(parrafo_docx, seg):
-                    """Aplica alineación y sangría a nivel de párrafo."""
-                    from docx.enum.text import WD_ALIGN_PARAGRAPH
-                    from docx.shared import Pt as _Pt, Cm as _Cm
+                        if tiene_formato:
+                            r.append(rPr)
 
-                    align = seg.get("align")
-                    if align:
-                        mapa = {
-                            "left":   WD_ALIGN_PARAGRAPH.LEFT,
-                            "center": WD_ALIGN_PARAGRAPH.CENTER,
-                            "right":  WD_ALIGN_PARAGRAPH.RIGHT,
-                        }
-                        if align in mapa:
-                            parrafo_docx.alignment = mapa[align]
+                        # Texto — preservar espacios con xml:space="preserve"
+                        t = _OE('w:t')
+                        t.text = texto
+                        if texto and (texto[0] == ' ' or texto[-1] == ' '):
+                            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+                        r.append(t)
+                        p.append(r)
 
-                    indent_px = seg.get("indent", 0)
-                    if indent_px:
-                        # Convertir px a cm (96 dpi: 1px = 2.54/96 cm)
-                        indent_cm = indent_px * 2.54 / 96
-                        parrafo_docx.paragraph_format.left_indent = _Cm(indent_cm)
-
-                from docx import Document as _DocxDocument
-                from docx.text.paragraph import Paragraph as _Paragraph
+                    return p
 
                 for tipo, contenido in grupos:
                     if tipo == "texto":
-                        p_elem = OxmlElement('w:p')
-                        parrafo_docx = _Paragraph(p_elem, document)
-                        # Aplicar formato de párrafo tomando los atributos del primer segmento
-                        # (alineación y sangría son iguales para todos los segs del mismo párrafo)
-                        if contenido:
-                            _aplicar_formato_parrafo(parrafo_docx, contenido[0])
-                        for seg in contenido:
-                            texto = seg.get("content", "")
-                            run = parrafo_docx.add_run(texto)
-                            _aplicar_formato_run(run, seg)
+                        p_elem = _make_parrafo_xml(contenido)
                         elementos_nuevos.append(p_elem)
 
                     elif tipo == "imagen":
