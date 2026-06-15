@@ -1,4 +1,9 @@
-Cambio V.1.0.56 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.57 - ✨ Últimas mejoras implementadas:
+
+- Renombrado de adjuntos, añadiendo el numero de RMA automaticamente.
+
+
+Cambio V.1.0.56
 
 - Correccion de bugs.
 
