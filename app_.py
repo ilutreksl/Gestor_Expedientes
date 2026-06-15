@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.56"
+APP_VERSION = "v1.0.57"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -9680,6 +9680,16 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
         
         for i, filepath in enumerate(filepaths, 1):
             nombre_original = os.path.basename(filepath)
+            
+            # Añadir prefijo RMA al nombre si el archivo no lo lleva ya.
+            # Si ya lo lleva (en cualquier capitalización), se normaliza a mayúsculas.
+            match = re.match(r'^(rma\d+_)(.*)', nombre_original, re.IGNORECASE)
+            if match:
+                # Ya tiene prefijo RMA → normalizarlo a mayúsculas
+                nombre_original = match.group(1).upper() + match.group(2)
+            else:
+                # No tiene prefijo → añadir el del expediente actual
+                nombre_original = f"{codigo_rma}_{nombre_original}"
             
             # Actualizar progreso general si hay múltiples archivos
             if ventana_progreso_general:

@@ -1,6 +1,7 @@
-Cambio V.1.0.57 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.58 - ✨ Últimas mejoras implementadas:
 
-- Renombrado de adjuntos, añadiendo el numero de RMA automaticamente.
+- Añadido icono en el listado de expedientes para saber si tiene albaran de reposicion y/o factura de abono. Muestra informacion del numero y de la ficha para facturar.
+- Renombrado de adjuntos, añadiendo el numero de RMA automaticamente. (1.0.57)
 
 
 Cambio V.1.0.56
