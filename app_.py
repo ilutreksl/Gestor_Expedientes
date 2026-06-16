@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.57"
+APP_VERSION = "v1.0.58"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -2936,7 +2936,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
                 # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
             
-                sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion FROM rma_maestro WHERE 1=1"
+                sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, numero_albaran_reposicion, numero_factura_abono, fecha_para_factura FROM rma_maestro WHERE 1=1"
                 params = []
             
                 # Aplicar filtro de ESTADO
@@ -3041,7 +3041,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Configurar anchos de columnas para mejor distribución
                 self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
                 self.lista_rma_frame.grid_columnconfigure(1, weight=0)               # ASOCIACIÓN (icono - sin minsize)
-                self.lista_rma_frame.grid_columnconfigure(2, weight=2, minsize=200)  # CLIENTE (reducido)
+                self.lista_rma_frame.grid_columnconfigure(2, weight=2, minsize=176)  # CLIENTE (reducido, -24px para iconos)
                 self.lista_rma_frame.grid_columnconfigure(3, weight=1, minsize=150)  # DOCUMENTO
                 self.lista_rma_frame.grid_columnconfigure(4, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
                 self.lista_rma_frame.grid_columnconfigure(5, weight=1, minsize=180)  # ESTADO (ampliado)
@@ -3070,7 +3070,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
 
                 for i, reg in enumerate(registros):
-                    rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion = reg
+                    rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, numero_albaran_reposicion, numero_factura_abono, fecha_para_factura = reg
                     row = i + 1
 
                     # Calcular la última actividad usando la función auxiliar
@@ -3101,7 +3101,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         actions_bg = colors[0]
 
                     f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height, width=22)
+                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height, width=46)
                     f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
@@ -3123,17 +3123,30 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     lbl0 = ctk.CTkLabel(f0, text=codigo_rma)
                     lbl0.pack(anchor="w", padx=4, pady=0)
                     
-                    # Columna de asociación (icono)
+                    # Columna de iconos: asociaciones y contabilidad
                     lbl1 = None
+                    # Icono de asociación
                     if rma_id in asociaciones_dict:
                         codigos_asociados = asociaciones_dict[rma_id]
                         lbl1 = ctk.CTkLabel(f1, text="🔗", cursor="hand2")
-                        lbl1.pack(anchor="center", padx=0, pady=0)
-                        # Crear tooltip con la lista de RMAs asociados
+                        lbl1.pack(side="left", anchor="center", padx=0, pady=0)
                         tooltip_text = "Asociado a: " + ", ".join(codigos_asociados)
                         Tooltip(lbl1, tooltip_text)
-                        # Al hacer clic, abrir ventana con asociaciones
                         lbl1.bind("<Button-1>", lambda e, rid=rma_id: self.mostrar_ventana_asociaciones(rid))
+                    # Icono de contabilidad si hay albarán repos. o factura abono
+                    tiene_albaran = numero_albaran_reposicion and str(numero_albaran_reposicion).strip()
+                    tiene_factura_abono = numero_factura_abono and str(numero_factura_abono).strip()
+                    if tiene_albaran or tiene_factura_abono:
+                        partes_tooltip = []
+                        if tiene_albaran:
+                            partes_tooltip.append(f"Alb. Repos.: {str(numero_albaran_reposicion).strip()}")
+                        if tiene_factura_abono:
+                            partes_tooltip.append(f"Fra. Abono: {str(numero_factura_abono).strip()}")
+                        if fecha_para_factura and str(fecha_para_factura).strip():
+                            partes_tooltip.append(f"Fecha factura: {str(fecha_para_factura).strip()}")
+                        lbl1_cont = ctk.CTkLabel(f1, text="💶")
+                        lbl1_cont.pack(side="left", anchor="center", padx=0, pady=0)
+                        Tooltip(lbl1_cont, "\n".join(partes_tooltip))
                     
                     lbl2 = ctk.CTkLabel(f2, text=cliente)
                     lbl2.pack(anchor="w", padx=4, pady=0)

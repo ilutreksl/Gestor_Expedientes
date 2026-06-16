@@ -179,26 +179,32 @@ En la pestaña **"Datos del Expediente"** encontrarás:
 
 #### Paso 3: Añadir artículos
 
-1. Cambia a la pestaña **"Artículos"**
-2. En el formulario de artículos, completa:
-   - **Referencia**: Código del artículo ⚠️ *Obligatorio*
-   - **Cant. según documento**: Cantidad que indica el albarán
-   - **Cant. entregada**: Cantidad realmente recibida
-   - **Estado**: Selecciona el estado (Nuevo, Usado, Defectuoso, etc.)
-   - **Precio Unitario**: Precio del artículo en euros
-   - ☑ **Aplicar depreciación**: Marca si el artículo tiene depreciación
-     - Si marcas esta opción, aparecerá un campo para el % de depreciación
-   - **Precio Final**: Se calcula automáticamente según depreciación
+1. Cambia a la pestaña **"📦 Artículos"**
+2. Verás directamente la **lista de artículos** del expediente con todas sus columnas visibles: Referencia, Nº Albarán, Nº Order, Cantidades, Estado, Precios y Depreciación.
+3. Para añadir un artículo nuevo, haz clic en **"➕ Añadir Artículo"** o pulsa **Ctrl+A** — se abrirá una ventana con todos los campos:
 
-3. Haz clic en **"Añadir Artículo"**
-4. El artículo aparecerá en la lista inferior
-5. Repite para añadir más artículos
+| Campo | Descripción | Obligatorio |
+|-------|-------------|-------------|
+| **Referencia** | Código del artículo (se convierte a mayúsculas automáticamente) | ✅ Sí |
+| **Nº Albarán** | Número de albarán asociado a este artículo concreto | No |
+| **Nº Order** | Número de orden de compra (p. ej. partidas de tiras LED) | No |
+| **Cant. según documento** | Cantidad que indica el documento del cliente | No |
+| **Cant. entregada** | Cantidad realmente recibida | No |
+| **Estado** | Estado del artículo (Nuevo, Defectuoso, etc.) | No |
+| **Precio Unitario** | Precio base del artículo en euros | No |
+| **Precio Final** | Se calcula automáticamente (modo Auto activo por defecto) | No |
+| **Depreciación** | Marca "Aplicar" e introduce el % si procede | No |
+
+4. Pulsa **✔ Guardar** o **Enter** para confirmar. El artículo aparece en la lista.
+5. Repite para añadir más artículos.
+
+> 💡 **Navegación rápida en la ventana de artículo:** usa **Tab** para avanzar de campo en campo y **Shift+Tab** para retroceder. Pulsa **Enter** en cualquier campo para guardar directamente. **Escape** cierra sin guardar.
 
 **Gestión de artículos en la lista:**
-- ✏️ **Editar**: Clic en el botón del lápiz para modificar
-- ❌ **Eliminar**: Clic en la X roja para quitar de la lista
+- ✏️ **Editar**: Clic en el botón del lápiz → se abre la misma ventana con los datos cargados
+- ❌ **Eliminar**: Clic en la X roja para quitar el artículo de la lista
 
-💡 **Consejo**: El precio final se actualiza automáticamente mientras escribes. Si aplicas depreciación del 20% a un artículo de 100€, el precio final será 80€.
+> ⚠️ **Importante**: Un mismo expediente puede tener artículos iguales con albaranes distintos. Cada artículo tiene su propio Nº Albarán y Nº Order independientes.
 
 #### Paso 4: Guardar el expediente
 
@@ -2049,14 +2055,36 @@ Sí, cada expediente tiene un **Historial de Cambios**:
 
 ## Atajos de Teclado
 
+### Atajos globales (disponibles en cualquier pantalla)
+
+| Atajo | Acción |
+|-------|--------|
+| **Ctrl + N** | Crear nuevo expediente |
+| **Ctrl + F** | Ir a búsqueda avanzada |
+| **F5** | Refrescar el listado de expedientes |
+| **Ctrl + S** | Guardar (en formularios de expediente) |
+
+### Atajos en la pestaña Artículos
+
+| Atajo | Acción |
+|-------|--------|
+| **Ctrl + A** | Abrir ventana de nuevo artículo |
+
+### Atajos dentro de la ventana de artículo (modal)
+
+| Atajo | Acción |
+|-------|--------|
+| **Tab** | Ir al siguiente campo |
+| **Shift + Tab** | Volver al campo anterior |
+| **Enter** | Guardar el artículo directamente |
+| **Escape** | Cerrar sin guardar |
+
+### Atajos generales
+
 | Atajo | Acción |
 |-------|--------|
 | **Enter** | Confirmar / Buscar |
 | **Esc** | Cancelar / Cerrar diálogo |
-| **Ctrl + S** | Guardar (en formularios) |
-| **Ctrl + F** | Ir a búsqueda rápida |
-| **Tab** | Siguiente campo |
-| **Shift + Tab** | Campo anterior |
 
 ---
 
@@ -2103,6 +2131,6 @@ Comienza por crear tu primer expediente RMA y explora las diferentes funciones. 
 
 ---
 
-*Versión del manual: 1.1 - Febrero 2026*  
-*Última actualización: Nueva sección sobre restauración de backups (v1.0.30)*  
+*Versión del manual: 1.2 - Junio 2026*  
+*Última actualización: Nuevo sistema de artículos con Nº Albarán y Nº Order por artículo. Ventana modal para gestión de artículos. Atajos de teclado ampliados (v1.0.54)*  
 *Si encuentras errores en este manual o quieres sugerir mejoras, contacta con el administrador.*

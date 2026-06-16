@@ -1,4 +1,10 @@
-Cambio V.1.0.58 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.59 - ✨ Últimas mejoras implementadas:
+
+- Remodelado de la seccion de articulos de dentro de las fichas de expediente. Ahora tambien solicita el albaran o factura de compra y el numero de ORDER.
+- El informe de expedientes por quincena, tiene en cuanta este cambio y ahora al exportar el documento a excel, añade a cada expediente, los articulos relacionados y los albaranes/facturas de compra asociadas.
+
+
+Cambio V.1.0.58
 
 - Añadido icono en el listado de expedientes para saber si tiene albaran de reposicion y/o factura de abono. Muestra informacion del numero y de la ficha para facturar.
 - Renombrado de adjuntos, añadiendo el numero de RMA automaticamente. (1.0.57)

@@ -197,9 +197,7 @@ class ExpedientesQuincenaWindow:
                             0
                         ) as total_contabilizable,
                         m.resultado_expediente,
-                        m.fecha_para_factura,
-                        COALESCE(m.numero_albaran_reposicion, '') as numero_albaran_reposicion,
-                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono
+                        m.fecha_para_factura
                     FROM rma_maestro m
                     WHERE m.fecha_para_factura IS NOT NULL 
                     AND m.fecha_para_factura != ''
@@ -228,9 +226,7 @@ class ExpedientesQuincenaWindow:
                             0
                         ) as total_contabilizable,
                         m.resultado_expediente,
-                        m.fecha_para_factura,
-                        COALESCE(m.numero_albaran_reposicion, '') as numero_albaran_reposicion,
-                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono
+                        m.fecha_para_factura
                     FROM rma_maestro m
                     WHERE m.fecha_para_factura = ?
                     ORDER BY m.codigo_rma DESC
@@ -375,219 +371,104 @@ class ExpedientesQuincenaWindow:
                 label.pack(side="left", padx=1)
     
     def exportar_excel(self):
-        """Exporta los datos a Excel. Cada expediente aparece en negrita con sus artículos indentados debajo."""
+        """Exporta los datos a Excel con formato"""
         if not self.expedientes_data:
             messagebox.showwarning("Sin datos", "No hay datos para exportar")
             return
-
+        
+        # Diálogo para guardar archivo
         patron_quincena, descripcion = self.obtener_rango_fechas()
         nombre_sugerido = f"Expedientes_{patron_quincena}.xlsx"
-
+        
         filepath = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
             filetypes=[("Excel files", "*.xlsx")],
             initialfile=nombre_sugerido
         )
-
+        
         if not filepath:
             return
-
+        
         try:
             logger.info(f"Exportando {len(self.expedientes_data)} expedientes a Excel: {filepath}")
-
+            
             wb = Workbook()
             ws = wb.active
             ws.title = "Expedientes Quincena"
-
-            # --- Estilos ---
-            header_font      = Font(bold=True, size=11, color="FFFFFF")
-            exp_font         = Font(bold=True, size=10)
-            art_font         = Font(size=10, italic=True)
-            header_fill      = PatternFill(start_color="3b82f6", end_color="3b82f6", fill_type="solid")
-            art_fill         = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
-            header_align     = Alignment(horizontal="center", vertical="center")
-            left_align       = Alignment(horizontal="left",   vertical="center")
-
-            border_side      = Side(style='thin', color="BBBBBB")
-            border           = Border(left=border_side, right=border_side,
-                                      top=border_side, bottom=border_side)
-
-            # --- Título ---
-            # 11 columnas originales + 1 columna nueva: Alb.Repos./Fact.Abono
-            num_cols = 12
-            ws.merge_cells(f'A1:{chr(64 + num_cols)}1')
-            c = ws['A1']
-            c.value = f"EXPEDIENTES - {descripcion.upper()}"
-            c.font = Font(bold=True, size=14)
-            c.alignment = Alignment(horizontal="center", vertical="center")
-
-            # --- Resumen ---
-            ws.merge_cells(f'A2:{chr(64 + num_cols)}2')
+            
+            # Estilos
+            header_font = Font(bold=True, size=12, color="FFFFFF")
+            header_fill = PatternFill(start_color="3b82f6", end_color="3b82f6", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+            
+            border_side = Side(style='thin', color="000000")
+            border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
+            
+            # Título
+            ws.merge_cells('A1:L1')
+            cell = ws['A1']
+            cell.value = f"EXPEDIENTES - {descripcion.upper()}"
+            cell.font = Font(bold=True, size=14)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            
+            # Info general - Usar total_contabilizable (índice 9)
+            ws.merge_cells('A2:K2')
             total_importe = sum(float(exp[9]) if exp[9] else 0.0 for exp in self.expedientes_data)
-            c = ws['A2']
-            c.value = (f"Total: {len(self.expedientes_data)} expedientes | "
-                       f"Importe contabilizable: {total_importe:,.2f} € "
-                       f"(excluye artículos no contabilizables)")
-            c.alignment = Alignment(horizontal="center")
-
-            # --- Cabeceras (mismas 11 columnas que la vista) ---
+            cell = ws['A2']
+            cell.value = f"Total: {len(self.expedientes_data)} expedientes | Importe contabilizable: {total_importe:,.2f} € (excluye artículos no contabilizables)"
+            cell.alignment = Alignment(horizontal="center")
+            
+            # Cabeceras
             headers = [
-                "RMA", "Cliente", "Nº Documento",
-                "F. Emisión", "F. Recepción", "F. Autorización",
-                "F. Proceso", "F. Gestión", "Importe", "Resultado", "Quincena",
-                "Alb. Repos. / Fact. Abono"
+                "RMA", "Cliente", "Nº Documento", "F. Emisión", "F. Recepción",
+                "F. Autorización", "F. Proceso", "F. Gestión", "Importe", "Resultado", "Quincena"
             ]
-            for col_i, header in enumerate(headers, start=1):
-                c = ws.cell(row=4, column=col_i)
-                c.value = header
-                c.font = header_font
-                c.fill = header_fill
-                c.alignment = header_align
-                c.border = border
-
-            # --- Cargar artículos desde BD ---
-            # conectar_db devuelve (conn, cursor) — desempaquetar correctamente
-            codigos_a_id    = {}
-            articulos_por_exp = {}
-            try:
-                result = self.conectar_db()
-                if isinstance(result, tuple):
-                    conn_art, cur_art = result
-                else:
-                    conn_art = result
-                    cur_art  = conn_art.cursor()
-
-                if conn_art and cur_art:
-                    codigos_rma = [exp[0] for exp in self.expedientes_data if exp[0]]
-                    if codigos_rma:
-                        ph = ",".join(["?" for _ in codigos_rma])
-                        cur_art.execute(
-                            f"SELECT id, codigo_rma FROM rma_maestro WHERE codigo_rma IN ({ph})",
-                            codigos_rma
-                        )
-                        for row in cur_art.fetchall():
-                            codigos_a_id[row[1]] = row[0]
-
-                    if codigos_a_id:
-                        ids_list = list(codigos_a_id.values())
-                        ph2 = ",".join(["?" for _ in ids_list])
-                        # SELECT * para no fallar si numero_albaran/numero_order aún no existen en Turso
-                        cur_art.execute(
-                            f"SELECT * FROM rma_detalles WHERE rma_id IN ({ph2}) ORDER BY rma_id",
-                            ids_list
-                        )
-                        cols_art = [d[0] for d in cur_art.description]
-                        for raw_row in cur_art.fetchall():
-                            art_dict = dict(zip(cols_art, raw_row))
-                            art_dict.setdefault('numero_albaran', '')
-                            art_dict.setdefault('numero_order', '')
-                            art_dict.setdefault('estado_producto', '')
-                            art_dict.setdefault('precio_final', 0)
-                            art_dict.setdefault('cantidad_entregada', 0)
-                            if art_dict['numero_albaran'] is None:
-                                art_dict['numero_albaran'] = ''
-                            rid = art_dict['rma_id']
-                            if rid not in articulos_por_exp:
-                                articulos_por_exp[rid] = []
-                            articulos_por_exp[rid].append(art_dict)
-
-                    conn_art.close()
-            except Exception as e:
-                logger.warning(f"No se pudieron cargar artículos para export: {e}")
-
-            # --- Mapeo índices del expediente → columnas Excel ---
-            # exp: 0=codigo_rma, 1=cliente, 2=num_doc, 3-7=fechas,
-            #      8=precio_total, 9=total_contabilizable, 10=resultado, 11=quincena
-            # índices: 0-7 datos, 9=importe contabilizable, 10=resultado, 11=quincena
-            # 12=albaran_reposicion, 13=factura_abono → se combinan en la col 12 del Excel
-            columnas_indices = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]
-
-            # --- Escribir filas ---
-            row_idx = 5
-            for exp in self.expedientes_data:
-                codigo_rma = exp[0]
-
-                # Fila del expediente (negrita, sin relleno)
-                for excel_col, data_col in enumerate(columnas_indices, start=1):
-                    c = ws.cell(row=row_idx, column=excel_col)
-                    valor = exp[data_col] if exp[data_col] else "-"
-                    if data_col == 9 and valor != "-":
+            
+            for col, header in enumerate(headers, start=1):
+                cell = ws.cell(row=4, column=col)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+                cell.border = border
+            
+            # Datos - Mapeo de índices (excluir precio_total_expediente, usar total_contabilizable)
+            # Columnas Excel: RMA(0), Cliente(1), Doc(2), Fechas(3-7), Importe(9), Resultado(10), Quincena(11)
+            columnas_indices = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]  # Saltar índice 8 (precio_total_expediente)
+            
+            for row_idx, exp in enumerate(self.expedientes_data, start=5):
+                for excel_col_idx, data_col_idx in enumerate(columnas_indices, start=1):
+                    cell = ws.cell(row=row_idx, column=excel_col_idx)
+                    valor = exp[data_col_idx] if exp[data_col_idx] else "-"
+                    
+                    # Formatear importe (cuando data_col_idx == 9, es el total_contabilizable)
+                    if data_col_idx == 9 and valor != "-":
                         try:
-                            c.value = float(valor)
-                            c.number_format = '#,##0.00 "€"'
-                        except Exception:
-                            c.value = valor
+                            cell.value = float(valor)
+                            cell.number_format = '#,##0.00 "€"'
+                        except:
+                            cell.value = valor
                     else:
-                        c.value = valor
-                    c.font   = exp_font
-                    c.border = border
-                    c.alignment = left_align
-
-                # Columna 12: Nº Albarán Reposición / Nº Factura Abono (combinados)
-                alb_repos = str(exp[12]).strip() if len(exp) > 12 and exp[12] else ''
-                fact_abono = str(exp[13]).strip() if len(exp) > 13 and exp[13] else ''
-                if alb_repos and fact_abono:
-                    valor_combinado = f"{alb_repos} - {fact_abono}"
-                elif alb_repos:
-                    valor_combinado = alb_repos
-                elif fact_abono:
-                    valor_combinado = fact_abono
-                else:
-                    valor_combinado = ""
-                c12 = ws.cell(row=row_idx, column=12)
-                c12.value = valor_combinado
-                c12.font = exp_font
-                c12.border = border
-                c12.alignment = left_align
-
-                row_idx += 1
-
-                # Filas de artículos indentadas (mismas columnas, fondo gris)
-                rma_id_exp = codigos_a_id.get(codigo_rma)
-                if rma_id_exp and rma_id_exp in articulos_por_exp:
-                    for art in articulos_por_exp[rma_id_exp]:
-                        ref_art     = art.get('referencia_articulo', '') or ''
-                        num_albaran = art.get('numero_albaran', '') or ''
-                        estado_art  = art.get('estado_producto', '') or ''
-                        try:
-                            importe_art = float(art.get('precio_final', 0) or 0) * float(art.get('cantidad_entregada', 0) or 0)
-                        except Exception:
-                            importe_art = 0.0
-
-                        # Rellenar las 11 columnas con fondo gris; datos en posiciones específicas
-                        for c_i in range(1, num_cols + 1):
-                            c = ws.cell(row=row_idx, column=c_i)
-                            c.fill   = art_fill
-                            c.border = border
-                            c.font   = art_font
-                            c.alignment = left_align
-
-                        # Col 1 → Referencia con indentación visual
-                        ws.cell(row=row_idx, column=1).value = f"    ↳ {ref_art or ''}"
-                        # Col 2 → Nº Albarán
-                        ws.cell(row=row_idx, column=2).value = f"Alb: {num_albaran}" if num_albaran else ""
-                        # Col 4 → Estado artículo
-                        ws.cell(row=row_idx, column=4).value = estado_art or ""
-                        # Col 9 → Importe artículo (misma columna que "Importe" del expediente)
-                        c_imp = ws.cell(row=row_idx, column=9)
-                        c_imp.value  = importe_art
-                        c_imp.number_format = '#,##0.00 "€"'
-
-                        row_idx += 1
-
-            # --- Ajustar anchos de columna (mismos que antes) ---
-            anchos = [15, 30, 15, 12, 12, 14, 12, 12, 12, 20, 12, 28]
-            for col_i, ancho in enumerate(anchos, start=1):
-                ws.column_dimensions[chr(64 + col_i)].width = ancho
-
-            # --- Guardar ---
+                        cell.value = valor
+                    
+                    cell.border = border
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+            
+            # Ajustar anchos de columna
+            anchos = [15, 30, 15, 12, 12, 14, 12, 12, 12, 20, 12]
+            for col, ancho in enumerate(anchos, start=1):
+                ws.column_dimensions[chr(64 + col)].width = ancho
+            
+            # Guardar
             wb.save(filepath)
             logger.info(f"Excel exportado exitosamente: {filepath}")
             messagebox.showinfo("Éxito", f"Archivo exportado correctamente:\n{filepath}")
-
+            
         except Exception as e:
             logger.error(f"Error al exportar a Excel: {e}")
             messagebox.showerror("Error", f"Error al exportar: {e}")
+
+
 def mostrar_expedientes_quincena(parent_frame, conectar_db_func, username):
     """
     Función principal para mostrar la ventana de expedientes por quincena

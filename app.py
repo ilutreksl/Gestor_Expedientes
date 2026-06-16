@@ -1,4 +1,4 @@
-﻿import customtkinter as ctk
+import customtkinter as ctk
 import tkinter.messagebox as messagebox
 from tkinter import Toplevel
 import sqlite3
@@ -471,7 +471,12 @@ def connect_db(timeout: float | None = None):
                         if result_item.get("type") == "error":
                             error_msg = result_item.get("error", {}).get("message", "Unknown error")
                             # No imprimir errores de verificación de esquema que son normales
-                            if not ("tipo_almacenamiento" in sql and "SELECT" in sql):
+                            _es_error_esquema = (
+                                ("tipo_almacenamiento" in sql and "SELECT" in sql) or
+                                ("numero_albaran" in error_msg and "no such column" in error_msg) or
+                                ("numero_order" in error_msg and "no such column" in error_msg)
+                            )
+                            if not _es_error_esquema:
                                 print(f"SQL Error: {error_msg}")
                                 print(f"Query: {sql}")
                                 print(f"Params: {params}")
@@ -1179,6 +1184,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             tareas_notificaciones.actualizar_tabla_tareas(self.master.conectar_db)
         except Exception as e:
             logger.error(f"Error al crear/actualizar tablas: {e}")
+
+        # Migrar columnas de rma_maestro y rma_detalles
+        try:
+            self.verificar_columna_motivo()
+        except Exception as e:
+            logger.error(f"Error en migración de columnas: {e}")
             
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
@@ -1306,8 +1317,55 @@ class VentanaPrincipal(ctk.CTkToplevel):
             print(f"Error comprobando/añadiendo columnas en rma_maestro: {e}")
         finally:
             conn.close()
+
+        # Migración de columnas en rma_detalles (se ejecuta siempre, también en Turso)
+        self._migrar_columnas_rma_detalles()
     
     
+    def _migrar_columnas_rma_detalles(self):
+        """
+        Añade las columnas numero_albaran y numero_order a rma_detalles si no existen.
+        Se ejecuta tanto en SQLite local como en Turso (ALTER TABLE ADD COLUMN es seguro en ambos).
+        """
+        try:
+            result = self.master.conectar_db()
+            if isinstance(result, tuple):
+                conn, cursor = result
+            else:
+                conn = result
+                cursor = conn.cursor() if conn else None
+
+            if not conn or not cursor:
+                return
+
+            columnas_necesarias = {
+                'numero_albaran': "TEXT DEFAULT ''",
+                'numero_order': "TEXT DEFAULT ''",
+            }
+
+            try:
+                cursor.execute("PRAGMA table_info('rma_detalles')")
+                cols_actuales = [row[1] for row in cursor.fetchall()]
+            except Exception:
+                # Turso no soporta PRAGMA — intentar ADD COLUMN directamente (falla silenciosamente si ya existe)
+                cols_actuales = []
+
+            for col_name, col_def in columnas_necesarias.items():
+                if col_name not in cols_actuales:
+                    try:
+                        cursor.execute(f"ALTER TABLE rma_detalles ADD COLUMN {col_name} {col_def}")
+                        conn.commit()
+                        print(f"✅ Columna '{col_name}' añadida a rma_detalles")
+                    except Exception as e:
+                        # Si ya existe la columna, el error es esperado y se ignora
+                        err_str = str(e).lower()
+                        if "duplicate" not in err_str and "already exists" not in err_str:
+                            print(f"Info al añadir '{col_name}' en rma_detalles: {e}")
+
+            conn.close()
+        except Exception as e:
+            print(f"Error en migración rma_detalles: {e}")
+
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""
         from lib.confirmacion_cierre import confirmar_cierre_aplicacion
@@ -5524,93 +5582,41 @@ class VentanaPrincipal(ctk.CTkToplevel):
         articulos_frame.grid_columnconfigure(0, weight=1)
         articulos_frame.grid_columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(articulos_frame, text="**DETALLE DE ARTÍCULOS**", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=6, pady=(10, 5), sticky="w")
-        
-        # 4. Entradas para añadir un nuevo artículo (Input Article Frame)
-        input_articulo_frame = ctk.CTkFrame(articulos_frame)
-        input_articulo_frame.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(5, 10))
-        # ... (Mantener la definición de las entradas self.art_ref, self.art_cant_doc, etc.)
-        # ... (NO TOCAR ESTA SECCIÓN, está bien como está, solo moverla)
+        # Cabecera con título y botón de añadir artículo
+        header_art_frame = ctk.CTkFrame(articulos_frame, fg_color="transparent")
+        header_art_frame.grid(row=0, column=0, columnspan=6, pady=(10, 5), sticky="ew")
+        header_art_frame.grid_columnconfigure(0, weight=1)
 
-        # Etiquetas
-        ctk.CTkLabel(input_articulo_frame, text="Ref. Artículo", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Cant. Doc.", font=ctk.CTkFont(size=11)).grid(row=0, column=1, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Cant. Entregada", font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Estado", font=ctk.CTkFont(size=11)).grid(row=0, column=3, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Precio Unitario", font=ctk.CTkFont(size=11)).grid(row=0, column=4, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Precio Final", font=ctk.CTkFont(size=11)).grid(row=0, column=5, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Auto", font=ctk.CTkFont(size=11)).grid(row=0, column=6, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=7, padx=5)
-        ctk.CTkLabel(input_articulo_frame, text="% Deprec.", font=ctk.CTkFont(size=11)).grid(row=0, column=8, padx=5)
-        
-        # Entradas
-        self.art_ref = ctk.CTkEntry(input_articulo_frame, width=150)
-        self.art_ref.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
-        self.art_cant_doc = ctk.CTkEntry(input_articulo_frame, width=80)
-        self.art_cant_doc.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
-        self.art_cant_entregada = ctk.CTkEntry(input_articulo_frame, width=80)
-        self.art_cant_entregada.grid(row=1, column=2, padx=5, pady=2, sticky="ew")
-        self.art_estado = ctk.CTkOptionMenu(input_articulo_frame, values=self.OPCIONES["Estado_Producto"], width=150)
-        self.art_estado.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
-        self.art_precio = ctk.CTkEntry(input_articulo_frame, width=100)
-        self.art_precio.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
-        
-        # Campo Precio Final (calculado o manual)
-        self.art_precio_final = ctk.CTkEntry(input_articulo_frame, width=100, placeholder_text="Auto")
-        self.art_precio_final.grid(row=1, column=5, padx=5, pady=2, sticky="ew")
-        self.art_precio_final.configure(state="disabled")  # Deshabilitado por defecto (modo auto)
-        
-        # Checkbox Auto (aplicar descuentos automáticamente) - activado por defecto
-        self.art_auto_descuento_var = ctk.IntVar(value=1)
-        self.art_auto_descuento_check = ctk.CTkCheckBox(input_articulo_frame, text="", variable=self.art_auto_descuento_var,
-                                                         command=self.toggle_modo_calculo_precio, width=30)
-        self.art_auto_descuento_check.grid(row=1, column=6, padx=5, pady=2)
-        
-        # Checkbox de depreciación
-        self.art_depreciacion_var = ctk.IntVar(value=0)
-        self.art_depreciacion_check = ctk.CTkCheckBox(input_articulo_frame, text="", variable=self.art_depreciacion_var,
-                                                      command=self.toggle_porcentaje_depreciacion, width=30)
-        self.art_depreciacion_check.grid(row=1, column=7, padx=5, pady=2)
-        
-        # Campo de porcentaje de depreciación (deshabilitado por defecto)
-        self.art_porcentaje_depreciacion = ctk.CTkEntry(input_articulo_frame, width=80, placeholder_text="0")
-        self.art_porcentaje_depreciacion.grid(row=1, column=8, padx=5, pady=2, sticky="ew")
-        self.art_porcentaje_depreciacion.configure(state="disabled")
-        
-        # Bindings para cálculo en tiempo real
-        self.art_precio.bind("<KeyRelease>", self.calcular_precio_final_tiempo_real)
-        self.art_porcentaje_depreciacion.bind("<KeyRelease>", self.calcular_precio_final_tiempo_real)
+        ctk.CTkLabel(header_art_frame, text="DETALLE DE ARTÍCULOS", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w")
 
-        # Botones de Acción de Artículos
-        # Guardar referencia al botón para permitir cambiar su comportamiento durante la edición
-        self.btn_anadir_articulo = ctk.CTkButton(input_articulo_frame,
-                                                 text="➕",
-                                                 width=30,
-                                                 command=self.anadir_articulo)
-        self.btn_anadir_articulo.grid(row=1, column=9, padx=5, pady=2)
-        
-        # Label de advertencia para cliente sin descuento (oculto por defecto)
-        self.lbl_advertencia_sin_descuento = ctk.CTkLabel(input_articulo_frame, 
-                                                          text="⚠️ Cliente sin descuento configurado - Introduce precio final manualmente",
-                                                          text_color="orange",
-                                                          font=ctk.CTkFont(size=11, weight="bold"))
-        self.lbl_advertencia_sin_descuento.grid(row=2, column=0, columnspan=10, padx=5, pady=5, sticky="w")
-        self.lbl_advertencia_sin_descuento.grid_remove()  # Ocultar por defecto
+        self.btn_anadir_articulo = ctk.CTkButton(
+            header_art_frame,
+            text="➕ Añadir Artículo  [Ctrl+A]",
+            width=200,
+            command=self.abrir_modal_articulo
+        )
+        self.btn_anadir_articulo.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
-        # Permitir pulsar ENTER en los campos para añadir/actualizar artículo
+        # Atajo de teclado Ctrl+A para abrir el modal de nuevo artículo desde la pestaña
         try:
-            self.art_ref.bind("<Return>", self._enter_articulo)
-            self.art_cant_doc.bind("<Return>", self._enter_articulo)
-            self.art_cant_entregada.bind("<Return>", self._enter_articulo)
-            self.art_precio.bind("<Return>", self._enter_articulo)
-            self.art_precio_final.bind("<Return>", self._enter_articulo)
-            self.art_porcentaje_depreciacion.bind("<Return>", self._enter_articulo)
+            self.winfo_toplevel().bind_all(
+                "<Control-a>",
+                lambda e: self.abrir_modal_articulo() if self.tabview.get() == "📦 Artículos" else None
+            )
         except Exception:
             pass
-        
-        # 5. Listado de Artículos ya añadidos
-        self.articulos_list_frame = ctk.CTkFrame(articulos_frame)
-        self.articulos_list_frame.grid(row=2, column=0, columnspan=6, sticky="ew", padx=10, pady=10)
+
+        # Variables internas necesarias para compatibilidad con funciones existentes
+        self.art_auto_descuento_var = ctk.IntVar(value=1)
+        self.art_depreciacion_var = ctk.IntVar(value=0)
+        # Widgets ocultos (no visibles en la pestaña, usados por abrir_modal_articulo internamente)
+        self.lbl_advertencia_sin_descuento = ctk.CTkLabel(articulos_frame, text="")
+        self.lbl_advertencia_sin_descuento.grid_forget()
+
+        # 5. Listado de Artículos ya añadidos (scrollable)
+        articulos_frame.grid_rowconfigure(1, weight=1)
+        self.articulos_list_frame = ctk.CTkScrollableFrame(articulos_frame)
+        self.articulos_list_frame.grid(row=1, column=0, columnspan=6, sticky="nsew", padx=10, pady=10)
         self.actualizar_listado_articulos()
 
         
@@ -6185,64 +6191,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             print(f"Error al calcular precio final: {e}")
     
     def anadir_articulo(self):
-        """Añade una fila de artículo a la lista temporal."""
-        from lib.articulo_depreciacion import validar_porcentaje_depreciacion
-        
-        try:
-            # Convertir referencia a mayúsculas siempre
-            referencia = self.art_ref.get().strip().upper()
-            # Permitir decimales en las cantidades
-            cant_doc = float(self.art_cant_doc.get().replace(',', '.') or 0.0)
-            cant_entregada = float(self.art_cant_entregada.get().replace(',', '.') or 0.0)
-            estado = self.art_estado.get()
-            # Reemplazar comas por puntos para que float funcione
-            precio_unitario = float(self.art_precio.get().replace(',', '.') or 0.0)
-            
-            # Precio final (auto o manual)
-            if self.art_auto_descuento_var.get() == 1:  # Modo AUTO
-                # Ya está calculado en el campo
-                precio_final = float(self.art_precio_final.get().replace(',', '.') or precio_unitario)
-            else:  # Modo MANUAL
-                precio_final_str = self.art_precio_final.get().strip().replace(',', '.')
-                precio_final = float(precio_final_str) if precio_final_str else precio_unitario
-            
-            # Depreciación
-            tiene_depreciacion = self.art_depreciacion_var.get() == 1
-            porcentaje_depreciacion = 0.0
-            
-            if tiene_depreciacion:
-                porcentaje_str = self.art_porcentaje_depreciacion.get().strip()
-                es_valido, porcentaje_valor, mensaje_error = validar_porcentaje_depreciacion(porcentaje_str)
-                
-                if not es_valido:
-                    messagebox.showerror("Error", f"Porcentaje de depreciación inválido: {mensaje_error}")
-                    return
-                
-                porcentaje_depreciacion = porcentaje_valor
-                
-        except ValueError:
-            print("Error: Cantidad y Precio deben ser números.")
-            return
-
-        if not referencia:
-            print("Error: La Referencia es obligatoria.")
-            return
-
-        nuevo_articulo = {
-            "referencia_articulo": referencia,
-            "cantidad_segun_documento": cant_doc,
-            "cantidad_entregada": cant_entregada,
-            "estado_producto": estado,
-            "precio_unitario": precio_unitario,
-            "precio_final": precio_final,
-            "depreciacion": 1 if tiene_depreciacion else 0,
-            "porcentaje_depreciacion": porcentaje_depreciacion,
-            "contabilizar": 1  # Por defecto, todos los artículos nuevos contabilizan
-        }
-        
-        self.articulos_data.append(nuevo_articulo)
-        self.actualizar_listado_articulos()
-        self.limpiar_articulo()
+        """Abre el modal para añadir un nuevo artículo (wrapper de compatibilidad)."""
+        self.abrir_modal_articulo(index=None)
 
     def limpiar_articulo(self):
         """Limpia los campos de entrada de un solo artículo."""
@@ -6293,51 +6243,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.actualizar_listado_articulos()
 
     def editar_articulo(self, index):
-        """Carga un artículo en los campos de entrada para su edición."""
+        """Abre la ventana modal de edición para el artículo en la posición index."""
         if 0 <= index < len(self.articulos_data):
-            art = self.articulos_data[index]
-            try:
-                self.art_ref.delete(0, ctk.END); self.art_ref.insert(0, str(art.get('referencia_articulo', '')))
-                self.art_cant_doc.delete(0, ctk.END); self.art_cant_doc.insert(0, str(art.get('cantidad_segun_documento', '')))
-                self.art_cant_entregada.delete(0, ctk.END); self.art_cant_entregada.insert(0, str(art.get('cantidad_entregada', '')))
-                self.art_precio.delete(0, ctk.END); self.art_precio.insert(0, str(art.get('precio_unitario', '')))
-                try:
-                    self.art_estado.set(art.get('estado_producto', self.OPCIONES['Estado_Producto'][0]))
-                except Exception:
-                    pass
-                
-                # Cargar precio final (activar modo manual temporalmente)
-                precio_final = art.get('precio_final', art.get('precio_unitario', 0.0))
-                self.art_precio_final.configure(state="normal")
-                self.art_precio_final.delete(0, ctk.END)
-                self.art_precio_final.insert(0, str(precio_final))
-                
-                # Mantener modo auto activado por defecto
-                self.art_auto_descuento_var.set(1)
-                self.art_precio_final.configure(state="disabled")
-                
-                # Cargar depreciación
-                depreciacion = art.get('depreciacion', 0)
-                porcentaje = art.get('porcentaje_depreciacion', 0.0)
-                
-                self.art_depreciacion_var.set(depreciacion)
-                if depreciacion == 1:
-                    self.art_porcentaje_depreciacion.configure(state="normal")
-                    self.art_porcentaje_depreciacion.delete(0, ctk.END)
-                    self.art_porcentaje_depreciacion.insert(0, str(porcentaje))
-                else:
-                    self.art_porcentaje_depreciacion.configure(state="disabled")
-                    self.art_porcentaje_depreciacion.delete(0, ctk.END)
-                    self.art_porcentaje_depreciacion.insert(0, "0")
-                    
-            except Exception:
-                pass
-            # Marcar índice en edición y cambiar botón
-            self.editing_articulo_index = index
-            try:
-                self.btn_anadir_articulo.configure(text="✔️", command=self.actualizar_articulo)
-            except Exception:
-                pass
+            self.abrir_modal_articulo(index=index)
 
     def actualizar_articulo(self):
         """Actualiza el artículo seleccionado con los valores actuales de los campos."""
@@ -6421,8 +6329,257 @@ class VentanaPrincipal(ctk.CTkToplevel):
             else:
                 self.anadir_articulo()
         except Exception:
-            # No propagamos excepciones por un ENTER accidental
             pass
+
+    def abrir_modal_articulo(self, index=None):
+        """
+        Abre una ventana modal para añadir o editar un artículo.
+        index: None = modo añadir nuevo; int = modo editar artículo existente.
+        Atajo desde la pestaña de artículos: Ctrl+A abre este modal para nuevo artículo.
+        Navegación: Tab avanza entre campos, Shift+Tab retrocede. Enter guarda.
+        """
+        from lib.articulo_depreciacion import validar_porcentaje_depreciacion
+        from lib.articulo_utils import obtener_descuento_cliente, calcular_precio_final
+
+        es_edicion = index is not None
+        art_existente = self.articulos_data[index] if es_edicion else {}
+
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Editar Artículo" if es_edicion else "Añadir Artículo")
+        ventana.geometry("680x540")
+        ventana.resizable(False, False)
+        ventana.grab_set()
+        ventana.focus_set()
+
+        # Centrar respecto a la ventana padre
+        try:
+            self.update_idletasks()
+            px = self.winfo_rootx() + self.winfo_width() // 2 - 340
+            py = self.winfo_rooty() + self.winfo_height() // 2 - 270
+            ventana.geometry(f"680x540+{px}+{py}")
+        except Exception:
+            pass
+
+        frame = ctk.CTkScrollableFrame(ventana)
+        frame.pack(fill="both", expand=True, padx=15, pady=15)
+        frame.grid_columnconfigure(1, weight=1)
+
+        titulo = "✏️ Editar Artículo" if es_edicion else "➕ Nuevo Artículo"
+        ctk.CTkLabel(frame, text=titulo, font=ctk.CTkFont(size=16, weight="bold")).grid(
+            row=0, column=0, columnspan=2, pady=(5, 15), sticky="w")
+
+        def lbl(text, row):
+            ctk.CTkLabel(frame, text=text, anchor="w").grid(row=row, column=0, padx=(0, 10), pady=5, sticky="w")
+
+        # --- Campos con orden de Tab explícito ---
+        lbl("Ref. Artículo *", 1)
+        e_ref = ctk.CTkEntry(frame, width=350)
+        e_ref.grid(row=1, column=1, pady=5, sticky="ew")
+        e_ref.insert(0, art_existente.get("referencia_articulo", ""))
+
+        lbl("Nº Albarán", 2)
+        e_albaran = ctk.CTkEntry(frame, width=350)
+        e_albaran.grid(row=2, column=1, pady=5, sticky="ew")
+        e_albaran.insert(0, art_existente.get("numero_albaran", "") or "")
+
+        lbl("Nº Order", 3)
+        e_order = ctk.CTkEntry(frame, width=350)
+        e_order.grid(row=3, column=1, pady=5, sticky="ew")
+        e_order.insert(0, art_existente.get("numero_order", "") or "")
+
+        lbl("Cant. según Documento", 4)
+        e_cant_doc = ctk.CTkEntry(frame, width=150)
+        e_cant_doc.grid(row=4, column=1, pady=5, sticky="w")
+        e_cant_doc.insert(0, str(art_existente.get("cantidad_segun_documento", "")))
+
+        lbl("Cant. Entregada", 5)
+        e_cant_ent = ctk.CTkEntry(frame, width=150)
+        e_cant_ent.grid(row=5, column=1, pady=5, sticky="w")
+        e_cant_ent.insert(0, str(art_existente.get("cantidad_entregada", "")))
+
+        lbl("Estado", 6)
+        e_estado = ctk.CTkOptionMenu(frame, values=self.OPCIONES["Estado_Producto"], width=250)
+        e_estado.grid(row=6, column=1, pady=5, sticky="w")
+        try:
+            e_estado.set(art_existente.get("estado_producto", self.OPCIONES["Estado_Producto"][0]))
+        except Exception:
+            pass
+
+        lbl("Precio Unitario", 7)
+        e_precio = ctk.CTkEntry(frame, width=150)
+        e_precio.grid(row=7, column=1, pady=5, sticky="w")
+        e_precio.insert(0, str(art_existente.get("precio_unitario", "")))
+
+        lbl("Precio Final", 8)
+        precio_final_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        precio_final_frame.grid(row=8, column=1, pady=5, sticky="ew")
+        e_precio_final = ctk.CTkEntry(precio_final_frame, width=120)
+        e_precio_final.pack(side="left", padx=(0, 8))
+        e_precio_final.insert(0, str(art_existente.get("precio_final", art_existente.get("precio_unitario", ""))))
+
+        var_auto = ctk.IntVar(value=1)
+        def _toggle_auto():
+            if var_auto.get() == 1:
+                e_precio_final.configure(state="disabled")
+            else:
+                e_precio_final.configure(state="normal")
+        chk_auto = ctk.CTkCheckBox(precio_final_frame, text="Auto", variable=var_auto, command=_toggle_auto)
+        chk_auto.pack(side="left")
+        e_precio_final.configure(state="disabled")
+
+        def _recalc_precio(event=None):
+            if var_auto.get() != 1:
+                return
+            try:
+                precio_u = float(e_precio.get().replace(',', '.') or 0)
+                cliente_actual = ""
+                if hasattr(self, 'campos_rma') and 'cliente' in self.campos_rma:
+                    try:
+                        cliente_actual = self.campos_rma['cliente'].get()
+                    except Exception:
+                        pass
+                descuento = obtener_descuento_cliente(self.master.conectar_db, cliente_actual)
+                tiene_dep = var_dep.get() == 1
+                try:
+                    porc_dep = float(e_porc_dep.get().replace(',', '.') or 0)
+                except Exception:
+                    porc_dep = 0.0
+                pf = calcular_precio_final(precio_u, descuento, tiene_dep, porc_dep)
+                e_precio_final.configure(state="normal")
+                e_precio_final.delete(0, "end")
+                e_precio_final.insert(0, f"{pf:.2f}")
+                if var_auto.get() == 1:
+                    e_precio_final.configure(state="disabled")
+            except Exception:
+                pass
+
+        e_precio.bind("<KeyRelease>", _recalc_precio)
+
+        lbl("Depreciación", 9)
+        dep_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        dep_frame.grid(row=9, column=1, pady=5, sticky="w")
+        var_dep = ctk.IntVar(value=art_existente.get("depreciacion", 0))
+        e_porc_dep = ctk.CTkEntry(dep_frame, width=80, placeholder_text="0")
+        e_porc_dep.pack(side="right", padx=(8, 0))
+        ctk.CTkLabel(dep_frame, text="% Deprec.:").pack(side="right")
+        porc_actual = art_existente.get("porcentaje_depreciacion", 0.0)
+        e_porc_dep.insert(0, str(porc_actual) if porc_actual else "0")
+
+        def _toggle_dep():
+            if var_dep.get() == 1:
+                e_porc_dep.configure(state="normal")
+            else:
+                e_porc_dep.configure(state="disabled")
+                e_porc_dep.delete(0, "end")
+                e_porc_dep.insert(0, "0")
+            _recalc_precio()
+
+        chk_dep = ctk.CTkCheckBox(dep_frame, text="Aplicar", variable=var_dep, command=_toggle_dep)
+        chk_dep.pack(side="left")
+        if var_dep.get() != 1:
+            e_porc_dep.configure(state="disabled")
+        e_porc_dep.bind("<KeyRelease>", _recalc_precio)
+
+        lbl_warn_dep = ctk.CTkLabel(frame, text="", text_color="red")
+        lbl_warn_dep.grid(row=10, column=0, columnspan=2, sticky="w")
+
+        # --- Botones ---
+        btn_frame = ctk.CTkFrame(ventana, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+
+        def _guardar(event=None):
+            from lib.articulo_depreciacion import validar_porcentaje_depreciacion
+            referencia = e_ref.get().strip().upper()
+            if not referencia:
+                messagebox.showwarning("Validación", "La referencia es obligatoria.", parent=ventana)
+                return
+            try:
+                cant_doc = float(e_cant_doc.get().replace(',', '.') or 0.0)
+                cant_ent = float(e_cant_ent.get().replace(',', '.') or 0.0)
+                precio_u = float(e_precio.get().replace(',', '.') or 0.0)
+            except ValueError:
+                messagebox.showwarning("Validación", "Cantidad y Precio deben ser números.", parent=ventana)
+                return
+
+            tiene_dep = var_dep.get() == 1
+            porc_dep = 0.0
+            if tiene_dep:
+                es_valido, porc_dep, msg_err = validar_porcentaje_depreciacion(e_porc_dep.get().strip())
+                if not es_valido:
+                    messagebox.showerror("Error", f"Porcentaje de depreciación inválido: {msg_err}", parent=ventana)
+                    return
+
+            if var_auto.get() == 1:
+                try:
+                    cliente_actual = ""
+                    if hasattr(self, 'campos_rma') and 'cliente' in self.campos_rma:
+                        try:
+                            cliente_actual = self.campos_rma['cliente'].get()
+                        except Exception:
+                            pass
+                    descuento = obtener_descuento_cliente(self.master.conectar_db, cliente_actual)
+                    precio_f = calcular_precio_final(precio_u, descuento, tiene_dep, porc_dep)
+                except Exception:
+                    precio_f = precio_u
+            else:
+                pf_str = e_precio_final.get().strip().replace(',', '.')
+                precio_f = float(pf_str) if pf_str else precio_u
+
+            nuevo_art = {
+                "referencia_articulo": referencia,
+                "numero_albaran": e_albaran.get().strip(),
+                "numero_order": e_order.get().strip(),
+                "cantidad_segun_documento": cant_doc,
+                "cantidad_entregada": cant_ent,
+                "estado_producto": e_estado.get(),
+                "precio_unitario": precio_u,
+                "precio_final": precio_f,
+                "depreciacion": 1 if tiene_dep else 0,
+                "porcentaje_depreciacion": porc_dep,
+                "contabilizar": self.articulos_data[index].get("contabilizar", 1) if es_edicion else 1,
+            }
+
+            if es_edicion:
+                self.articulos_data[index] = nuevo_art
+            else:
+                self.articulos_data.append(nuevo_art)
+
+            self.actualizar_listado_articulos()
+            ventana.destroy()
+
+        ctk.CTkButton(btn_frame, text="✔ Guardar", command=_guardar, width=120).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(btn_frame, text="Cancelar", fg_color="gray40", hover_color="gray30",
+                      command=ventana.destroy, width=100).pack(side="right")
+
+        # --- Navegación con Tab entre campos de entrada ---
+        campos_tab = [e_ref, e_albaran, e_order, e_cant_doc, e_cant_ent, e_precio, e_porc_dep]
+
+        def _tab_siguiente(event, campo_actual):
+            idx_actual = campos_tab.index(campo_actual)
+            siguiente = campos_tab[(idx_actual + 1) % len(campos_tab)]
+            # Saltar e_porc_dep si la depreciación está desactivada
+            if siguiente is e_porc_dep and var_dep.get() != 1:
+                siguiente = campos_tab[0]
+            siguiente.focus_set()
+            return "break"  # Evitar el Tab por defecto de Tk
+
+        def _tab_anterior(event, campo_actual):
+            idx_actual = campos_tab.index(campo_actual)
+            anterior = campos_tab[(idx_actual - 1) % len(campos_tab)]
+            if anterior is e_porc_dep and var_dep.get() != 1:
+                anterior = campos_tab[-2]
+            anterior.focus_set()
+            return "break"
+
+        for campo in campos_tab:
+            campo.bind("<Tab>", lambda e, c=campo: _tab_siguiente(e, c))
+            campo.bind("<Shift-Tab>", lambda e, c=campo: _tab_anterior(e, c))
+            campo.bind("<Return>", _guardar)
+
+        # --- Escape para cerrar ---
+        ventana.bind("<Escape>", lambda e: ventana.destroy())
+
+        e_ref.focus_set()
 
     def actualizar_listado_articulos(self):
         """Redibuja la tabla con los artículos de la lista temporal."""
@@ -6438,8 +6595,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
             return
             
         # Dibujar encabezados y filas usando grid directamente en el contenedor principal
-        cols = ["Ref. Artículo", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Precio Final", "Deprec.", "% Deprec.", "✓ Contabiliza", "Acción", ""]
-        weights = [2, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0]
+        cols = ["Ref. Artículo", "Nº Albarán", "Nº Order", "Cant. Doc.", "Cant. Entregada", "Estado", "Precio Unit.", "Precio Final", "Deprec.", "% Deprec.", "✓ Contabiliza", "Acción", ""]
+        weights = [2, 1, 1, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0]
         header_font = ctk.CTkFont(weight="bold", size=12)
 
         # Configurar columnas del contenedor para que se alineen entre filas
@@ -6459,9 +6616,9 @@ class VentanaPrincipal(ctk.CTkToplevel):
             idx = i  # Guardar índice para eventos
             
             try:
-                # Crear frames para cada columna (excepto acciones)
+                # Crear frames para cada columna (excepto acciones) — ahora son 10 columnas de datos
                 frames_fila = []
-                for col in range(8):  # Columnas 0-7 (sin acciones)
+                for col in range(10):  # Columnas 0-9 (ref, albaran, order, cant_doc, cant_ent, estado, precio_u, precio_f, deprec, porc)
                     f = ctk.CTkFrame(self.articulos_list_frame, fg_color="transparent")
                     f.grid(row=row, column=col, sticky="ew", padx=0, pady=0)
                     frames_fila.append(f)
@@ -6469,44 +6626,48 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # Labels dentro de los frames
                 lbl_ref = ctk.CTkLabel(frames_fila[0], text=item["referencia_articulo"])
                 lbl_ref.pack(anchor="w", padx=5, pady=2)
-                
-                lbl_cant_doc = ctk.CTkLabel(frames_fila[1], text=item["cantidad_segun_documento"])
+
+                lbl_albaran = ctk.CTkLabel(frames_fila[1], text=item.get("numero_albaran", "") or "")
+                lbl_albaran.pack(anchor="w", padx=5, pady=2)
+
+                lbl_order = ctk.CTkLabel(frames_fila[2], text=item.get("numero_order", "") or "")
+                lbl_order.pack(anchor="w", padx=5, pady=2)
+
+                lbl_cant_doc = ctk.CTkLabel(frames_fila[3], text=item["cantidad_segun_documento"])
                 lbl_cant_doc.pack(anchor="w", padx=5, pady=2)
                 
-                lbl_cant_ent = ctk.CTkLabel(frames_fila[2], text=item["cantidad_entregada"])
+                lbl_cant_ent = ctk.CTkLabel(frames_fila[4], text=item["cantidad_entregada"])
                 lbl_cant_ent.pack(anchor="w", padx=5, pady=2)
                 
-                lbl_estado = ctk.CTkLabel(frames_fila[3], text=item["estado_producto"])
+                lbl_estado = ctk.CTkLabel(frames_fila[5], text=item["estado_producto"])
                 lbl_estado.pack(anchor="w", padx=5, pady=2)
                 
-                lbl_precio_unit = ctk.CTkLabel(frames_fila[4], text=f"{item['precio_unitario']:.2f} €")
+                lbl_precio_unit = ctk.CTkLabel(frames_fila[6], text=f"{item['precio_unitario']:.2f} €")
                 lbl_precio_unit.pack(anchor="w", padx=5, pady=2)
                 
                 precio_final = item.get("precio_final", item.get("precio_unitario", 0.0))
-                lbl_precio_final = ctk.CTkLabel(frames_fila[5], text=f"{precio_final:.2f} €")
+                lbl_precio_final = ctk.CTkLabel(frames_fila[7], text=f"{precio_final:.2f} €")
                 lbl_precio_final.pack(anchor="w", padx=5, pady=2)
                 
                 deprec_text = "✓" if item.get("depreciacion", 0) == 1 else "-"
-                lbl_deprec = ctk.CTkLabel(frames_fila[6], text=deprec_text)
+                lbl_deprec = ctk.CTkLabel(frames_fila[8], text=deprec_text)
                 lbl_deprec.pack(anchor="w", padx=5, pady=2)
                 
                 porcentaje = item.get("porcentaje_depreciacion", 0.0)
                 porcentaje_text = f"{porcentaje}%" if item.get("depreciacion", 0) == 1 else "-"
-                lbl_porc = ctk.CTkLabel(frames_fila[7], text=porcentaje_text)
+                lbl_porc = ctk.CTkLabel(frames_fila[9], text=porcentaje_text)
                 lbl_porc.pack(anchor="w", padx=5, pady=2)
 
-                # Checkbox de contabilizar (solo editable por Admin y Dpto. Técnico)
+                # Checkbox de contabilizar (solo editable por Admin y Dpto. Técnico) — columna 10
                 contabilizar_value = item.get("contabilizar", 1)
                 
                 # Convertir explícitamente a int para evitar problemas con strings
-                # Si viene "0" como string, bool("0") sería True, pero int("0") es 0
                 try:
                     contabilizar_int = int(contabilizar_value)
                 except (ValueError, TypeError):
                     contabilizar_int = 1
                     logger.warning(f"Valor de contabilizar inválido: {contabilizar_value} (tipo: {type(contabilizar_value).__name__}), usando 1")
                 
-                # LOG: Debug del valor convertido
                 logger.debug(f"[RENDER] Artículo {item.get('referencia_articulo')}: contabilizar_value={contabilizar_value} -> int={contabilizar_int} -> bool={bool(contabilizar_int)}")
                 
                 var_contabilizar = ctk.BooleanVar(value=bool(contabilizar_int))
@@ -6515,7 +6676,6 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 puede_modificar = self.rol in ["admin", "administrador", "Dpto. Tecnico"]
                 
                 def _toggle_contabilizar(idx_art=idx, var_chk=var_contabilizar):
-                    # Actualizar el valor en articulos_data
                     nuevo_valor = 1 if var_chk.get() else 0
                     self.articulos_data[idx_art]['contabilizar'] = nuevo_valor
                     logger.info(f"Artículo {self.articulos_data[idx_art]['referencia_articulo']} - Contabilizar: {nuevo_valor} (checkbox: {var_chk.get()})")
@@ -6528,19 +6688,19 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     width=30,
                     state="normal" if puede_modificar else "disabled"
                 )
-                chk_contabilizar.grid(row=row, column=8, padx=5, pady=2, sticky="w")
+                chk_contabilizar.grid(row=row, column=10, padx=5, pady=2, sticky="w")
 
-                # Acciones: Eliminar y Editar (sin eventos de selección)
+                # Acciones: Eliminar y Editar — columnas 11 y 12
                 ctk.CTkButton(self.articulos_list_frame, text="X", width=30, fg_color="red", hover_color="darkred",
-                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=9, padx=5, pady=2, sticky="w")
+                              command=lambda idx=i: self.eliminar_articulo(idx)).grid(row=row, column=11, padx=5, pady=2, sticky="w")
                 try:
                     ctk.CTkButton(self.articulos_list_frame, text="✏️", width=30,
-                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=10, padx=2, pady=2, sticky="w")
+                                  command=lambda idx=i: self.editar_articulo(idx)).grid(row=row, column=12, padx=2, pady=2, sticky="w")
                 except Exception:
                     pass
                 
                 # Eventos de selección
-                labels_fila = [lbl_ref, lbl_cant_doc, lbl_cant_ent, lbl_estado, lbl_precio_unit, lbl_precio_final, lbl_deprec, lbl_porc]
+                labels_fila = [lbl_ref, lbl_albaran, lbl_order, lbl_cant_doc, lbl_cant_ent, lbl_estado, lbl_precio_unit, lbl_precio_final, lbl_deprec, lbl_porc]
                 
                 def _seleccionar_articulo(e, frames=frames_fila, idx_art=idx):
                     if hasattr(self, 'frames_seleccionados_articulo') and self.frames_seleccionados_articulo:
@@ -7166,6 +7326,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 for i, art in enumerate(self.articulos_data):
                     logger.debug(f"Guardando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
                 
+                # Asegurar que todos los artículos tienen los campos nuevos (compatibilidad)
+                campos_nuevos_defaults = {"numero_albaran": "", "numero_order": ""}
+                for art in self.articulos_data:
+                    for campo, defval in campos_nuevos_defaults.items():
+                        if campo not in art:
+                            art[campo] = defval
+
                 # Preparar lista de valores para executemany
                 valores_batch = []
                 for articulo in self.articulos_data:
@@ -7666,9 +7833,26 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.datos_rma_maestro = datos_maestro
             
             # 2. Cargar RMA Detalles (Artículos)
-            cursor.execute("SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto, precio_unitario, precio_final, depreciacion, porcentaje_depreciacion, COALESCE(contabilizar, 1) as contabilizar FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            # Usamos SELECT * para ser agnósticos a las columnas disponibles.
+            # Así funciona aunque numero_albaran/numero_order aún no existan en la BD (Turso/legacy).
+            cursor.execute(
+                "SELECT * FROM rma_detalles WHERE rma_id = ?", (rma_id,)
+            )
             columnas_detalle = [col[0] for col in cursor.description]
             articulos_db = [dict(zip(columnas_detalle, fila)) for fila in cursor.fetchall()]
+            # Normalizar campos que puede que no existan en BDs antiguas
+            for art in articulos_db:
+                # contabilizar: forzar int desde cualquier tipo
+                try:
+                    art['contabilizar'] = int(art.get('contabilizar', 1) or 1)
+                except (ValueError, TypeError):
+                    art['contabilizar'] = 1
+                art.setdefault('numero_albaran', '')
+                art.setdefault('numero_order', '')
+                if art['numero_albaran'] is None:
+                    art['numero_albaran'] = ''
+                if art['numero_order'] is None:
+                    art['numero_order'] = ''
             
             # LOG: Debug de valores cargados desde DB
             for i, art in enumerate(articulos_db):
@@ -8235,6 +8419,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     # LOG: Debug de valores de contabilizar en UPDATE
                     for i, art in enumerate(self.articulos_data):
                         logger.debug(f"Actualizando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
+
+                    # Asegurar campos nuevos en artículos existentes (compatibilidad)
+                    campos_nuevos_defaults = {"numero_albaran": "", "numero_order": ""}
+                    for art in self.articulos_data:
+                        for campo, defval in campos_nuevos_defaults.items():
+                            if campo not in art:
+                                art[campo] = defval
 
                     # Preparar lista de valores para executemany
                     valores_batch = []
