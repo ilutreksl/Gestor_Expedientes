@@ -404,7 +404,7 @@ class ExpedientesQuincenaWindow:
             exp_font         = Font(bold=True, size=10)
             art_font         = Font(size=10, italic=True)
             header_fill      = PatternFill(start_color="3b82f6", end_color="3b82f6", fill_type="solid")
-            art_fill         = PatternFill(start_color="F3F4F6", end_color="F3F4F6", fill_type="solid")
+            art_fill         = PatternFill(start_color="EBF3FB", end_color="EBF3FB", fill_type="solid")
             header_align     = Alignment(horizontal="center", vertical="center")
             left_align       = Alignment(horizontal="left",   vertical="center")
 
@@ -546,6 +546,13 @@ class ExpedientesQuincenaWindow:
                 rma_id_exp = codigos_a_id.get(codigo_rma)
                 if rma_id_exp and rma_id_exp in articulos_por_exp:
                     for art in articulos_por_exp[rma_id_exp]:
+                        # Saltar artículos no contabilizables
+                        try:
+                            if int(art.get('contabilizar', 1) if art.get('contabilizar') is not None else 1) == 0:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+
                         ref_art     = art.get('referencia_articulo', '') or ''
                         num_albaran = art.get('numero_albaran', '') or ''
                         estado_art  = art.get('estado_producto', '') or ''
@@ -554,7 +561,7 @@ class ExpedientesQuincenaWindow:
                         except Exception:
                             importe_art = 0.0
 
-                        # Rellenar las 11 columnas con fondo gris; datos en posiciones específicas
+                        # Rellenar columnas 1-12 con fondo gris
                         for c_i in range(1, num_cols + 1):
                             c = ws.cell(row=row_idx, column=c_i)
                             c.fill   = art_fill
@@ -568,14 +575,40 @@ class ExpedientesQuincenaWindow:
                         ws.cell(row=row_idx, column=2).value = f"Alb: {num_albaran}" if num_albaran else ""
                         # Col 4 → Estado artículo
                         ws.cell(row=row_idx, column=4).value = estado_art or ""
-                        # Col 9 → Importe artículo (misma columna que "Importe" del expediente)
+                        # Col 6 → Precio unitario (reutiliza "F. Proceso", vacía en artículos)
+                        try:
+                            precio_unit = float(art.get('precio_unitario', 0) or 0)
+                        except Exception:
+                            precio_unit = 0.0
+                        c_pu = ws.cell(row=row_idx, column=6)
+                        c_pu.value = precio_unit
+                        c_pu.number_format = '#,##0.00 "€"'
+                        c_pu.fill = art_fill
+                        c_pu.font = art_font
+                        c_pu.border = border
+                        c_pu.alignment = left_align
+                        # Col 7 → Unidades (reutiliza "F. Gestión", vacía en artículos)
+                        try:
+                            unidades = float(art.get('cantidad_entregada', 0) or 0)
+                        except Exception:
+                            unidades = 0.0
+                        c_ud = ws.cell(row=row_idx, column=7)
+                        c_ud.value = unidades
+                        c_ud.fill = art_fill
+                        c_ud.font = art_font
+                        c_ud.border = border
+                        c_ud.alignment = left_align
+                        # Col 9 → Importe artículo
                         c_imp = ws.cell(row=row_idx, column=9)
                         c_imp.value  = importe_art
                         c_imp.number_format = '#,##0.00 "€"'
-
+                        c_imp.fill = art_fill
+                        c_imp.font = art_font
+                        c_imp.border = border
+                        c_imp.alignment = left_align
                         row_idx += 1
 
-            # --- Ajustar anchos de columna (mismos que antes) ---
+            # --- Ajustar anchos de columna ---
             anchos = [15, 30, 15, 12, 12, 14, 12, 12, 12, 20, 12, 28]
             for col_i, ancho in enumerate(anchos, start=1):
                 ws.column_dimensions[chr(64 + col_i)].width = ancho

@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.58"
+APP_VERSION = "v1.0.60"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5646,6 +5646,18 @@ class VentanaPrincipal(ctk.CTkToplevel):
         )
         self.btn_subir_adjunto.pack(pady=(10, 5), padx=10, fill='x')
 
+        # 2b. Panel de estadísticas (cantidad + espacio total)
+        self.adjuntos_stats_frame = ctk.CTkFrame(adjuntos_tab, fg_color="transparent")
+        self.adjuntos_stats_frame.pack(fill='x', padx=10, pady=(0, 2))
+        self.lbl_adjuntos_stats = ctk.CTkLabel(
+            self.adjuntos_stats_frame,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="gray60",
+            anchor='w'
+        )
+        self.lbl_adjuntos_stats.pack(side='left', padx=2)
+
         # 2. Frame para el Listado de Adjuntos
         # Usamos un ScrollableFrame para que la lista crezca
         self.adjuntos_list_frame = ctk.CTkScrollableFrame(adjuntos_tab, label_text="Archivos Adjuntos")
@@ -7844,7 +7856,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             for art in articulos_db:
                 # contabilizar: forzar int desde cualquier tipo
                 try:
-                    art['contabilizar'] = int(art.get('contabilizar', 1) or 1)
+                    val_cont = art.get('contabilizar', 1)
+                    # NO usar "or 1" porque convierte 0 en 1
+                    art['contabilizar'] = int(val_cont) if val_cont is not None else 1
                 except (ValueError, TypeError):
                     art['contabilizar'] = 1
                 art.setdefault('numero_albaran', '')
@@ -8380,101 +8394,88 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 conn.close()
                 return
 
-        # 5. Actualizar rma_detalles (Borrar antiguos e Insertar nuevos) - OPTIMIZADO
+        # 5. Actualizar rma_detalles — siempre DELETE+INSERT
         try:
-            # Primero obtener los artículos antiguos para comparar
-            cursor.execute("SELECT * FROM rma_detalles WHERE rma_id = ? ORDER BY referencia_articulo", (rma_id,))
-            articulos_antiguos = cursor.fetchall()
-            
-            # Comparar si los artículos realmente cambiaron
-            articulos_cambiaron = False
-            if len(articulos_antiguos) != len(self.articulos_data):
-                articulos_cambiaron = True
-            else:
-                # Comparar cada artículo (simplificado: comparar campos clave)
-                for i, art_antiguo in enumerate(articulos_antiguos):
-                    if i < len(self.articulos_data):
-                        art_nuevo = self.articulos_data[i]
-                        # Comparar campos principales (ajustar según estructura de tu tabla)
-                        # Asumiendo que la posición 1 es referencia, 2 es cantidad, etc.
-                        if (str(art_antiguo[1] if len(art_antiguo) > 1 else '') != str(art_nuevo.get('referencia_articulo', '')) or
-                            str(art_antiguo[2] if len(art_antiguo) > 2 else '') != str(art_nuevo.get('cantidad_entregada', '')) or
-                            str(art_antiguo[3] if len(art_antiguo) > 3 else '') != str(art_nuevo.get('precio_unitario', ''))):
-                            articulos_cambiaron = True
-                            break
-            
-            # Solo actualizar y registrar en historial si realmente cambiaron
-            if articulos_cambiaron:
-                # Borrar todos los detalles existentes
-                cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
-                
-                # Insertar los detalles de la lista temporal del formulario - BATCH
-                if self.articulos_data:
-                    primer_articulo = self.articulos_data[0].copy()
-                    primer_articulo['rma_id'] = rma_id
+            cursor.execute("SELECT COUNT(*) FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            _cr = cursor.fetchone()
+            articulos_antiguos_count = _cr[0] if _cr else 0
 
-                    columnas_detalle = ', '.join(primer_articulo.keys())
-                    placeholders_detalle = ', '.join('?' * len(primer_articulo))
+            cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
 
-                    # LOG: Debug de valores de contabilizar en UPDATE
-                    for i, art in enumerate(self.articulos_data):
-                        logger.debug(f"Actualizando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
+            if self.articulos_data:
+                try:
+                    cursor.execute("PRAGMA table_info(rma_detalles)")
+                    _cols_bd = {r[1] for r in cursor.fetchall()}
+                except Exception:
+                    _cols_bd = {
+                        'rma_id', 'referencia_articulo', 'cantidad_segun_documento',
+                        'cantidad_entregada', 'estado_producto', 'precio_unitario',
+                        'precio_final', 'depreciacion', 'porcentaje_depreciacion', 'contabilizar'
+                    }
 
-                    # Asegurar campos nuevos en artículos existentes (compatibilidad)
-                    campos_nuevos_defaults = {"numero_albaran": "", "numero_order": ""}
-                    for art in self.articulos_data:
-                        for campo, defval in campos_nuevos_defaults.items():
-                            if campo not in art:
-                                art[campo] = defval
+                _campos_orden = [
+                    'referencia_articulo', 'cantidad_segun_documento', 'cantidad_entregada',
+                    'estado_producto', 'precio_unitario', 'precio_final',
+                    'depreciacion', 'porcentaje_depreciacion', 'contabilizar',
+                    'numero_albaran', 'numero_order'
+                ]
+                _cols_insert = ['rma_id'] + [c for c in _campos_orden if c in _cols_bd]
+                _cols_str = ', '.join(_cols_insert)
+                _ph_str   = ', '.join('?' * len(_cols_insert))
+                # Defaults numéricos para campos que no pueden ser string vacío
+                _num_campos = {'precio_unitario', 'precio_final', 'depreciacion',
+                               'porcentaje_depreciacion', 'cantidad_segun_documento',
+                               'cantidad_entregada'}
 
-                    # Preparar lista de valores para executemany
-                    valores_batch = []
-                    for articulo in self.articulos_data:
-                        articulo_copia = articulo.copy()
-                        articulo_copia['rma_id'] = rma_id
-                        valores_batch.append(tuple(articulo_copia.values()))
+                valores_batch = []
+                for articulo in self.articulos_data:
+                    fila = [rma_id]
+                    for col in _cols_insert[1:]:
+                        val = articulo.get(col)
+                        if val is None:
+                            val = 1 if col == 'contabilizar' else (0 if col in _num_campos else '')
+                        fila.append(val)
+                    valores_batch.append(tuple(fila))
 
-                    # Insertar todos los artículos en batch (mucho más rápido)
-                    cursor.executemany(f"""
-                        INSERT INTO rma_detalles ({columnas_detalle}) 
-                        VALUES ({placeholders_detalle})
-                    """, valores_batch)
+                cursor.executemany(
+                    f"INSERT INTO rma_detalles ({_cols_str}) VALUES ({_ph_str})",
+                    valores_batch
+                )
 
-                    # Solo registrar en historial si hubo cambios
-                    self.guardar_cambio_historial(rma_id, "Detalle Artículos", f"{len(articulos_antiguos)} items", f"{len(self.articulos_data)} items")
+                self.guardar_cambio_historial(
+                    rma_id, "Detalle Artículos",
+                    f"{articulos_antiguos_count} items",
+                    f"{len(self.articulos_data)} items"
+                )
 
-                    # Recalcular el precio total a partir de los artículos insertados y actualizar rma_maestro
-                    try:
-                        precio_total_recalc = 0.0
-                        for item in self.articulos_data:
-                            cantidad = item.get('cantidad_entregada', 0) or 0
-                            if isinstance(cantidad, str):
-                                cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
-                            else:
-                                cantidad = float(cantidad)
+                try:
+                    precio_total_recalc = 0.0
+                    for item in self.articulos_data:
+                        cantidad = item.get('cantidad_entregada', 0) or 0
+                        if isinstance(cantidad, str):
+                            cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                        else:
+                            cantidad = float(cantidad)
+                        precio = item.get('precio_final') or item.get('precio_unitario', 0.0) or 0.0
+                        if isinstance(precio, str):
+                            precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                        else:
+                            precio = float(precio)
+                        precio_total_recalc += cantidad * precio
+                    cursor.execute(
+                        "UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?",
+                        (precio_total_recalc, rma_id)
+                    )
+                except Exception as e:
+                    print(f"Error al recalcular precio_total_expediente: {e}")
 
-                            # Usar precio_final si existe, sino precio_unitario como fallback
-                            precio = item.get('precio_final', None)
-                            if precio is None or precio == '' or precio == 0:
-                                precio = item.get('precio_unitario', 0.0) or 0.0
-                            
-                            if isinstance(precio, str):
-                                precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
-                            else:
-                                precio = float(precio)
+            elif articulos_antiguos_count > 0:
+                self.guardar_cambio_historial(
+                    rma_id, "Detalle Artículos",
+                    f"{articulos_antiguos_count} items", "0 items - Artículos eliminados"
+                )
 
-                            precio_total_recalc += cantidad * precio
-
-                        cursor.execute("UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?", (precio_total_recalc, rma_id))
-                    except Exception as e:
-                        print(f"Error al recalcular/guardar precio_total_expediente en actualizar_rma: {e}")
-
-                elif not self.articulos_data and len(articulos_antiguos) > 0: # Si borramos y no insertamos nada
-                    # Borrar artículos
-                    cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
-                    self.guardar_cambio_historial(rma_id, "Detalle Artículos", f"{len(articulos_antiguos)} items", "0 items - Artículos eliminados")
-
-                updated_any = True
+            updated_any = True
 
         except sqlite3.Error as e:
             print(f"Error al actualizar detalles: {e}")
@@ -8482,8 +8483,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 conn.rollback()
             conn.close()
             return
-            
-        # 6. Actualizar/Insertar en rma_orders
+
+                # 6. Actualizar/Insertar en rma_orders
         try:
             num_order_nuevo = datos_nuevos.get('num_order', '')
             
@@ -10467,6 +10468,38 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             })
         return resultado
 
+    def _formatear_tamano(self, bytes_size):
+        """Convierte bytes a cadena legible (KB, MB, etc.)."""
+        if bytes_size is None:
+            return "—"
+        if bytes_size < 1024:
+            return f"{bytes_size} B"
+        elif bytes_size < 1024 * 1024:
+            return f"{bytes_size / 1024:.1f} KB"
+        elif bytes_size < 1024 * 1024 * 1024:
+            return f"{bytes_size / (1024 * 1024):.1f} MB"
+        else:
+            return f"{bytes_size / (1024 * 1024 * 1024):.2f} GB"
+
+    def _obtener_tamanos_carpeta_b2(self, carpeta_rma):
+        """
+        Lista todos los archivos de una carpeta RMA en B2 en una sola llamada.
+        Retorna dict {nombre_archivo: size_bytes}.
+        """
+        resultado = {}
+        try:
+            b2_api, bucket = get_b2_client()
+            if not b2_api or not bucket:
+                return resultado
+            prefijo = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{carpeta_rma}/")
+            file_versions = bucket.ls(prefijo, latest_only=True, recursive=False)
+            for file_version, _ in file_versions:
+                nombre = file_version.file_name.split("/")[-1]
+                resultado[nombre] = file_version.size
+        except Exception as e:
+            print(f"Error obteniendo tamaños de B2: {e}")
+        return resultado
+
     def cargar_lista_adjuntos(self, rma_id):
         """Consulta y muestra el listado de adjuntos para un RMA específico."""
         
@@ -10494,18 +10527,55 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             print(f"Error cargando adjuntos: {e}")
             return
 
+        # --- Obtener tamaños en una sola operación ---
+        tamanos = {}
+        if adjuntos:
+            if usar_b2():
+                primera_ruta = adjuntos[0][2].replace("\\", "/")
+                carpeta_rma = primera_ruta.split("/")[0]
+                tamanos_b2 = self._obtener_tamanos_carpeta_b2(carpeta_rma)
+                for adjunto_id, nombre, ruta in adjuntos:
+                    tamanos[adjunto_id] = tamanos_b2.get(nombre)
+            else:
+                for adjunto_id, nombre, ruta in adjuntos:
+                    ruta_completa = os.path.join(ADJUNTOS_ROOT_DIR, ruta)
+                    try:
+                        tamanos[adjunto_id] = os.path.getsize(ruta_completa) if os.path.exists(ruta_completa) else None
+                    except Exception:
+                        tamanos[adjunto_id] = None
+
+        # Actualizar stats
+        if hasattr(self, 'lbl_adjuntos_stats'):
+            if not adjuntos:
+                self.lbl_adjuntos_stats.configure(text="Sin archivos adjuntos")
+            else:
+                total_bytes = sum(v for v in tamanos.values() if v is not None)
+                n = len(adjuntos)
+                plural = "archivos" if n != 1 else "archivo"
+                total_str = self._formatear_tamano(total_bytes) if total_bytes > 0 else "—"
+                self.lbl_adjuntos_stats.configure(
+                    text=f"📎 {n} {plural} adjuntos  |  💾 Total: {total_str}"
+                )
+
         if not adjuntos:
             ctk.CTkLabel(self.adjuntos_list_frame, text="No hay archivos adjuntos para este expediente.").pack(pady=10)
             return
 
         for i, adjunto in enumerate(adjuntos):
             adjunto_id, nombre, ruta = adjunto
+            tamano_bytes = tamanos.get(adjunto_id)
+            tamano_str = self._formatear_tamano(tamano_bytes)
 
             item_frame = ctk.CTkFrame(self.adjuntos_list_frame)
             item_frame.pack(fill='x', padx=5, pady=2)
 
-            # Etiqueta del nombre del archivo
-            ctk.CTkLabel(item_frame, text=nombre, width=250, anchor='w').pack(side='left', padx=5)
+            # Bloque izquierdo: nombre + tamaño
+            info_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            info_frame.pack(side='left', fill='x', expand=True, padx=5, pady=2)
+
+            ctk.CTkLabel(info_frame, text=nombre, anchor='w', font=ctk.CTkFont(size=13)).pack(side='left', padx=(0, 6))
+            ctk.CTkLabel(info_frame, text=tamano_str, anchor='w',
+                         font=ctk.CTkFont(size=11), text_color="gray60").pack(side='left')
 
             # Botón Eliminar
             btn_eliminar = ctk.CTkButton(
@@ -10529,8 +10599,18 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             btn_descargar.pack(side='right', padx=2)
             Tooltip(btn_descargar, "Descargar archivo")
 
+            # Botón Renombrar
+            btn_renombrar = ctk.CTkButton(
+                item_frame,
+                text="🏷️",
+                width=35,
+                command=lambda aid=adjunto_id, n=nombre, r=ruta: self.renombrar_adjunto(aid, n, r)
+            )
+            btn_renombrar.pack(side='right', padx=2)
+            Tooltip(btn_renombrar, "Renombrar archivo")
+
             # Botón Editar (descarga, edita y resube)
-            if usar_b2():  # Solo mostrar editar en modo Dropbox
+            if usar_b2():  # Solo mostrar editar en modo B2
                 btn_editar = ctk.CTkButton(
                     item_frame, 
                     text="✏️", 
@@ -10551,6 +10631,194 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             Tooltip(btn_ver, "Visualizar archivo")
             
         # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
+    def renombrar_adjunto(self, adjunto_id, nombre_actual, ruta_relativa):
+        """Muestra un diálogo para renombrar un adjunto y aplica el cambio en B2/local y BD."""
+
+        # --- Diálogo de entrada ---
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Renombrar archivo")
+        dlg.geometry("420x160")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.update_idletasks()
+        x = (dlg.winfo_screenwidth() // 2) - 210
+        y = (dlg.winfo_screenheight() // 2) - 80
+        dlg.geometry(f"420x160+{x}+{y}")
+
+        ctk.CTkLabel(dlg, text="Nuevo nombre del archivo:", anchor='w').pack(padx=16, pady=(16, 4), fill='x')
+
+        entry = ctk.CTkEntry(dlg, width=388)
+        entry.pack(padx=16)
+        entry.insert(0, nombre_actual)
+        entry.select_range(0, 'end')
+        entry.focus_set()
+
+        lbl_error = ctk.CTkLabel(dlg, text="", text_color="red", font=ctk.CTkFont(size=11))
+        lbl_error.pack(padx=16, pady=(2, 0), fill='x')
+
+        # Extraer prefijo RMA de la ruta (ej: "RMA-000123" de "RMA-000123/foto.jpg")
+        partes_ruta = ruta_relativa.replace("\\", "/").split("/")
+        carpeta_rma = partes_ruta[0] if len(partes_ruta) > 1 else ""
+
+        def _aplicar():
+            nuevo_nombre = entry.get().strip()
+            if not nuevo_nombre:
+                lbl_error.configure(text="El nombre no puede estar vacío.")
+                return
+
+            # Validar caracteres no permitidos en nombres de archivo
+            chars_invalidos = set('/\\:*?"<>|')
+            if any(c in chars_invalidos for c in nuevo_nombre):
+                lbl_error.configure(text='Nombre inválido. No usar: / \\ : * ? " < > |')
+                return
+
+            # Respetar prefijo RMA: si el usuario NO lo incluyó, añadirlo
+            prefijo = carpeta_rma.upper() + "_"
+            if carpeta_rma:
+                if nuevo_nombre.upper().startswith(prefijo):
+                    # Ya incluye el prefijo (en cualquier capitalización) → normalizar a mayúsculas
+                    nuevo_nombre = prefijo + nuevo_nombre[len(prefijo):]
+                else:
+                    nuevo_nombre = prefijo + nuevo_nombre
+
+            if nuevo_nombre == nombre_actual:
+                dlg.destroy()
+                return
+
+            # Obtener extensión del original si el nuevo nombre no la tiene
+            _, ext_original = os.path.splitext(nombre_actual)
+            _, ext_nuevo = os.path.splitext(nuevo_nombre)
+            if not ext_nuevo and ext_original:
+                nuevo_nombre += ext_original
+
+            # Construir nueva ruta relativa
+            nueva_ruta_relativa = f"{carpeta_rma}/{nuevo_nombre}" if carpeta_rma else nuevo_nombre
+
+            # --- Deshabilitar botones y mostrar estado ---
+            btn_ok.configure(state="disabled", text="Renombrando...")
+            btn_cancelar.configure(state="disabled")
+            dlg.update()
+
+            # --- Operación de renombrado ---
+            try:
+                if usar_b2():
+                    exito = self._renombrar_archivo_b2(ruta_relativa, nueva_ruta_relativa)
+                else:
+                    exito = self._renombrar_archivo_local(ruta_relativa, nueva_ruta_relativa)
+            except Exception as e:
+                lbl_error.configure(text=f"Error: {e}")
+                btn_ok.configure(state="normal", text="Renombrar")
+                btn_cancelar.configure(state="normal")
+                return
+
+            if not exito:
+                lbl_error.configure(text="No se pudo renombrar el archivo. Inténtelo de nuevo.")
+                btn_ok.configure(state="normal", text="Renombrar")
+                btn_cancelar.configure(state="normal")
+                return
+
+            # --- Actualizar BD ---
+            try:
+                conn, cursor = self.master.conectar_db()
+                cursor.execute(
+                    "UPDATE rma_adjuntos SET nombre_archivo = ?, ruta_relativa = ? WHERE id = ?",
+                    (nuevo_nombre, nueva_ruta_relativa, adjunto_id)
+                )
+                # Registrar en historial
+                cursor.execute(
+                    """INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                       VALUES (?, ?, ?, ?)""",
+                    (
+                        self.current_rma_id,
+                        datetime.datetime.now().isoformat(),
+                        self.username,
+                        f"Adjunto renombrado: '{nombre_actual}' → '{nuevo_nombre}'"
+                    )
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                messagebox.showerror("Error BD", f"El archivo fue renombrado pero no se pudo actualizar la base de datos: {e}")
+
+            dlg.destroy()
+            self.cargar_lista_adjuntos(self.current_rma_id)
+
+        def _cancelar():
+            dlg.destroy()
+
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(pady=(6, 12))
+        btn_ok = ctk.CTkButton(btn_frame, text="Renombrar", width=120, command=_aplicar)
+        btn_ok.pack(side='left', padx=6)
+        btn_cancelar = ctk.CTkButton(btn_frame, text="Cancelar", width=100,
+                                      fg_color="gray40", hover_color="gray30", command=_cancelar)
+        btn_cancelar.pack(side='left', padx=6)
+
+        entry.bind("<Return>", lambda e: _aplicar())
+        entry.bind("<Escape>", lambda e: _cancelar())
+
+    def _renombrar_archivo_b2(self, ruta_relativa_origen, ruta_relativa_destino):
+        """
+        Renombra un archivo en B2 copiando (descarga+resubida) y borrando el original.
+        Retorna True si tuvo éxito, False si falló.
+        """
+        import tempfile
+
+        b2_api, bucket = get_b2_client()
+        if not b2_api or not bucket:
+            return False
+
+        ruta_b2_origen = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa_origen}")
+        ruta_b2_destino = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa_destino}")
+
+        try:
+            # 1. Descargar a temporal
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
+
+            downloaded = bucket.download_file_by_name(ruta_b2_origen)
+            downloaded.save_to(tmp_path)
+
+            # 2. Subir con el nuevo nombre
+            bucket.upload_local_file(local_file=tmp_path, file_name=ruta_b2_destino)
+
+            # 3. Eliminar el original
+            file_versions = bucket.ls(ruta_b2_origen, latest_only=True, recursive=False)
+            for file_version, _ in file_versions:
+                if file_version.file_name == ruta_b2_origen:
+                    b2_api.delete_file_version(file_version.id_, file_version.file_name)
+                    break
+
+            return True
+
+        except Exception as e:
+            print(f"Error renombrando archivo en B2: {e}")
+            return False
+        finally:
+            try:
+                if 'tmp_path' in dir() and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    def _renombrar_archivo_local(self, ruta_relativa_origen, ruta_relativa_destino):
+        """
+        Renombra un archivo en almacenamiento local.
+        Retorna True si tuvo éxito, False si falló.
+        """
+        try:
+            ruta_origen = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa_origen)
+            ruta_destino = os.path.join(ADJUNTOS_ROOT_DIR, ruta_relativa_destino)
+            if not os.path.exists(ruta_origen):
+                print(f"Archivo origen no encontrado: {ruta_origen}")
+                return False
+            os.rename(ruta_origen, ruta_destino)
+            return True
+        except Exception as e:
+            print(f"Error renombrando archivo local: {e}")
+            return False
+
     def abrir_adjunto(self, ruta_relativa):
         """Abre el archivo adjunto desde Backblaze B2 o almacenamiento local."""
         if usar_b2():

@@ -1,4 +1,10 @@
-Cambio V.1.0.59 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.60 - ✨ Últimas mejoras implementadas:
+
+- Renombrado de los adjuntos en la pestaña de adjuntos en la fichas de expedientes.
+- Visualizado del espacio de cada archivo y el total de los adjutnos en las fichas de los expedientes.
+
+
+Cambio V.1.0.59
 
 - Remodelado de la seccion de articulos de dentro de las fichas de expediente. Ahora tambien solicita el albaran o factura de compra y el numero de ORDER.
 - El informe de expedientes por quincena, tiene en cuanta este cambio y ahora al exportar el documento a excel, añade a cada expediente, los articulos relacionados y los albaranes/facturas de compra asociadas.
