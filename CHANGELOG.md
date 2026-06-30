@@ -1,4 +1,13 @@
-Cambio V.1.0.60 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.61 - ✨ Últimas mejoras implementadas:
+
+- Añadido check en el informe de quinceas para visualizar los entregados.
+- Añadido dos nuevos iconos en el listado de expedientes.
+    - Icono Reloj: Si un expediente tiene una tarea asociada.
+    - Icono Mixto: Si esta entregado a Contabilidad.
+- Se registra en el historial de los expedientes, cuando se entrega a Contabilidad, cuando se marca el check en el informe por quincenas.
+
+
+Cambio V.1.0.60
 
 - Renombrado de los adjuntos en la pestaña de adjuntos en la fichas de expedientes.
 - Visualizado del espacio de cada archivo y el total de los adjutnos en las fichas de los expedientes.

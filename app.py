@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.60"
+APP_VERSION = "v1.0.61"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -1190,6 +1190,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
             self.verificar_columna_motivo()
         except Exception as e:
             logger.error(f"Error en migración de columnas: {e}")
+
+        # Migrar columna fecha_entregado_contabilidad (Turso-safe)
+        try:
+            self._migrar_columna_contabilidad_rma_maestro()
+        except Exception as e:
+            logger.error(f"Error en migración columna contabilidad: {e}")
             
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
@@ -1365,6 +1371,46 @@ class VentanaPrincipal(ctk.CTkToplevel):
             conn.close()
         except Exception as e:
             print(f"Error en migración rma_detalles: {e}")
+
+    def _migrar_columna_contabilidad_rma_maestro(self):
+        """Añade la columna fecha_entregado_contabilidad a rma_maestro si no existe.
+        Funciona tanto en SQLite local como en Turso (ALTER TABLE ADD COLUMN es seguro en ambos)."""
+        try:
+            result = self.master.conectar_db()
+            if isinstance(result, tuple):
+                conn, cursor = result
+            else:
+                conn = result
+                cursor = conn.cursor() if conn else None
+
+            if not conn or not cursor:
+                return
+
+            columnas_necesarias = {
+                'fecha_entregado_contabilidad': "TEXT DEFAULT NULL",
+            }
+
+            try:
+                cursor.execute("PRAGMA table_info('rma_maestro')")
+                cols_actuales = [row[1] for row in cursor.fetchall()]
+            except Exception:
+                # Turso no soporta PRAGMA — intentar ADD COLUMN directamente
+                cols_actuales = []
+
+            for col_name, col_def in columnas_necesarias.items():
+                if col_name not in cols_actuales:
+                    try:
+                        cursor.execute(f"ALTER TABLE rma_maestro ADD COLUMN {col_name} {col_def}")
+                        conn.commit()
+                        logger.info(f"Columna '{col_name}' añadida a rma_maestro")
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if "duplicate" not in err_str and "already exists" not in err_str:
+                            logger.warning(f"Info al añadir '{col_name}' en rma_maestro: {e}")
+
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error en migración columna contabilidad rma_maestro: {e}")
 
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""
@@ -2994,7 +3040,25 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 # 2. CARGAR LOS REGISTROS APLICANDO LOS FILTROS
                 # (Aquí mantenemos tu lógica SQL que ya estaba funcionando)
             
-                sql = "SELECT id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, numero_albaran_reposicion, numero_factura_abono, fecha_para_factura FROM rma_maestro WHERE 1=1"
+                sql = (
+                    "SELECT m.id, m.codigo_rma, m.cliente, m.numero_documento_cliente, "
+                    "m.fecha_emision, m.estado, m.fecha_autorizacion, m.fecha_recepcion, "
+                    "m.fecha_proceso, m.fecha_gestion, m.numero_albaran_reposicion, "
+                    "m.numero_factura_abono, m.fecha_para_factura, "
+                    "COALESCE(m.fecha_entregado_contabilidad, '') AS fecha_entregado_contabilidad, "
+                    "(SELECT MIN(t.fecha_vencimiento) FROM tareas t "
+                    " WHERE t.codigo_rma = m.codigo_rma "
+                    " AND t.estado NOT IN ('Completada', 'Cancelada') "
+                    " AND t.fecha_vencimiento IS NOT NULL AND t.fecha_vencimiento != '') "
+                    "AS proxima_tarea_vencimiento, "
+                    "(SELECT t2.titulo FROM tareas t2 "
+                    " WHERE t2.codigo_rma = m.codigo_rma "
+                    " AND t2.estado NOT IN ('Completada', 'Cancelada') "
+                    " AND t2.fecha_vencimiento IS NOT NULL AND t2.fecha_vencimiento != '' "
+                    " ORDER BY t2.fecha_vencimiento ASC LIMIT 1) "
+                    "AS proxima_tarea_titulo "
+                    "FROM rma_maestro m WHERE 1=1"
+                )
                 params = []
             
                 # Aplicar filtro de ESTADO
@@ -3098,8 +3162,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 header_font = ctk.CTkFont(weight="bold")
                 # Configurar anchos de columnas para mejor distribución
                 self.lista_rma_frame.grid_columnconfigure(0, weight=0, minsize=100)  # CÓDIGO RMA
-                self.lista_rma_frame.grid_columnconfigure(1, weight=0)               # ASOCIACIÓN (icono - sin minsize)
-                self.lista_rma_frame.grid_columnconfigure(2, weight=2, minsize=176)  # CLIENTE (reducido, -24px para iconos)
+                self.lista_rma_frame.grid_columnconfigure(1, weight=0)               # ICONOS (sin minsize)
+                self.lista_rma_frame.grid_columnconfigure(2, weight=2, minsize=150)  # CLIENTE (reducido -26px para 4 iconos)
                 self.lista_rma_frame.grid_columnconfigure(3, weight=1, minsize=150)  # DOCUMENTO
                 self.lista_rma_frame.grid_columnconfigure(4, weight=0, minsize=130)  # ÚLTIMA ACTIVIDAD
                 self.lista_rma_frame.grid_columnconfigure(5, weight=1, minsize=180)  # ESTADO (ampliado)
@@ -3128,7 +3192,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 row_height = 22 if getattr(self, 'user_settings', {}).get('compact_mode', True) else 32
 
                 for i, reg in enumerate(registros):
-                    rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, numero_albaran_reposicion, numero_factura_abono, fecha_para_factura = reg
+                    rma_id, codigo_rma, cliente, numero_documento_cliente, fecha_emision, estado, fecha_autorizacion, fecha_recepcion, fecha_proceso, fecha_gestion, numero_albaran_reposicion, numero_factura_abono, fecha_para_factura, fecha_entregado_contabilidad, proxima_tarea_vencimiento, proxima_tarea_titulo = reg
                     row = i + 1
 
                     # Calcular la última actividad usando la función auxiliar
@@ -3159,7 +3223,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         actions_bg = colors[0]
 
                     f0 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
-                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height, width=46)
+                    f1 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height, width=72)
                     f2 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f3 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
                     f4 = ctk.CTkFrame(self.lista_rma_frame, fg_color="transparent", height=row_height)
@@ -3205,6 +3269,17 @@ class VentanaPrincipal(ctk.CTkToplevel):
                         lbl1_cont = ctk.CTkLabel(f1, text="💶")
                         lbl1_cont.pack(side="left", anchor="center", padx=0, pady=0)
                         Tooltip(lbl1_cont, "\n".join(partes_tooltip))
+                    # Icono de entregado a contabilidad (quincena marcada)
+                    if fecha_entregado_contabilidad and str(fecha_entregado_contabilidad).strip():
+                        lbl1_ctb = ctk.CTkLabel(f1, text="📬")
+                        lbl1_ctb.pack(side="left", anchor="center", padx=0, pady=0)
+                        Tooltip(lbl1_ctb, f"Entregado a Contabilidad: {str(fecha_entregado_contabilidad).strip()}")
+                    # Icono de tarea pendiente con vencimiento
+                    if proxima_tarea_vencimiento:
+                        lbl1_tarea = ctk.CTkLabel(f1, text="⏰")
+                        lbl1_tarea.pack(side="left", anchor="center", padx=0, pady=0)
+                        titulo_tarea = proxima_tarea_titulo or "Tarea pendiente"
+                        Tooltip(lbl1_tarea, f"{titulo_tarea}\nVence: {proxima_tarea_vencimiento}")
                     
                     lbl2 = ctk.CTkLabel(f2, text=cliente)
                     lbl2.pack(anchor="w", padx=4, pady=0)

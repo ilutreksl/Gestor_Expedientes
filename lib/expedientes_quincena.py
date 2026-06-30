@@ -180,7 +180,7 @@ class ExpedientesQuincenaWindow:
                 # Buscar ambas quincenas: reemplazar Q_ por Q% para wildcard
                 patron_sql = patron_quincena.replace("Q_", "Q%")
                 query = """
-                    SELECT 
+                    SELECT
                         m.codigo_rma,
                         m.cliente,
                         m.numero_documento_cliente,
@@ -199,9 +199,11 @@ class ExpedientesQuincenaWindow:
                         m.resultado_expediente,
                         m.fecha_para_factura,
                         COALESCE(m.numero_albaran_reposicion, '') as numero_albaran_reposicion,
-                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono
+                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono,
+                        m.id,
+                        COALESCE(m.fecha_entregado_contabilidad, '') as fecha_entregado_contabilidad
                     FROM rma_maestro m
-                    WHERE m.fecha_para_factura IS NOT NULL 
+                    WHERE m.fecha_para_factura IS NOT NULL
                     AND m.fecha_para_factura != ''
                     AND m.fecha_para_factura != 'Seleccionar...'
                     AND m.fecha_para_factura LIKE ?
@@ -211,7 +213,7 @@ class ExpedientesQuincenaWindow:
             else:
                 # Buscar quincena específica
                 query = """
-                    SELECT 
+                    SELECT
                         m.codigo_rma,
                         m.cliente,
                         m.numero_documento_cliente,
@@ -230,7 +232,9 @@ class ExpedientesQuincenaWindow:
                         m.resultado_expediente,
                         m.fecha_para_factura,
                         COALESCE(m.numero_albaran_reposicion, '') as numero_albaran_reposicion,
-                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono
+                        COALESCE(m.numero_factura_abono, '') as numero_factura_abono,
+                        m.id,
+                        COALESCE(m.fecha_entregado_contabilidad, '') as fecha_entregado_contabilidad
                     FROM rma_maestro m
                     WHERE m.fecha_para_factura = ?
                     ORDER BY m.codigo_rma DESC
@@ -304,8 +308,9 @@ class ExpedientesQuincenaWindow:
             font=ctk.CTkFont(size=13, weight="bold")
         ).pack(side="left")
         
-        # Cabeceras - estructura: 0=codigo_rma, 1=cliente, 2=num_doc, 3-7=fechas, 
-        # 8=precio_total, 9=total_contabilizable, 10=resultado, 11=quincena
+        # Cabeceras - estructura: 0=codigo_rma, 1=cliente, 2=num_doc, 3-7=fechas,
+        # 8=precio_total, 9=total_contabilizable, 10=resultado, 11=quincena,
+        # 12=albaran_reposicion, 13=factura_abono, 14=id, 15=fecha_entregado_contabilidad
         columnas = [
             ("RMA", 0, 120),
             ("Cliente", 1, 200),
@@ -315,14 +320,18 @@ class ExpedientesQuincenaWindow:
             ("F. Autorización", 5, 110),
             ("F. Proceso", 6, 100),
             ("F. Gestión", 7, 100),
-            ("Importe", 9, 100),  # Cambio a índice 9 (total_contabilizable)
-            ("Resultado", 10, 150),  # Cambio a índice 10
-            ("Quincena", 11, 100)  # Cambio a índice 11
+            ("Importe", 9, 100),
+            ("Resultado", 10, 150),
+            ("Quincena", 11, 100)
         ]
-        
+
         header_frame = ctk.CTkFrame(self.tabla_frame)
         header_frame.pack(fill="x", pady=(0, 5))
-        
+
+        # Cabecera del checkbox de contabilidad (sin texto, solo reserva espacio)
+        ctk.CTkLabel(header_frame, text="✓", width=26,
+                     font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(2, 1))
+
         for col_nombre, col_idx, col_ancho in columnas:
             btn = ctk.CTkButton(
                 header_frame,
@@ -332,27 +341,40 @@ class ExpedientesQuincenaWindow:
                 height=30
             )
             btn.pack(side="left", padx=1)
-            
+
             # Indicador de orden
             if self.orden_actual["columna"] == col_nombre:
                 indicador = "▼" if not self.orden_actual["ascendente"] else "▲"
                 btn.configure(text=f"{col_nombre} {indicador}")
-        
+
         # Datos
         for exp in self.expedientes_data:
             fila_frame = ctk.CTkFrame(self.tabla_frame)
             fila_frame.pack(fill="x", pady=1)
-            
+
+            # Checkbox de entregado a contabilidad
+            rma_id_exp = exp[14] if len(exp) > 14 else None
+            fecha_ctb = exp[15] if len(exp) > 15 else None
+            esta_marcado = bool(fecha_ctb and str(fecha_ctb).strip())
+            check_var = ctk.BooleanVar(value=esta_marcado)
+            check = ctk.CTkCheckBox(
+                fila_frame, text="", variable=check_var,
+                checkbox_width=16, checkbox_height=16, width=26,
+                command=lambda cv=check_var, rid=rma_id_exp, fa=fecha_ctb:
+                    self._toggle_contabilidad(cv, rid, fa)
+            )
+            check.pack(side="left", padx=(2, 1))
+
             for i, (_, col_idx, col_ancho) in enumerate(columnas):
                 valor = exp[col_idx] if exp[col_idx] else "-"
-                
+
                 # Formatear importe (índice 9 = total_contabilizable)
                 if col_idx == 9 and valor != "-":
                     try:
                         valor = f"{float(valor):,.2f} €"
                     except:
                         pass
-                
+
                 # Color para campos especiales (por defecto None = color automático)
                 color = None
                 if col_idx == 7:  # F. Gestión
@@ -360,9 +382,9 @@ class ExpedientesQuincenaWindow:
                         color = "#10b981"  # Verde si está gestionado
                     else:
                         color = "#f59e0b"  # Naranja si está pendiente
-                elif col_idx == 11:  # Quincena (ahora en índice 11)
+                elif col_idx == 11:  # Quincena
                     color = "#3b82f6"
-                
+
                 label = ctk.CTkLabel(
                     fila_frame,
                     text=str(valor),
@@ -374,6 +396,62 @@ class ExpedientesQuincenaWindow:
                     label.configure(text_color=color)
                 label.pack(side="left", padx=1)
     
+    def _toggle_contabilidad(self, check_var, rma_id, fecha_anterior):
+        """Marca/desmarca el expediente como entregado a contabilidad, actualiza BD e historial."""
+        if rma_id is None:
+            logger.warning("_toggle_contabilidad: rma_id es None, operación ignorada")
+            return
+
+        marcado = check_var.get()
+        nueva_fecha = datetime.date.today().isoformat() if marcado else None
+
+        try:
+            result = self.conectar_db()
+            if isinstance(result, tuple):
+                conn, cursor = result
+            else:
+                conn = result
+                cursor = conn.cursor() if conn else None
+
+            if not conn or not cursor:
+                logger.error("_toggle_contabilidad: no se pudo conectar a la BD")
+                return
+
+            try:
+                cursor.execute(
+                    "UPDATE rma_maestro SET fecha_entregado_contabilidad = ? WHERE id = ?",
+                    (nueva_fecha, rma_id)
+                )
+
+                # Registrar en historial con la misma estructura que el resto del sistema
+                valor_anterior_str = str(fecha_anterior).strip() if fecha_anterior and str(fecha_anterior).strip() else "—"
+                valor_nuevo_str = nueva_fecha if nueva_fecha else "—"
+                descripcion = (
+                    f"Campo 'Entregado a Contabilidad' modificado: "
+                    f"'{valor_anterior_str}' -> '{valor_nuevo_str}'"
+                )
+                cursor.execute(
+                    "INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio) "
+                    "VALUES (?, ?, ?, ?)",
+                    (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                     self.username, descripcion)
+                )
+
+                conn.commit()
+                logger.info(
+                    f"Contabilidad {'marcada' if marcado else 'desmarcada'} "
+                    f"para rma_id={rma_id}: {valor_anterior_str} -> {valor_nuevo_str}"
+                )
+            finally:
+                conn.close()
+
+            # Recargar la tabla para reflejar el estado actualizado
+            self.cargar_datos()
+
+        except Exception as e:
+            logger.error(f"Error al actualizar entregado a contabilidad (rma_id={rma_id}): {e}")
+            messagebox.showerror("Error", f"No se pudo actualizar el estado de contabilidad:\n{e}")
+
     def exportar_excel(self):
         """Exporta los datos a Excel. Cada expediente aparece en negrita con sus artículos indentados debajo."""
         if not self.expedientes_data:
