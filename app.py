@@ -6439,18 +6439,42 @@ class VentanaPrincipal(ctk.CTkToplevel):
         chk_auto.pack(side="left")
         e_precio_final.configure(state="disabled")
 
+        def _obtener_cliente_actual():
+            """Lee el nombre del cliente desde el campo real del formulario de expediente."""
+            try:
+                if hasattr(self, 'entry_Cliente'):
+                    return self.entry_Cliente.get().strip()
+            except Exception:
+                pass
+            return ""
+
+        def _obtener_descuento_actual(cliente_nombre):
+            """Abre una conexión real y consulta el descuento del cliente."""
+            if not cliente_nombre:
+                logger.info("[DESCUENTO] Sin nombre de cliente, descuento = 0")
+                return 0.0
+            try:
+                conn_d, cursor_d = self.master.conectar_db()
+                try:
+                    descuento = obtener_descuento_cliente(cliente_nombre, conn_d)
+                finally:
+                    try:
+                        conn_d.close()
+                    except Exception:
+                        pass
+                logger.info(f"[DESCUENTO] Cliente='{cliente_nombre}' -> descuento={descuento}")
+                return descuento or 0.0
+            except Exception as e:
+                logger.warning(f"[DESCUENTO] Error obteniendo descuento de cliente '{cliente_nombre}': {e}")
+                return 0.0
+
         def _recalc_precio(event=None):
             if var_auto.get() != 1:
                 return
             try:
                 precio_u = float(e_precio.get().replace(',', '.') or 0)
-                cliente_actual = ""
-                if hasattr(self, 'campos_rma') and 'cliente' in self.campos_rma:
-                    try:
-                        cliente_actual = self.campos_rma['cliente'].get()
-                    except Exception:
-                        pass
-                descuento = obtener_descuento_cliente(self.master.conectar_db, cliente_actual)
+                cliente_actual = _obtener_cliente_actual()
+                descuento = _obtener_descuento_actual(cliente_actual)
                 tiene_dep = var_dep.get() == 1
                 try:
                     porc_dep = float(e_porc_dep.get().replace(',', '.') or 0)
@@ -6462,8 +6486,8 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 e_precio_final.insert(0, f"{pf:.2f}")
                 if var_auto.get() == 1:
                     e_precio_final.configure(state="disabled")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error recalculando precio final: {e}")
 
         e_precio.bind("<KeyRelease>", _recalc_precio)
 
@@ -6523,15 +6547,11 @@ class VentanaPrincipal(ctk.CTkToplevel):
 
             if var_auto.get() == 1:
                 try:
-                    cliente_actual = ""
-                    if hasattr(self, 'campos_rma') and 'cliente' in self.campos_rma:
-                        try:
-                            cliente_actual = self.campos_rma['cliente'].get()
-                        except Exception:
-                            pass
-                    descuento = obtener_descuento_cliente(self.master.conectar_db, cliente_actual)
+                    cliente_actual = _obtener_cliente_actual()
+                    descuento = _obtener_descuento_actual(cliente_actual)
                     precio_f = calcular_precio_final(precio_u, descuento, tiene_dep, porc_dep)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Error calculando precio final al guardar: {e}")
                     precio_f = precio_u
             else:
                 pf_str = e_precio_final.get().strip().replace(',', '.')
@@ -6789,7 +6809,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     cantidad = 0.0
                 else:
                     cantidad = float(cantidad)
-                
+
                 # Usar precio_final en lugar de precio_unitario para el cálculo
                 precio = item.get('precio_final', item.get('precio_unitario', 0.0))
                 if isinstance(precio, str):
@@ -6799,10 +6819,10 @@ class VentanaPrincipal(ctk.CTkToplevel):
                     precio = 0.0
                 else:
                     precio = float(precio)
-                
+
                 # Multiplicar de forma segura
                 precio_total += cantidad * precio
-                
+
             except (ValueError, TypeError) as e:
                 # Si hay un error en la conversión, ignorar este artículo y continuar
                 print(f"Error al calcular precio para artículo {item.get('referencia_articulo', 'N/A')}: {e}")
@@ -6836,7 +6856,7 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 precio = item.get('precio_final', None)
                 if precio is None or precio == '' or precio == 0:
                     precio = item.get('precio_unitario', 0.0) or 0.0
-                
+
                 if isinstance(precio, str):
                     precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
                 else:
@@ -10610,7 +10630,7 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             Tooltip(btn_renombrar, "Renombrar archivo")
 
             # Botón Editar (descarga, edita y resube)
-            if usar_b2():  # Solo mostrar editar en modo B2
+            if usar_b2():  # Solo mostrar editar en modo Dropbox
                 btn_editar = ctk.CTkButton(
                     item_frame, 
                     text="✏️", 
@@ -10631,6 +10651,7 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             Tooltip(btn_ver, "Visualizar archivo")
             
         # Llamamos a esta función dentro de abrir_dialogo_adjunto() para que se recargue después de subir un archivo.
+
     def renombrar_adjunto(self, adjunto_id, nombre_actual, ruta_relativa):
         """Muestra un diálogo para renombrar un adjunto y aplica el cambio en B2/local y BD."""
 
@@ -10677,7 +10698,6 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             prefijo = carpeta_rma.upper() + "_"
             if carpeta_rma:
                 if nuevo_nombre.upper().startswith(prefijo):
-                    # Ya incluye el prefijo (en cualquier capitalización) → normalizar a mayúsculas
                     nuevo_nombre = prefijo + nuevo_nombre[len(prefijo):]
                 else:
                     nuevo_nombre = prefijo + nuevo_nombre
@@ -10725,7 +10745,6 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
                     "UPDATE rma_adjuntos SET nombre_archivo = ?, ruta_relativa = ? WHERE id = ?",
                     (nuevo_nombre, nueva_ruta_relativa, adjunto_id)
                 )
-                # Registrar en historial
                 cursor.execute(
                     """INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
                        VALUES (?, ?, ?, ?)""",
@@ -10772,18 +10791,16 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
         ruta_b2_origen = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa_origen}")
         ruta_b2_destino = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa_destino}")
 
+        tmp_path = None
         try:
-            # 1. Descargar a temporal
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp_path = tmp.name
 
             downloaded = bucket.download_file_by_name(ruta_b2_origen)
             downloaded.save_to(tmp_path)
 
-            # 2. Subir con el nuevo nombre
             bucket.upload_local_file(local_file=tmp_path, file_name=ruta_b2_destino)
 
-            # 3. Eliminar el original
             file_versions = bucket.ls(ruta_b2_origen, latest_only=True, recursive=False)
             for file_version, _ in file_versions:
                 if file_version.file_name == ruta_b2_origen:
@@ -10797,7 +10814,7 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
             return False
         finally:
             try:
-                if 'tmp_path' in dir() and os.path.exists(tmp_path):
+                if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
             except Exception:
                 pass
