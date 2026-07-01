@@ -328,7 +328,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.0.61"
+APP_VERSION = "v1.0.62"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -5698,9 +5698,26 @@ class VentanaPrincipal(ctk.CTkToplevel):
         # D) PESTAÑA CONTABILIDAD
         fila_cont = 0
         self.crear_campo(contabilidad_frame, fila_cont, "Resultado Expediente:", "Resultado_Expediente", tipo="optionmenu", opciones=self.OPCIONES["Resultado_Expediente"], valor_defecto=self.OPCIONES["Resultado_Expediente"][0]); fila_cont += 1
-        self.crear_campo(contabilidad_frame, fila_cont, "Número Albarán:", "Numero_Albaran"); fila_cont += 1
+        # Campo Número Albarán con botón de búsqueda de PDF
+        ctk.CTkLabel(contabilidad_frame, text="Número Albarán:").grid(
+            row=fila_cont, column=0, padx=10, pady=5, sticky="w")
+        self.entry_Numero_Albaran = ctk.CTkEntry(contabilidad_frame, width=300, state="normal")
+        self.entry_Numero_Albaran.grid(row=fila_cont, column=1, padx=10, pady=5, sticky="ew")
+        # Botón de búsqueda de PDF (visible solo si el usuario lo tiene activado en ajustes)
+        self.btn_buscar_albaran = ctk.CTkButton(
+            contabilidad_frame,
+            text="🔍",
+            width=36,
+            height=28,
+            font=ctk.CTkFont(size=15),
+            command=self.buscar_y_adjuntar_albaran,
+        )
+        self.btn_buscar_albaran.grid(row=fila_cont, column=2, padx=(2, 10), pady=5, sticky="w")
+        if not self.user_settings.get("busqueda_albaranes_activa", False):
+            self.btn_buscar_albaran.grid_remove()
+        fila_cont += 1
         self.crear_campo(contabilidad_frame, fila_cont, "Fecha Doc. Cliente:", "Fecha_Doc_Cliente"); fila_cont += 1
-        
+
         # Nuevos campos de reposición y abono
         self.crear_campo(contabilidad_frame, fila_cont, "Nº Albarán Reposición:", "numero_albaran_reposicion"); fila_cont += 1
         self.crear_campo(contabilidad_frame, fila_cont, "Fecha Albarán Reposición:", "fecha_albaran_reposicion", tipo="date"); fila_cont += 1
@@ -9915,6 +9932,151 @@ Para crear un expediente, el cliente debe estar registrado previamente en la sec
         os.makedirs(ruta_rma, exist_ok=True)
         return ruta_rma
     
+    def buscar_y_adjuntar_albaran(self):
+        """Busca el PDF del albarán en la carpeta configurada y lo adjunta al expediente."""
+        from lib.albaran_utils import extraer_nombre_pdf_desde_albaran, buscar_pdf_en_carpeta
+
+        logger.info(f"Usuario {self.username} inicia búsqueda de albarán PDF")
+
+        if not self.current_rma_id:
+            logger.warning("Búsqueda de albarán cancelada: expediente no guardado")
+            messagebox.showwarning(
+                "Expediente no guardado",
+                "Guarda el expediente al menos una vez antes de adjuntar archivos.")
+            return
+
+        # Leer el número de albarán del campo
+        num_albaran = self.entry_Numero_Albaran.get().strip()
+        if not num_albaran:
+            logger.warning("Búsqueda de albarán cancelada: campo número de albarán vacío")
+            messagebox.showwarning(
+                "Campo vacío",
+                "Introduce primero el número de albarán.")
+            return
+
+        # Leer configuración del usuario
+        ruta = self.user_settings.get("ruta_carpeta_albaranes", "").strip()
+        fmt_usuario = self.user_settings.get("formato_albaran_usuario", "{N}") or "{N}"
+        fmt_pdf = self.user_settings.get("formato_archivo_pdf", "{N}.pdf") or "{N}.pdf"
+
+        logger.debug(f"Búsqueda albarán: número='{num_albaran}', carpeta='{ruta}', "
+                     f"fmt_usuario='{fmt_usuario}', fmt_pdf='{fmt_pdf}'")
+
+        if not ruta or not os.path.isdir(ruta):
+            logger.error(f"Carpeta de albaranes no configurada o inexistente: '{ruta}'")
+            messagebox.showerror(
+                "Carpeta no configurada",
+                "La carpeta de albaranes no está configurada o no existe.\n"
+                "Ve a Ajustes → pestaña 'Albaranes' para configurarla.")
+            return
+
+        # Construir el nombre esperado del archivo PDF
+        try:
+            nombre_pdf = extraer_nombre_pdf_desde_albaran(num_albaran, fmt_usuario, fmt_pdf)
+            logger.debug(f"Nombre PDF calculado: '{nombre_pdf}'")
+        except ValueError as e:
+            logger.error(f"Error al interpretar número de albarán '{num_albaran}': {e}")
+            messagebox.showerror(
+                "Error en formato",
+                f"No se pudo interpretar el número de albarán con los patrones configurados:\n{e}\n\n"
+                "Ve a Ajustes → pestaña 'Albaranes' para revisar la configuración.")
+            return
+
+        # Buscar el archivo en la carpeta (recursivamente)
+        ruta_pdf = buscar_pdf_en_carpeta(ruta, nombre_pdf)
+
+        if not ruta_pdf:
+            logger.warning(f"PDF '{nombre_pdf}' no encontrado en '{ruta}'")
+            messagebox.showwarning(
+                "PDF no encontrado",
+                f"No se encontró el archivo '{nombre_pdf}' en:\n{ruta}\n\n"
+                "Comprueba que el archivo existe y que los patrones de formato "
+                "en Ajustes → Albaranes son correctos.")
+            return
+
+        logger.info(f"PDF encontrado: '{ruta_pdf}'")
+
+        # Obtener el código RMA
+        codigo_rma = self.lbl_codigo_rma.cget("text").split(": ")[1].strip()
+
+        # Usar el nombre real del archivo encontrado (no el patrón, que puede tener *)
+        nombre_real = os.path.basename(ruta_pdf)
+        nombre_adjunto = f"{codigo_rma}_{nombre_real}"
+        logger.debug(f"Nombre real del archivo: '{nombre_real}' → adjunto: '{nombre_adjunto}'")
+
+        # Verificar si ya está adjuntado (evitar duplicados)
+        try:
+            conn, cursor = self.master.conectar_db()
+            cursor.execute(
+                "SELECT id FROM rma_adjuntos WHERE rma_id = ? AND nombre_archivo = ?",
+                (self.current_rma_id, nombre_adjunto)
+            )
+            if cursor.fetchone():
+                conn.close()
+                logger.info(f"PDF '{nombre_adjunto}' ya estaba adjuntado al expediente {codigo_rma}")
+                messagebox.showinfo(
+                    "Ya adjuntado",
+                    f"El archivo '{nombre_real}' ya está adjuntado a este expediente.")
+                return
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Error al comprobar duplicado de adjunto: {e}")
+
+        # Subir el archivo (local o B2)
+        logger.debug(f"Subiendo adjunto '{nombre_adjunto}' para RMA '{codigo_rma}'")
+        if usar_b2():
+            exito, ruta_relativa = self._subir_archivo_b2(ruta_pdf, codigo_rma, nombre_adjunto, None)
+        else:
+            exito, ruta_relativa = self._subir_archivo_local(ruta_pdf, codigo_rma, nombre_adjunto)
+
+        if not exito:
+            logger.error(f"Fallo al subir el archivo '{nombre_adjunto}'")
+            return
+
+        # Registrar en base de datos
+        self.crear_tabla_rma_orders()
+        self.crear_tabla_adjuntos()
+        conn, cursor = self.master.conectar_db()
+        try:
+            if getattr(self, '_usar_tipo_almacenamiento', False):
+                tipo_almacenamiento = 'backblaze' if usar_b2() else 'local'
+                cursor.execute(
+                    """INSERT INTO rma_adjuntos
+                       (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (self.current_rma_id, os.path.basename(ruta_relativa), ruta_relativa,
+                     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                     self.username, tipo_almacenamiento)
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO rma_adjuntos
+                       (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (self.current_rma_id, os.path.basename(ruta_relativa), ruta_relativa,
+                     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                     self.username)
+                )
+            conn.commit()
+            logger.info(f"Albarán '{nombre_real}' adjuntado correctamente al expediente {codigo_rma} "
+                        f"(rma_id={self.current_rma_id})")
+        except Exception as e:
+            logger.error(f"Error al registrar adjunto '{nombre_adjunto}' en BD: {e}", exc_info=True)
+            messagebox.showerror("Error de BD", f"No se pudo registrar el adjunto: {e}")
+            return
+        finally:
+            conn.close()
+
+        messagebox.showinfo(
+            "Albarán adjuntado",
+            f"✅ El albarán '{nombre_real}' se ha adjuntado correctamente al expediente.")
+
+        # Recargar la lista de adjuntos
+        try:
+            self.cargar_lista_adjuntos(self.current_rma_id)
+        except Exception as e:
+            logger.error(f"Error recargando adjuntos tras adjuntar albarán: {e}")
+
     def abrir_dialogo_adjunto(self, modo_abrir_carpeta=False):
         """Abre el diálogo de selección de archivo y lo sube al sistema."""
         # 1. Verificar si el RMA ya está guardado (si current_rma_id tiene valor)

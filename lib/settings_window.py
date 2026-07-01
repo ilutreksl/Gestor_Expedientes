@@ -89,6 +89,12 @@ class SettingsWindow(ctk.CTkToplevel):
         
         # Avanzado
         self.var_modo_debug = tk.BooleanVar(value=self.user_settings.get("modo_debug", False))
+
+        # Búsqueda de Albaranes
+        self.var_busqueda_albaranes = tk.BooleanVar(value=self.user_settings.get("busqueda_albaranes_activa", False))
+        self.var_ruta_albaranes = tk.StringVar(value=self.user_settings.get("ruta_carpeta_albaranes", ""))
+        self.var_formato_albaran_usuario = tk.StringVar(value=self.user_settings.get("formato_albaran_usuario", "{N}"))
+        self.var_formato_archivo_pdf = tk.StringVar(value=self.user_settings.get("formato_archivo_pdf", "{N}.pdf"))
         
         logger.debug(f"Variables inicializadas: tooltips={self.var_tooltips.get()}, "
                     f"compact={self.var_compact.get()}, sonido={self.var_sonido.get()}")
@@ -113,13 +119,15 @@ class SettingsWindow(ctk.CTkToplevel):
         self.tab_notificaciones = self.tabview.add("🔔 Notificaciones")
         self.tab_seguridad = self.tabview.add("🔒 Seguridad")
         self.tab_avanzado = self.tabview.add("⚙️ Avanzado")
-        
+        self.tab_albaranes = self.tabview.add("📄 Albaranes")
+
         # Llenar pestañas
         self._create_general_tab()
         self._create_appearance_tab()
         self._create_notifications_tab()
         self._create_security_tab()
         self._create_advanced_tab()
+        self._create_albaranes_tab()
         
         # Frame de botones (fuera del tabview)
         self._create_buttons_frame(main_frame)
@@ -601,6 +609,224 @@ class SettingsWindow(ctk.CTkToplevel):
         
         logger.debug("Pestaña Avanzado creada con opciones de gestión y limpieza")
     
+    def _create_albaranes_tab(self):
+        """Crea la pestaña de configuración de búsqueda automática de albaranes."""
+        logger.debug("Creando pestaña Albaranes")
+
+        frame = ctk.CTkScrollableFrame(self.tab_albaranes, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        frame.grid_columnconfigure(1, weight=1)
+
+        row = 0
+
+        # Título
+        ctk.CTkLabel(frame, text="Búsqueda Automática de Albaranes",
+                     font=("Arial", 16, "bold")).grid(row=row, column=0, columnspan=3,
+                                                      sticky="w", padx=10, pady=(5, 5))
+        row += 1
+
+        desc = ("Configura aquí cómo localizar automáticamente los PDF de albaranes cuando\n"
+                "estás en la pestaña Contabilidad. Usa los tokens {Y} y {N} para indicar\n"
+                "las partes variables del número de albarán (año y número correlativo).")
+        ctk.CTkLabel(frame, text=desc, font=("Arial", 11), justify="left",
+                     text_color="gray60").grid(row=row, column=0, columnspan=3,
+                                               sticky="w", padx=10, pady=(0, 15))
+        row += 1
+
+        # Separador
+        ctk.CTkFrame(frame, height=2, fg_color="gray40").grid(
+            row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
+        row += 1
+
+        # Activar búsqueda
+        ctk.CTkLabel(frame, text="Activar búsqueda automática:",
+                     font=("Arial", 12)).grid(row=row, column=0, sticky="w", padx=10, pady=8)
+        switch_busqueda = ctk.CTkSwitch(frame, text="Activado",
+                                        variable=self.var_busqueda_albaranes,
+                                        command=self._on_setting_changed)
+        switch_busqueda.grid(row=row, column=1, sticky="w", padx=10, pady=8)
+        self._add_tooltip(switch_busqueda,
+                          "Muestra el botón 🔍 junto al campo Número Albarán "
+                          "en la pestaña Contabilidad")
+        row += 1
+
+        # Carpeta de albaranes
+        ctk.CTkLabel(frame, text="Carpeta de albaranes (PDF):",
+                     font=("Arial", 12)).grid(row=row, column=0, sticky="w", padx=10, pady=8)
+
+        ruta_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        ruta_frame.grid(row=row, column=1, columnspan=2, sticky="ew", padx=10, pady=8)
+        ruta_frame.grid_columnconfigure(0, weight=1)
+
+        self.entry_ruta_albaranes = ctk.CTkEntry(
+            ruta_frame, textvariable=self.var_ruta_albaranes,
+            placeholder_text="Ej: C:\\Albaranes\\PDF")
+        self.entry_ruta_albaranes.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        self.entry_ruta_albaranes.bind("<KeyRelease>", lambda e: self._on_setting_changed())
+
+        btn_browse = ctk.CTkButton(ruta_frame, text="📁 Examinar...", width=120,
+                                   command=self._seleccionar_carpeta_albaranes)
+        btn_browse.grid(row=0, column=1)
+        self._add_tooltip(btn_browse, "Selecciona la carpeta donde se guardan los PDF de albaranes")
+        row += 1
+
+        # Separador
+        ctk.CTkFrame(frame, height=2, fg_color="gray40").grid(
+            row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=15)
+        row += 1
+
+        # Sección de formatos
+        ctk.CTkLabel(frame, text="Configuración de Formatos",
+                     font=("Arial", 14, "bold")).grid(row=row, column=0, columnspan=3,
+                                                      sticky="w", padx=10, pady=(5, 5))
+        row += 1
+
+        fmt_desc = ("Tokens disponibles:\n"
+                    "  · {Y}  → parte del año (ej: 26 para 2026)\n"
+                    "  · {N}  → número correlativo tal como lo escribes (ej: 0007)\n"
+                    "  · {N0} → igual que {N} pero sin ceros a la izquierda (ej: 7) — solo en el patrón PDF\n"
+                    "  · *    → cualquier texto (comodín) — solo en el patrón PDF\n\n"
+                    "Ejemplo: escribes 'AL26/0007' y el PDF es 'Albarán 1-AL26-7 PROVEEDOR.pdf'\n"
+                    "  → Patrón usuario: AL{Y}/{N}\n"
+                    "  → Patrón PDF:     Albarán 1-AL{Y}-{N0}*.pdf")
+        ctk.CTkLabel(frame, text=fmt_desc, font=("Arial", 11), justify="left",
+                     text_color="gray60").grid(row=row, column=0, columnspan=3,
+                                               sticky="w", padx=10, pady=(0, 10))
+        row += 1
+
+        # Patrón del número de albarán (cómo lo escribe el usuario)
+        ctk.CTkLabel(frame, text="Patrón nº albarán (como lo escribes):",
+                     font=("Arial", 12)).grid(row=row, column=0, sticky="w", padx=10, pady=8)
+        self.entry_fmt_albaran = ctk.CTkEntry(
+            frame, textvariable=self.var_formato_albaran_usuario,
+            placeholder_text="Ej: AL{Y}/{N}  o  ALB-{N}  o  {N}", width=280)
+        self.entry_fmt_albaran.grid(row=row, column=1, sticky="w", padx=10, pady=8)
+        self.entry_fmt_albaran.bind("<KeyRelease>", lambda e: self._on_setting_changed())
+        self._add_tooltip(self.entry_fmt_albaran,
+                          "Indica cómo escribes el número en el campo.\n"
+                          "{Y} = año, {N} = número correlativo.")
+        row += 1
+
+        # Patrón del nombre de archivo PDF
+        ctk.CTkLabel(frame, text="Patrón del nombre del archivo PDF:",
+                     font=("Arial", 12)).grid(row=row, column=0, sticky="w", padx=10, pady=8)
+        self.entry_fmt_pdf = ctk.CTkEntry(
+            frame, textvariable=self.var_formato_archivo_pdf,
+            placeholder_text="Ej: Albarán 1-AL{Y}-{N0}*.pdf  o  {N}.pdf", width=280)
+        self.entry_fmt_pdf.grid(row=row, column=1, sticky="w", padx=10, pady=8)
+        self.entry_fmt_pdf.bind("<KeyRelease>", lambda e: self._on_setting_changed())
+        self._add_tooltip(self.entry_fmt_pdf,
+                          "Indica cómo guarda el PDF tu programa de gestión.\n"
+                          "{Y} = año, {N} = número con ceros, {N0} = sin ceros, * = cualquier texto.")
+        row += 1
+
+        # Separador
+        ctk.CTkFrame(frame, height=2, fg_color="gray40").grid(
+            row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=15)
+        row += 1
+
+        # Panel de prueba
+        ctk.CTkLabel(frame, text="Probar configuración",
+                     font=("Arial", 14, "bold")).grid(row=row, column=0, columnspan=3,
+                                                      sticky="w", padx=10, pady=(5, 5))
+        row += 1
+
+        ctk.CTkLabel(
+            frame,
+            text="Introduce un número de albarán de ejemplo para comprobar si la configuración "
+                 "localiza el archivo correctamente.",
+            font=("Arial", 11), text_color="gray60", wraplength=600, justify="left"
+        ).grid(row=row, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 8))
+        row += 1
+
+        test_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        test_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=8)
+        test_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(test_frame, text="Número de prueba:",
+                     font=("Arial", 12)).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.entry_test_albaran = ctk.CTkEntry(
+            test_frame, placeholder_text="Ej: AL26/0007", width=220)
+        self.entry_test_albaran.grid(row=0, column=1, sticky="w")
+        btn_test = ctk.CTkButton(test_frame, text="🔍 Probar", width=110,
+                                 command=self._probar_busqueda_albaran)
+        btn_test.grid(row=0, column=2, padx=(10, 0))
+        row += 1
+
+        self.lbl_test_resultado = ctk.CTkLabel(
+            frame, text="", font=("Arial", 11), text_color="gray60",
+            wraplength=620, justify="left")
+        self.lbl_test_resultado.grid(row=row, column=0, columnspan=3,
+                                     sticky="w", padx=10, pady=5)
+
+        logger.debug("Pestaña Albaranes creada")
+
+    def _seleccionar_carpeta_albaranes(self):
+        """Abre un diálogo para seleccionar la carpeta de albaranes."""
+        logger.debug("Abriendo diálogo de selección de carpeta de albaranes")
+        carpeta = filedialog.askdirectory(title="Seleccionar carpeta de albaranes PDF",
+                                          parent=self)
+        if carpeta:
+            self.var_ruta_albaranes.set(carpeta)
+            logger.info(f"Carpeta de albaranes seleccionada: '{carpeta}'")
+            self._on_setting_changed()
+
+    def _probar_busqueda_albaran(self):
+        """Prueba la configuración de búsqueda con un número de albarán de ejemplo."""
+        try:
+            from lib.albaran_utils import extraer_nombre_pdf_desde_albaran, buscar_pdf_en_carpeta
+        except ImportError as e:
+            logger.error(f"No se pudo importar albaran_utils: {e}")
+            self.lbl_test_resultado.configure(
+                text="⚠️ No se pudo cargar el módulo de utilidades de albaranes.",
+                text_color="orange")
+            return
+
+        num_albaran = self.entry_test_albaran.get().strip()
+        if not num_albaran:
+            self.lbl_test_resultado.configure(
+                text="⚠️ Introduce un número de prueba.", text_color="orange")
+            return
+
+        ruta = self.var_ruta_albaranes.get().strip()
+        if not ruta or not os.path.isdir(ruta):
+            self.lbl_test_resultado.configure(
+                text="⚠️ La carpeta indicada no existe o no es válida.", text_color="orange")
+            return
+
+        fmt_usuario = self.var_formato_albaran_usuario.get().strip() or "{N}"
+        fmt_pdf = self.var_formato_archivo_pdf.get().strip() or "{N}.pdf"
+
+        logger.debug(f"Prueba de búsqueda: número='{num_albaran}', carpeta='{ruta}', "
+                     f"fmt_usuario='{fmt_usuario}', fmt_pdf='{fmt_pdf}'")
+
+        try:
+            nombre_archivo = extraer_nombre_pdf_desde_albaran(num_albaran, fmt_usuario, fmt_pdf)
+            logger.debug(f"Nombre PDF calculado para prueba: '{nombre_archivo}'")
+        except ValueError as e:
+            logger.warning(f"Error de formato en prueba de albarán: {e}")
+            self.lbl_test_resultado.configure(
+                text=f"⚠️ Error en formato: {e}", text_color="orange")
+            return
+
+        tiene_comodin = '*' in nombre_archivo or '?' in nombre_archivo
+        verbo = "patrón" if tiene_comodin else "archivo"
+        logger.debug(f"Buscando {verbo}: '{nombre_archivo}' en '{ruta}'")
+
+        resultado = buscar_pdf_en_carpeta(ruta, nombre_archivo)
+
+        if resultado:
+            logger.info(f"Prueba exitosa: archivo encontrado en '{resultado}'")
+            self.lbl_test_resultado.configure(
+                text=f"🔍 {verbo.capitalize()} buscado: {nombre_archivo}\n✅ Archivo encontrado: {resultado}",
+                text_color="green")
+        else:
+            logger.info(f"Prueba: {verbo} '{nombre_archivo}' no encontrado en '{ruta}'")
+            self.lbl_test_resultado.configure(
+                text=f"🔍 {verbo.capitalize()} buscado: {nombre_archivo}\n"
+                     f"❌ No se encontró ningún archivo en '{ruta}' (búsqueda recursiva).",
+                text_color="red")
+
     def _create_buttons_frame(self, parent):
         """Crea el frame de botones en la parte inferior."""
         logger.debug("Creando frame de botones")
@@ -1263,9 +1489,13 @@ class SettingsWindow(ctk.CTkToplevel):
             "dias_notificar_sin_gestionar": self.var_dias_sin_gestionar.get(),
             "volumen_notificaciones": self.var_volumen.get(),
             "tiene_firma": self.var_tiene_firma.get(),
-            "modo_debug": self.var_modo_debug.get()
+            "modo_debug": self.var_modo_debug.get(),
+            "busqueda_albaranes_activa": self.var_busqueda_albaranes.get(),
+            "ruta_carpeta_albaranes": self.var_ruta_albaranes.get().strip(),
+            "formato_albaran_usuario": self.var_formato_albaran_usuario.get().strip() or "{N}",
+            "formato_archivo_pdf": self.var_formato_archivo_pdf.get().strip() or "{N}.pdf",
         }
-        
+
         return config
     
     def _apply_imported_settings(self, config):

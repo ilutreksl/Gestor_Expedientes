@@ -1,4 +1,11 @@
-Cambio V.1.0.61 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.62 - ✨ Últimas mejoras implementadas:
+
+- Añadido poder adjuntar los albaranes automaticamente al expediente.
+    - Hay que activarlo desde ajustes del usuario, y saldra un boton al lado del campo Numero de Albaran en la pestaña Contabilidad de los expediente.
+
+
+
+Cambio V.1.0.61
 
 - Añadido check en el informe de quinceas para visualizar los entregados.
 - Añadido dos nuevos iconos en el listado de expedientes.
