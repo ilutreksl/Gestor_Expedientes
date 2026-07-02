@@ -5338,8 +5338,12 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 except ValueError:
                     pass
 
-            ctk.CTkLabel(row, 
-                        text=f"{task['titulo']} - Vence: {fecha_v or 'Sin fecha'} - Estado: {estado}",
+            prioridad = task.get('prioridad') or 'Normal'
+            icono_prioridad = "🔴" if prioridad == 'Alta' else "🟡" if prioridad == 'Normal' else "🟢"
+            asignado_texto = f" - Asignado: {task.get('asignado_a')}" if task.get('asignado_a') else ""
+
+            ctk.CTkLabel(row,
+                        text=f"{icono_prioridad} {task['titulo']} - Vence: {fecha_v or 'Sin fecha'} - Estado: {estado}{asignado_texto}",
                         text_color=color_texto).pack(side='left', padx=5)
             ctk.CTkButton(row, text="Editar", width=60, command=lambda t=task: editar_tarea_dialog(t)).pack(side='right', padx=5)
             ctk.CTkButton(row, text="Eliminar", width=60, command=lambda t=task: eliminar_tarea_rma(t['id'], t['codigo_rma'], t['titulo'])).pack(side='right', padx=5)
@@ -5358,15 +5362,15 @@ class VentanaPrincipal(ctk.CTkToplevel):
                 codigo = self.lbl_codigo_rma.cget('text').split(': ')[1].strip()
                 conn = connect_db()
                 cur = conn.cursor()
-                cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por FROM tareas WHERE codigo_rma = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (codigo,))
+                cur.execute("SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento, estado, creado_por, asignado_a, prioridad FROM tareas WHERE codigo_rma = ? ORDER BY fecha_vencimiento IS NULL, fecha_vencimiento ASC", (codigo,))
                 filas = cur.fetchall()
                 conn.close()
 
                 if not filas:
                     ctk.CTkLabel(self.tareas_list_frame, text="No hay tareas asociadas a este RMA.", text_color="gray").pack(pady=10)
                     return
-                for tid, codigo_rma, titulo, desc, fecha_v, estado, creador in filas:
-                    task = {'id': tid, 'codigo_rma': codigo_rma, 'titulo': titulo, 'descripcion': desc, 'fecha_vencimiento': fecha_v, 'estado': estado, 'creado_por': creador}
+                for tid, codigo_rma, titulo, desc, fecha_v, estado, creador, asignado_a, prioridad in filas:
+                    task = {'id': tid, 'codigo_rma': codigo_rma, 'titulo': titulo, 'descripcion': desc, 'fecha_vencimiento': fecha_v, 'estado': estado, 'creado_por': creador, 'asignado_a': asignado_a, 'prioridad': prioridad}
                     mostrar_tarea_row(task)
             except sqlite3.Error as e:
                 messagebox.showerror("Error BD", f"Error cargando tareas: {e}")
