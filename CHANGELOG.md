@@ -1,7 +1,8 @@
-Cambio V.1.0.62 - ✨ Últimas mejoras implementadas:
+Cambio V.1.0.63 - ✨ Últimas mejoras implementadas:
 
 - Añadido poder adjuntar los albaranes automaticamente al expediente.
     - Hay que activarlo desde ajustes del usuario, y saldra un boton al lado del campo Numero de Albaran en la pestaña Contabilidad de los expediente.
+- Mejorada la estadisticas de los articulos, para contemplar las mismas referencias en los mismos estados.
 
 
 
