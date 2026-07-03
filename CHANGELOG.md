@@ -1,4 +1,16 @@
-Cambio V.1.0.63 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.00 - ✨ Últimas mejoras implementadas:
+
+- Refactorizacion de la aplicacion.
+    * Mejorar mantenimiento a largo plazo.
+    * Mejorar rendimiento de la app.
+    * Mejorar agilidad de la app.
+- Añadido listado de tareas y calendario en la columna de la derecha.
+    * Se puede habilitar/deshabilitar desde los ajustes de usuario en la pestaña "Notificaciones"
+- Correccion de bugs en la seccion de guardar los expedientes y las tareas.
+
+
+
+Cambio V.1.0.63
 
 - Añadido poder adjuntar los albaranes automaticamente al expediente.
     - Hay que activarlo desde ajustes del usuario, y saldra un boton al lado del campo Numero de Albaran en la pestaña Contabilidad de los expediente.

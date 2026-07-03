@@ -539,3 +539,327 @@ def marcar_tarea_completada(connect_db_func, tarea_id: int, usuario: str) -> boo
     except Exception as e:
         logger.error(f"Error al marcar tarea como completada: {e}", exc_info=True)
         return False
+
+
+def obtener_tareas_dashboard(connect_db_func, usuario: str, mostrar_todas: bool = True,
+                              solo_prioritarias: bool = False) -> List[Dict]:
+    """
+    Obtiene las tareas pendientes de un usuario para el widget del dashboard,
+    respetando los dos filtros independientes configurables desde Ajustes de Usuario.
+
+    Args:
+        connect_db_func: Función para conectar a la base de datos
+        usuario: Nombre del usuario
+        mostrar_todas: Si True, se muestran todas las tareas pendientes (las de
+            prioridad Alta ya quedan primero por el ORDER BY existente)
+        solo_prioritarias: Si True y mostrar_todas es False, filtra solo las de
+            prioridad Alta
+
+    Returns:
+        Lista de diccionarios con información de tareas pendientes
+    """
+    logger.debug(f"Obteniendo tareas de dashboard para {usuario} "
+                 f"(todas={mostrar_todas}, solo_prioritarias={solo_prioritarias})")
+
+    if not mostrar_todas and not solo_prioritarias:
+        logger.debug("Ambos filtros de tareas desactivados, usando 'mostrar_todas' por defecto")
+        mostrar_todas = True
+
+    try:
+        result = connect_db_func()
+        if isinstance(result, tuple):
+            conn, cursor = result
+        else:
+            conn = result
+            cursor = conn.cursor() if conn else None
+
+        if not conn or not cursor:
+            logger.error("No se pudo conectar a la base de datos")
+            return []
+
+        filtro_prioridad = ""
+        params = [usuario, usuario]
+        if solo_prioritarias and not mostrar_todas:
+            filtro_prioridad = "AND prioridad = 'Alta'"
+
+        cursor.execute(f"""
+            SELECT id, codigo_rma, titulo, descripcion, fecha_vencimiento,
+                   estado, prioridad, creado_por, asignado_a
+            FROM tareas
+            WHERE (asignado_a = ? OR (asignado_a IS NULL AND creado_por = ?))
+            AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
+            {filtro_prioridad}
+            ORDER BY
+                CASE prioridad
+                    WHEN 'Alta' THEN 1
+                    WHEN 'Normal' THEN 2
+                    WHEN 'Baja' THEN 3
+                    ELSE 4
+                END,
+                fecha_vencimiento IS NULL, fecha_vencimiento ASC
+        """, params)
+
+        tareas = []
+        for row in cursor.fetchall():
+            tareas.append({
+                'id': row[0],
+                'codigo_rma': row[1],
+                'titulo': row[2],
+                'descripcion': row[3],
+                'fecha_vencimiento': row[4],
+                'estado': row[5],
+                'prioridad': row[6] or 'Normal',
+                'creado_por': row[7],
+                'asignado_a': row[8]
+            })
+
+        conn.close()
+        logger.debug(f"Dashboard: {len(tareas)} tareas cargadas para {usuario}")
+        return tareas
+
+    except Exception as e:
+        logger.error(f"Error al obtener tareas de dashboard: {e}", exc_info=True)
+        return []
+
+
+def obtener_conteo_tareas_por_dia(connect_db_func, usuario: str, anio: int, mes: int,
+                                   mostrar_todas: bool = True,
+                                   solo_prioritarias: bool = False) -> Dict[int, Dict]:
+    """
+    Agrupa por día del mes las tareas pendientes de un usuario, para marcar el
+    calendario mensual del dashboard.
+
+    Args:
+        connect_db_func: Función para conectar a la base de datos
+        usuario: Nombre del usuario
+        anio: Año a consultar
+        mes: Mes a consultar (1-12)
+        mostrar_todas: Igual que en obtener_tareas_dashboard
+        solo_prioritarias: Igual que en obtener_tareas_dashboard
+
+    Returns:
+        Diccionario {dia_int: {"count": n, "tiene_alta": bool}}
+    """
+    logger.debug(f"Calculando conteo de tareas por día para {usuario} ({mes}/{anio})")
+
+    if not mostrar_todas and not solo_prioritarias:
+        mostrar_todas = True
+
+    try:
+        result = connect_db_func()
+        if isinstance(result, tuple):
+            conn, cursor = result
+        else:
+            conn = result
+            cursor = conn.cursor() if conn else None
+
+        if not conn or not cursor:
+            logger.error("No se pudo conectar a la base de datos")
+            return {}
+
+        filtro_prioridad = ""
+        if solo_prioritarias and not mostrar_todas:
+            filtro_prioridad = "AND prioridad = 'Alta'"
+
+        mes_str = f"{anio:04d}-{mes:02d}"
+        cursor.execute(f"""
+            SELECT fecha_vencimiento, prioridad
+            FROM tareas
+            WHERE (asignado_a = ? OR (asignado_a IS NULL AND creado_por = ?))
+            AND estado NOT IN ('Completado', 'Completada', 'Finalizada')
+            AND fecha_vencimiento IS NOT NULL
+            AND strftime('%Y-%m', fecha_vencimiento) = ?
+            {filtro_prioridad}
+        """, (usuario, usuario, mes_str))
+
+        dias: Dict[int, Dict] = {}
+        for fecha_vencimiento, prioridad in cursor.fetchall():
+            try:
+                # fecha_vencimiento puede venir con hora (p.ej. "YYYY-MM-DD HH:MM:SS"),
+                # así que solo tomamos la parte de fecha antes de extraer el día.
+                solo_fecha = fecha_vencimiento.strip().split(" ")[0].split("T")[0]
+                dia = int(solo_fecha.split("-")[2])
+            except (ValueError, IndexError, AttributeError):
+                continue
+            entrada = dias.setdefault(dia, {"count": 0, "tiene_alta": False})
+            entrada["count"] += 1
+            if prioridad == "Alta":
+                entrada["tiene_alta"] = True
+
+        conn.close()
+        logger.debug(f"Calendario {mes}/{anio}: {len(dias)} días con tareas para {usuario}")
+        return dias
+
+    except Exception as e:
+        logger.error(f"Error al calcular conteo de tareas por día: {e}", exc_info=True)
+        return {}
+
+
+def _registrar_historial_tarea(cursor, codigo_rma: str, usuario: str, descripcion_cambio: str):
+    """
+    Inserta una entrada en rma_historial para una acción sobre una tarea,
+    resolviendo el rma_id a partir del código RMA. No hace commit (lo hace el llamante).
+    """
+    if not codigo_rma:
+        return
+    cursor.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+    rma_row = cursor.fetchone()
+    if rma_row:
+        rma_id = rma_row[0]
+        cursor.execute("""
+            INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+            VALUES (?, ?, ?, ?)
+        """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), usuario, descripcion_cambio))
+
+
+def completar_tarea_con_historial(connect_db_func, tarea_id: int, usuario: str) -> bool:
+    """
+    Marca una tarea como completada y registra la acción en el historial del
+    expediente asociado.
+
+    Args:
+        connect_db_func: Función para conectar a la base de datos
+        tarea_id: ID de la tarea
+        usuario: Usuario que completa la tarea
+
+    Returns:
+        True si se actualizó correctamente
+    """
+    logger.debug(f"Completando tarea {tarea_id} desde dashboard (usuario={usuario})")
+    try:
+        result = connect_db_func()
+        if isinstance(result, tuple):
+            conn, cursor = result
+        else:
+            conn = result
+            cursor = conn.cursor() if conn else None
+
+        if not conn or not cursor:
+            logger.error("No se pudo conectar a la base de datos")
+            return False
+
+        cursor.execute("SELECT codigo_rma, titulo FROM tareas WHERE id = ?", (tarea_id,))
+        row = cursor.fetchone()
+        if not row:
+            logger.error(f"No se encontró la tarea {tarea_id} para completar")
+            conn.close()
+            return False
+        codigo_rma, titulo = row[0], row[1]
+
+        cursor.execute("UPDATE tareas SET estado = 'Completado' WHERE id = ?", (tarea_id,))
+        _registrar_historial_tarea(cursor, codigo_rma, usuario, f"Tarea completada: {titulo}")
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Usuario {usuario} completó tarea {tarea_id} desde dashboard")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error al completar tarea desde dashboard: {e}", exc_info=True)
+        return False
+
+
+def eliminar_tarea_con_historial(connect_db_func, tarea_id: int, usuario: str) -> bool:
+    """
+    Elimina una tarea y registra la acción en el historial del expediente asociado.
+
+    Args:
+        connect_db_func: Función para conectar a la base de datos
+        tarea_id: ID de la tarea
+        usuario: Usuario que elimina la tarea
+
+    Returns:
+        True si se eliminó correctamente
+    """
+    logger.debug(f"Eliminando tarea {tarea_id} desde dashboard (usuario={usuario})")
+    try:
+        result = connect_db_func()
+        if isinstance(result, tuple):
+            conn, cursor = result
+        else:
+            conn = result
+            cursor = conn.cursor() if conn else None
+
+        if not conn or not cursor:
+            logger.error("No se pudo conectar a la base de datos")
+            return False
+
+        cursor.execute("SELECT codigo_rma, titulo FROM tareas WHERE id = ?", (tarea_id,))
+        row = cursor.fetchone()
+        if not row:
+            logger.error(f"No se encontró la tarea {tarea_id} para eliminar")
+            conn.close()
+            return False
+        codigo_rma, titulo = row[0], row[1]
+
+        cursor.execute("DELETE FROM tareas WHERE id = ?", (tarea_id,))
+        _registrar_historial_tarea(cursor, codigo_rma, usuario, f"Tarea eliminada: {titulo}")
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Usuario {usuario} eliminó tarea {tarea_id} desde dashboard")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error al eliminar tarea desde dashboard: {e}", exc_info=True)
+        return False
+
+
+def editar_tarea_con_historial(connect_db_func, tarea_id: int, usuario: str, titulo: str,
+                                descripcion: str, fecha_vencimiento: Optional[str], estado: str,
+                                asignado_a: Optional[str], prioridad: str) -> bool:
+    """
+    Actualiza una tarea y registra la acción en el historial del expediente asociado.
+
+    Args:
+        connect_db_func: Función para conectar a la base de datos
+        tarea_id: ID de la tarea
+        usuario: Usuario que edita la tarea
+        titulo, descripcion, fecha_vencimiento, estado, asignado_a, prioridad: Nuevos valores
+
+    Returns:
+        True si se actualizó correctamente
+    """
+    logger.debug(f"Editando tarea {tarea_id} desde dashboard (usuario={usuario})")
+    try:
+        result = connect_db_func()
+        if isinstance(result, tuple):
+            conn, cursor = result
+        else:
+            conn = result
+            cursor = conn.cursor() if conn else None
+
+        if not conn or not cursor:
+            logger.error("No se pudo conectar a la base de datos")
+            return False
+
+        cursor.execute("SELECT codigo_rma, titulo FROM tareas WHERE id = ?", (tarea_id,))
+        row = cursor.fetchone()
+        if not row:
+            logger.error(f"No se encontró la tarea {tarea_id} para editar")
+            conn.close()
+            return False
+        codigo_rma, titulo_antiguo = row[0], row[1]
+
+        cursor.execute("""
+            UPDATE tareas
+            SET titulo = ?, descripcion = ?, fecha_vencimiento = ?, estado = ?, asignado_a = ?, prioridad = ?
+            WHERE id = ?
+        """, (titulo, descripcion, fecha_vencimiento, estado, asignado_a, prioridad, tarea_id))
+
+        asignacion_texto = f" (asignada a {asignado_a})" if asignado_a else ""
+        descripcion_cambio = (f"Tarea ID {tarea_id} editada - {titulo_antiguo} -> {titulo} "
+                               f"(Estado: {estado}){asignacion_texto}")
+        _registrar_historial_tarea(cursor, codigo_rma, usuario, descripcion_cambio)
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Usuario {usuario} editó tarea {tarea_id} desde dashboard")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error al editar tarea desde dashboard: {e}", exc_info=True)
+        return False

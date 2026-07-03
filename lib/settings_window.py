@@ -83,7 +83,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self.var_dias_vencimiento = tk.IntVar(value=self.user_settings.get("dias_anticipacion_vencimiento", 7))
         self.var_dias_sin_gestionar = tk.IntVar(value=self.user_settings.get("dias_notificar_sin_gestionar", 15))
         self.var_volumen = tk.IntVar(value=self.user_settings.get("volumen_notificaciones", 70))
-        
+        self.var_mostrar_tareas_dashboard = tk.BooleanVar(value=self.user_settings.get("mostrar_tareas_dashboard", True))
+        self.var_mostrar_todas_tareas_dashboard = tk.BooleanVar(value=self.user_settings.get("mostrar_todas_tareas_dashboard", True))
+        self.var_mostrar_prioritarias_dashboard = tk.BooleanVar(value=self.user_settings.get("mostrar_prioritarias_dashboard", False))
+        self.var_mostrar_calendario_dashboard = tk.BooleanVar(value=self.user_settings.get("mostrar_calendario_dashboard", True))
+
         # Seguridad
         self.var_tiene_firma = tk.BooleanVar(value=self.user_settings.get("tiene_firma", False))
         
@@ -370,8 +374,51 @@ class SettingsWindow(ctk.CTkToplevel):
         self.label_volumen.pack(side="left")
         self._add_tooltip(self.slider_volumen, "Ajusta el volumen del sonido de notificaciones (0-100%)")
         row += 1
-        
-        logger.debug("Pestaña Notificaciones creada con 5 ajustes")
+
+        # Separador
+        sep3 = ctk.CTkFrame(frame, height=2, fg_color="gray40")
+        sep3.grid(row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=15)
+        row += 1
+
+        # Título panel de tareas y calendario
+        ctk.CTkLabel(frame, text="Panel de tareas y calendario",
+                    font=("Arial", 14, "bold")).grid(row=row, column=0, columnspan=2,
+                                                     sticky="w", padx=10, pady=(0,10))
+        row += 1
+
+        # Mostrar lista de tareas en el dashboard
+        switch_tareas_dashboard = ctk.CTkSwitch(frame, text="Mostrar lista de tareas en el dashboard",
+                                                variable=self.var_mostrar_tareas_dashboard, font=("Arial", 12),
+                                                command=self._on_setting_changed)
+        switch_tareas_dashboard.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=8)
+        self._add_tooltip(switch_tareas_dashboard, "Muestra un listado compacto de tus tareas pendientes en la columna de estadísticas")
+        row += 1
+
+        # Mostrar todas las tareas asignadas
+        check_todas_tareas = ctk.CTkCheckBox(frame, text="Mostrar todas las tareas asignadas",
+                                             variable=self.var_mostrar_todas_tareas_dashboard, font=("Arial", 12),
+                                             command=self._on_setting_changed)
+        check_todas_tareas.grid(row=row, column=0, columnspan=2, sticky="w", padx=(30, 10), pady=4)
+        self._add_tooltip(check_todas_tareas, "Incluye todas tus tareas pendientes en el listado del dashboard")
+        row += 1
+
+        # Mostrar solo prioritarias
+        check_prioritarias = ctk.CTkCheckBox(frame, text="Mostrar solo prioritarias",
+                                             variable=self.var_mostrar_prioritarias_dashboard, font=("Arial", 12),
+                                             command=self._on_setting_changed)
+        check_prioritarias.grid(row=row, column=0, columnspan=2, sticky="w", padx=(30, 10), pady=4)
+        self._add_tooltip(check_prioritarias, "Si 'Mostrar todas' está desactivado, filtra el listado a solo tareas de prioridad Alta")
+        row += 1
+
+        # Mostrar calendario mensual
+        switch_calendario_dashboard = ctk.CTkSwitch(frame, text="Mostrar calendario mensual en el dashboard",
+                                                    variable=self.var_mostrar_calendario_dashboard, font=("Arial", 12),
+                                                    command=self._on_setting_changed)
+        switch_calendario_dashboard.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=8)
+        self._add_tooltip(switch_calendario_dashboard, "Muestra un calendario mensual con las tareas pendientes marcadas en la columna de estadísticas")
+        row += 1
+
+        logger.debug("Pestaña Notificaciones creada con 9 ajustes")
     
     def _create_security_tab(self):
         """Crea la pestaña Seguridad."""
@@ -1439,15 +1486,14 @@ class SettingsWindow(ctk.CTkToplevel):
             # Actualizar aplicación
             self.app.user_settings = self.user_settings.copy()
             
-            # Exponer globalmente (puede que no exista el módulo app en copy-exported)
-            if hasattr(self.app, 'USER_SETTINGS'):
-                self.app.USER_SETTINGS = self.user_settings
-            else:
-                try:
-                    import app
-                    app.USER_SETTINGS = self.user_settings
-                except Exception:
-                    pass
+            # Exponer globalmente para que Tooltip (definido en lib/app_core.py, que lee
+            # su propia variable de módulo USER_SETTINGS) respete el ajuste "show_tooltips"
+            # inmediatamente, sin esperar a reiniciar la aplicación.
+            try:
+                import lib.app_core as app_core
+                app_core.USER_SETTINGS = self.user_settings
+            except Exception as e:
+                logger.error(f"No se pudo sincronizar USER_SETTINGS para tooltips: {e}", exc_info=True)
             
             # Redibujar listado si cambió compact mode
             try:
@@ -1488,6 +1534,10 @@ class SettingsWindow(ctk.CTkToplevel):
             "dias_anticipacion_vencimiento": self.var_dias_vencimiento.get(),
             "dias_notificar_sin_gestionar": self.var_dias_sin_gestionar.get(),
             "volumen_notificaciones": self.var_volumen.get(),
+            "mostrar_tareas_dashboard": self.var_mostrar_tareas_dashboard.get(),
+            "mostrar_todas_tareas_dashboard": self.var_mostrar_todas_tareas_dashboard.get(),
+            "mostrar_prioritarias_dashboard": self.var_mostrar_prioritarias_dashboard.get(),
+            "mostrar_calendario_dashboard": self.var_mostrar_calendario_dashboard.get(),
             "tiene_firma": self.var_tiene_firma.get(),
             "modo_debug": self.var_modo_debug.get(),
             "busqueda_albaranes_activa": self.var_busqueda_albaranes.get(),
@@ -1535,7 +1585,15 @@ class SettingsWindow(ctk.CTkToplevel):
             if "volumen_notificaciones" in config:
                 self.var_volumen.set(config["volumen_notificaciones"])
                 self.label_volumen.configure(text=f"{config['volumen_notificaciones']}%")
-            
+            if "mostrar_tareas_dashboard" in config:
+                self.var_mostrar_tareas_dashboard.set(config["mostrar_tareas_dashboard"])
+            if "mostrar_todas_tareas_dashboard" in config:
+                self.var_mostrar_todas_tareas_dashboard.set(config["mostrar_todas_tareas_dashboard"])
+            if "mostrar_prioritarias_dashboard" in config:
+                self.var_mostrar_prioritarias_dashboard.set(config["mostrar_prioritarias_dashboard"])
+            if "mostrar_calendario_dashboard" in config:
+                self.var_mostrar_calendario_dashboard.set(config["mostrar_calendario_dashboard"])
+
             # Avanzado
             if "modo_debug" in config:
                 self.var_modo_debug.set(config["modo_debug"])
