@@ -1,4 +1,4 @@
-Cambio V.1.1.00 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.01 - ✨ Últimas mejoras implementadas:
 
 - Refactorizacion de la aplicacion.
     * Mejorar mantenimiento a largo plazo.
@@ -7,6 +7,7 @@ Cambio V.1.1.00 - ✨ Últimas mejoras implementadas:
 - Añadido listado de tareas y calendario en la columna de la derecha.
     * Se puede habilitar/deshabilitar desde los ajustes de usuario en la pestaña "Notificaciones"
 - Correccion de bugs en la seccion de guardar los expedientes y las tareas.
+- Añadido boton de crear tareas en el calendario del dashboard.
 
 
 

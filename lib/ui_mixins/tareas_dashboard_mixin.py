@@ -295,6 +295,159 @@ class TareasDashboardMixin:
 
         ctk.CTkButton(dlg, text="Guardar", command=guardar_edicion).pack(pady=10)
 
+    def _abrir_dialogo_crear_tarea_dashboard(self):
+        """Diálogo para crear una tarea nueva desde el calendario del dashboard,
+        con opción de asociarla a un expediente existente."""
+        logger.debug("Abriendo diálogo de creación de tarea desde el calendario del dashboard")
+        fecha_inicial = self._dia_filtro_tareas or datetime.date.today()
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Crear tarea")
+        dlg.geometry("460x700")
+        dlg.grab_set()
+
+        ctk.CTkLabel(dlg, text="Título:").pack(pady=(10, 0))
+        titulo_entry = ctk.CTkEntry(dlg)
+        titulo_entry.pack(padx=10, pady=5, fill='x')
+
+        ctk.CTkLabel(dlg, text="Descripción:").pack(pady=(10, 0))
+        desc_text = tk.Text(dlg, height=4)
+        desc_text.pack(padx=10, pady=5, fill='both', expand=True)
+
+        ctk.CTkLabel(dlg, text="Fecha Vencimiento (YYYY-MM-DD):").pack(pady=(5, 0))
+        fecha_entry = ctk.CTkEntry(dlg)
+        fecha_entry.insert(0, fecha_inicial.isoformat())
+        fecha_entry.pack(padx=10, pady=5, fill='x')
+
+        ctk.CTkLabel(dlg, text="Prioridad:").pack(pady=(5, 0))
+        prioridad_var = ctk.StringVar(value="Normal")
+        ctk.CTkOptionMenu(dlg, values=["Alta", "Normal", "Baja"],
+                          variable=prioridad_var).pack(padx=10, pady=5, fill='x')
+
+        ctk.CTkLabel(dlg, text="Asignar a:").pack(pady=(5, 0))
+        usuarios_disponibles = ["No asignado"]
+        try:
+            conn_temp, cur_temp = self.conectar_db()
+            cur_temp.execute("SELECT nombre_usuario FROM usuarios ORDER BY nombre_usuario")
+            usuarios_disponibles.extend([row[0] for row in cur_temp.fetchall()])
+            conn_temp.close()
+        except Exception as e:
+            logger.error(f"Error al obtener usuarios para diálogo de creación de tarea: {e}", exc_info=True)
+
+        asignado_var = ctk.StringVar(value="No asignado")
+        ctk.CTkOptionMenu(dlg, values=usuarios_disponibles, variable=asignado_var).pack(padx=10, pady=5, fill='x')
+
+        # Selector de expediente (opcional): buscar por código RMA o cliente
+        ctk.CTkLabel(dlg, text="Expediente asociado (opcional):").pack(pady=(5, 0))
+        expediente_seleccionado = {"codigo_rma": None, "texto": None}
+
+        lbl_expediente_actual = ctk.CTkLabel(dlg, text="Sin expediente asociado", text_color="gray",
+                                              font=ctk.CTkFont(size=10))
+        lbl_expediente_actual.pack(padx=10, pady=(0, 2), fill='x')
+
+        expediente_entry = ctk.CTkEntry(dlg, placeholder_text="Escriba código RMA o cliente para buscar...")
+        expediente_entry.pack(padx=10, pady=(0, 2), fill='x')
+
+        expediente_resultados = ctk.CTkScrollableFrame(dlg, height=90)
+        expediente_resultados.pack(padx=10, pady=(0, 5), fill='x')
+
+        def buscar_expedientes(_event=None):
+            termino = expediente_entry.get().strip()
+            for widget in expediente_resultados.winfo_children():
+                widget.destroy()
+            if len(termino) < 2:
+                return
+            try:
+                conn_temp, cur_temp = self.conectar_db()
+                cur_temp.execute(
+                    "SELECT codigo_rma, cliente FROM rma_maestro "
+                    "WHERE codigo_rma LIKE ? OR cliente LIKE ? "
+                    "ORDER BY fecha_emision DESC LIMIT 20",
+                    (f"%{termino}%", f"%{termino}%")
+                )
+                resultados = cur_temp.fetchall()
+                conn_temp.close()
+            except Exception as e:
+                logger.error(f"Error buscando expedientes para nueva tarea: {e}", exc_info=True)
+                return
+
+            if not resultados:
+                ctk.CTkLabel(expediente_resultados, text="Sin resultados", text_color="gray",
+                             font=ctk.CTkFont(size=9)).pack(pady=5)
+                return
+
+            for codigo_rma, cliente in resultados:
+                def seleccionar(codigo=codigo_rma, cli=cliente):
+                    expediente_seleccionado["codigo_rma"] = codigo
+                    expediente_seleccionado["texto"] = f"{codigo} - {cli}"
+                    lbl_expediente_actual.configure(text=f"Expediente: {codigo} - {cli}", text_color=("black", "white"))
+                    expediente_entry.delete(0, "end")
+                    for w in expediente_resultados.winfo_children():
+                        w.destroy()
+
+                fila = ctk.CTkButton(expediente_resultados, text=f"{codigo_rma} - {cliente}",
+                                      font=ctk.CTkFont(size=9), anchor="w",
+                                      fg_color="transparent", text_color=("black", "white"),
+                                      hover_color=("gray80", "gray30"), command=seleccionar)
+                fila.pack(fill="x", pady=1)
+
+        expediente_entry.bind("<KeyRelease>", buscar_expedientes)
+
+        def quitar_expediente():
+            expediente_seleccionado["codigo_rma"] = None
+            expediente_seleccionado["texto"] = None
+            lbl_expediente_actual.configure(text="Sin expediente asociado", text_color="gray")
+
+        ctk.CTkButton(dlg, text="Quitar expediente asociado", height=20, font=ctk.CTkFont(size=9),
+                      fg_color="transparent", text_color="gray", hover_color=("gray80", "gray30"),
+                      command=quitar_expediente).pack(padx=10, pady=(0, 5), fill='x')
+
+        def confirmar_crear():
+            titulo = titulo_entry.get().strip()
+            if not titulo:
+                messagebox.showerror("Error", "El título es obligatorio.", parent=dlg)
+                return
+            descripcion = desc_text.get("1.0", "end").strip()
+            fecha_v = fecha_entry.get().strip() or None
+            if fecha_v:
+                try:
+                    datetime.datetime.strptime(fecha_v, "%Y-%m-%d")
+                except ValueError:
+                    messagebox.showerror("Error", "Formato de fecha inválido. Use YYYY-MM-DD", parent=dlg)
+                    return
+            asignado_a = asignado_var.get()
+            if asignado_a == "No asignado":
+                asignado_a = None
+            codigo_rma = expediente_seleccionado["codigo_rma"]
+
+            try:
+                conn, cur = self.conectar_db()
+                cur.execute(
+                    "INSERT INTO tareas (codigo_rma, titulo, descripcion, fecha_vencimiento, estado, "
+                    "creado_por, creado_en, asignado_a, prioridad, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                    (codigo_rma, titulo, descripcion, fecha_v, 'Pendiente', self.username,
+                     datetime.datetime.now().isoformat(), asignado_a, prioridad_var.get())
+                )
+                if codigo_rma:
+                    cur.execute("SELECT id FROM rma_maestro WHERE codigo_rma = ?", (codigo_rma,))
+                    rma_row = cur.fetchone()
+                    if rma_row:
+                        cur.execute("""
+                            INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                            VALUES (?, ?, ?, ?)
+                        """, (rma_row[0], datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                             self.username, f"Nueva tarea creada desde el calendario: {titulo}"))
+                conn.commit()
+                conn.close()
+                dlg.destroy()
+                self._refrescar_tareas_dashboard()
+                messagebox.showinfo("Éxito", "✅ Tarea creada correctamente")
+            except Exception as e:
+                logger.error(f"Error al crear tarea desde el calendario del dashboard: {e}", exc_info=True)
+                messagebox.showerror("Error", f"No se pudo crear la tarea:\n{e}", parent=dlg)
+
+        ctk.CTkButton(dlg, text="Crear", command=confirmar_crear).pack(pady=10)
+
     # ------------------------------------------------------------------
     # Calendario mensual
     # ------------------------------------------------------------------
@@ -337,6 +490,12 @@ class TareasDashboardMixin:
 
             header = ctk.CTkFrame(self.calendario_dashboard_frame, fg_color="transparent")
             header.pack(fill="x", pady=(2, 2))
+
+            btn_nueva_tarea = ctk.CTkButton(header, text="+", width=22, height=18, font=ctk.CTkFont(size=10, weight="bold"),
+                                             fg_color=("#27ae60", "#2ecc71"), hover_color=("#229954", "#27ae60"),
+                                             command=lambda: self._abrir_dialogo_crear_tarea_dashboard())
+            btn_nueva_tarea.pack(side="left", padx=2)
+            Tooltip(btn_nueva_tarea, "Crear tarea nueva")
 
             ctk.CTkButton(header, text="◀", width=22, height=18, font=ctk.CTkFont(size=10),
                           command=lambda: self._cambiar_mes_calendario(-1)).pack(side="left", padx=2)

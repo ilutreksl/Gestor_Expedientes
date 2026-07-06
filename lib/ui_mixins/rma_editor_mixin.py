@@ -526,6 +526,9 @@ class RmaEditorMixin:
                     # Actualizar badge de tareas inmediatamente
                     if hasattr(self, 'badge_tareas'):
                         self.badge_tareas.actualizar_contador()
+                    # Refrescar el listado/calendario de tareas del dashboard (columna derecha)
+                    if hasattr(self, '_refrescar_tareas_dashboard'):
+                        self._refrescar_tareas_dashboard()
                     messagebox.showinfo("Éxito", "✅ Tarea creada correctamente")
                 except sqlite3.Error as e:
                     messagebox.showerror("Error BD", f"No se pudo crear la tarea: {e}")
@@ -634,6 +637,9 @@ class RmaEditorMixin:
                         # Actualizar badge de tareas inmediatamente
                         if hasattr(self, 'badge_tareas'):
                             self.badge_tareas.actualizar_contador()
+                        # Refrescar el listado/calendario de tareas del dashboard (columna derecha)
+                        if hasattr(self, '_refrescar_tareas_dashboard'):
+                            self._refrescar_tareas_dashboard()
                         messagebox.showinfo("Éxito", "✅ Tarea actualizada correctamente")
                     except sqlite3.Error as e:
                         messagebox.showerror("Error BD", f"No se pudo actualizar la tarea: {e}")
@@ -666,6 +672,11 @@ class RmaEditorMixin:
                 conn.close()
                 if hasattr(self, 'cargar_lista_tareas_rma'):
                     self.cargar_lista_tareas_rma()
+                # Actualizar badge y listado/calendario de tareas del dashboard (columna derecha)
+                if hasattr(self, 'badge_tareas'):
+                    self.badge_tareas.actualizar_contador()
+                if hasattr(self, '_refrescar_tareas_dashboard'):
+                    self._refrescar_tareas_dashboard()
                 messagebox.showinfo("Eliminada", "❌ Tarea eliminada correctamente")
             except sqlite3.Error as e:
                 messagebox.showerror("Error BD", f"No se pudo eliminar la tarea: {e}")

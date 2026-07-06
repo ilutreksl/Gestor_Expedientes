@@ -358,8 +358,9 @@ class ClientesMixin:
                 
                 messagebox.showinfo("Éxito", f"Cliente '{nombre}' creado correctamente")
                 ventana.destroy()
-                self.cargar_lista_clientes()
-                
+                if hasattr(self, 'clientes_frame') and self.clientes_frame.winfo_exists():
+                    self.cargar_lista_clientes()
+
             except Exception as e:
                 if "UNIQUE constraint failed" in str(e):
                     messagebox.showerror("Error", f"Ya existe un cliente con el nombre '{nombre}'")
