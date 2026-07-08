@@ -99,9 +99,43 @@ class EmailMixin:
                         font=ctk.CTkFont(size=12, weight="bold")).pack(pady=5)
             ctk.CTkLabel(info_frame, text=f"Email: {email_acontacto}", 
                         font=ctk.CTkFont(size=12)).pack(pady=2)
-            ctk.CTkLabel(info_frame, text=f"Doc. Cliente: {numero_documento_cliente}", 
+            ctk.CTkLabel(info_frame, text=f"Doc. Cliente: {numero_documento_cliente}",
                         font=ctk.CTkFont(size=12)).pack(pady=2)
-            
+
+            # --- Sección Destinatario (contacto del expediente u otro email) ---
+            destinatario_frame = ctk.CTkFrame(main_frame)
+            destinatario_frame.pack(fill="x", pady=(0, 15))
+
+            ctk.CTkLabel(destinatario_frame, text="📨 Destinatario:",
+                        font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+
+            destino_var = ctk.StringVar(value="contacto")
+            entry_email_otro = ctk.CTkEntry(destinatario_frame, width=350, state="disabled",
+                                             placeholder_text="Escribe el email del destinatario")
+
+            def _on_destino_change():
+                entry_email_otro.configure(state="normal" if destino_var.get() == "otro" else "disabled")
+
+            ctk.CTkRadioButton(destinatario_frame, text=f"Contacto del expediente ({email_acontacto})",
+                              variable=destino_var, value="contacto",
+                              command=_on_destino_change).pack(anchor="w", padx=20, pady=2)
+            ctk.CTkRadioButton(destinatario_frame, text="Otro destinatario:",
+                              variable=destino_var, value="otro",
+                              command=_on_destino_change).pack(anchor="w", padx=20, pady=2)
+            entry_email_otro.pack(anchor="w", padx=40, pady=(0, 10))
+
+            # --- Sección Asunto (editable) ---
+            asunto_frame = ctk.CTkFrame(main_frame)
+            asunto_frame.pack(fill="x", pady=(0, 15))
+
+            ctk.CTkLabel(asunto_frame, text="📝 Asunto:",
+                        font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+
+            asunto_defecto = f"ILUTREK - Nº {numero_rma} ; DOCUMENTO CLIENTE: {numero_documento_cliente}"
+            entry_asunto = ctk.CTkEntry(asunto_frame)
+            entry_asunto.insert(0, asunto_defecto)
+            entry_asunto.pack(fill="x", padx=10, pady=(0, 10))
+
             # Sección de adjuntos
             adjuntos_frame = ctk.CTkFrame(main_frame)
             adjuntos_frame.pack(fill="both", expand=True, pady=(0, 20))
@@ -180,10 +214,23 @@ class EmailMixin:
             botones_frame.pack(fill="x", pady=(0, 10))
             
             # Botón para continuar con email
+            def _click_continuar():
+                if destino_var.get() == "otro":
+                    email_final = entry_email_otro.get().strip()
+                    if not email_final or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email_final):
+                        messagebox.showwarning("Email inválido", "Introduce un email de destinatario válido.")
+                        return
+                else:
+                    email_final = email_acontacto
+
+                asunto_final = entry_asunto.get().strip() or asunto_defecto
+
+                self._procesar_email_con_adjuntos(dialogo, email_final, nombre_cliente, numero_documento_cliente, numero_rma, asunto_final)
+
             btn_email = ctk.CTkButton(
-                botones_frame, 
+                botones_frame,
                 text="📧 Abrir cliente de correo",
-                command=lambda: self._procesar_email_con_adjuntos(dialogo, email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma),
+                command=_click_continuar,
                 font=ctk.CTkFont(size=12, weight="bold"),
                 height=40
             )
@@ -229,24 +276,24 @@ class EmailMixin:
         for var_checkbox, _, _, _ in self.checkboxes_adjuntos:
             var_checkbox.set(False)
 
-    def _procesar_email_con_adjuntos(self, dialogo, email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma):
+    def _procesar_email_con_adjuntos(self, dialogo, email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma, asunto=None):
         """Procesa los adjuntos seleccionados y abre el cliente de correo."""
-        
+
         # Recopilar adjuntos seleccionados
         adjuntos_para_email = []
         for var_checkbox, adjunto_id, ruta_relativa, nombre_archivo in self.checkboxes_adjuntos:
             if var_checkbox.get():
                 adjuntos_para_email.append((adjunto_id, ruta_relativa, nombre_archivo))
-        
+
         # Cerrar diálogo
         dialogo.destroy()
-        
+
         # Continuar con el proceso de email
         self._enviar_email_con_adjuntos_seleccionados(
-            email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma, adjuntos_para_email
+            email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma, adjuntos_para_email, asunto
         )
 
-    def _enviar_email_con_adjuntos_seleccionados(self, email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma, adjuntos_seleccionados):
+    def _enviar_email_con_adjuntos_seleccionados(self, email_acontacto, nombre_cliente, numero_documento_cliente, numero_rma, adjuntos_seleccionados, asunto=None):
         """Envía email con los adjuntos seleccionados."""
         
         try:
@@ -290,7 +337,7 @@ class EmailMixin:
                         messagebox.showwarning("Advertencia", f"No se pudo descargar el archivo '{nombre_archivo_final}': {e}")
             
             # Definir Asunto y Cuerpo del email
-            asunto_base = f"ILUTREK - Nº {numero_rma} ; DOCUMENTO CLIENTE: {numero_documento_cliente}"
+            asunto_base = asunto or f"ILUTREK - Nº {numero_rma} ; DOCUMENTO CLIENTE: {numero_documento_cliente}"
             
             # Texto base del email
             cuerpo_base = (
@@ -339,7 +386,7 @@ class EmailMixin:
                     self._crear_ventana_archivos_temporales(archivos_temporales, temp_dir)
                 
                 # Registrar la acción en el historial
-                self._registrar_accion_email_historial(numero_rma, email_acontacto, adjuntos_seleccionados)
+                self._registrar_accion_email_historial(numero_rma, email_acontacto, adjuntos_seleccionados, asunto_base)
             
         except Exception as e:
             messagebox.showerror("Error", f"Error enviando email con adjuntos: {e}")
@@ -459,14 +506,17 @@ class EmailMixin:
         except Exception as e:
             print(f"Error eliminando directorio temporal: {e}")
 
-    def _registrar_accion_email_historial(self, numero_rma, email_destinatario, adjuntos_seleccionados):
-        """Registra la acción de envío de email en el historial con nombres de adjuntos."""
+    def _registrar_accion_email_historial(self, numero_rma, email_destinatario, adjuntos_seleccionados, asunto=None):
+        """Registra la acción de envío de email en el historial con destinatario, asunto y adjuntos."""
         try:
             conn = connect_db()
             cursor = conn.cursor()
-            
+
             descripcion = f"Email enviado a {email_destinatario}"
-            
+
+            if asunto:
+                descripcion += f" (Asunto: {asunto})"
+
             if adjuntos_seleccionados:
                 nombres_adjuntos = []
                 for _, _, nombre_archivo in adjuntos_seleccionados:

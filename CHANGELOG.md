@@ -1,7 +1,8 @@
-Cambio V.1.1.02 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.03 - ✨ Últimas mejoras implementadas:
 
-- Añadidos dos nuevos campos en la pestaña General de la fichas de los expedientes.
+- (1.1.02)Añadidos dos nuevos campos en la pestaña General de la fichas de los expedientes.
 Estos campos son para la Resolucion Provisional.
+- (1.1.03)En el boton de enviar email dentro de la ficha de expedientes, ahora permite elegir otro destinatario y otro asunto, quedando reflejado en su historial.
 
 
 
