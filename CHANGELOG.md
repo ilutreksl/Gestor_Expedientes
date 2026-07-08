@@ -1,4 +1,11 @@
-Cambio V.1.1.01 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.02 - ✨ Últimas mejoras implementadas:
+
+- Añadidos dos nuevos campos en la pestaña General de la fichas de los expedientes.
+Estos campos son para la Resolucion Provisional.
+
+
+
+Cambio V.1.1.01
 
 - Refactorizacion de la aplicacion.
     * Mejorar mantenimiento a largo plazo.

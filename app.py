@@ -273,6 +273,7 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         "Gestionado_Por": personas_manager.cargar_personas(),  # Cargar desde JSON
         "Recepcionado_Por": personas_recepcion_manager.cargar_personas(),  # Cargar desde JSON
         "Resultado_Expediente": resultado_expediente_manager.cargar_resultados(),  # Cargar desde JSON
+        "Resolucion_Provisional": ["", "REPOSICION", "ABONAR", "NO ABONAR"],
         "Estado_Producto": estados_manager.cargar_estados(),  # Cargar desde JSON
         "Tipo_Cliente": cargar_tipos_cliente()  # Cargar desde JSON
     }
@@ -366,7 +367,13 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             self._migrar_columna_contabilidad_rma_maestro()
         except Exception as e:
             logger.error(f"Error en migración columna contabilidad: {e}")
-            
+
+        # Migrar columnas resolucion_provisional / obs_res_provisional (Turso-safe)
+        try:
+            self._migrar_columnas_resolucion_provisional()
+        except Exception as e:
+            logger.error(f"Error en migración columnas resolución provisional: {e}")
+
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
             app_core.USER_SETTINGS = self.user_settings
@@ -579,6 +586,47 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             conn.close()
         except Exception as e:
             logger.error(f"Error en migración columna contabilidad rma_maestro: {e}")
+
+    def _migrar_columnas_resolucion_provisional(self):
+        """Añade las columnas resolucion_provisional y obs_res_provisional a rma_maestro si no existen.
+        Funciona tanto en SQLite local como en Turso (ALTER TABLE ADD COLUMN es seguro en ambos)."""
+        try:
+            result = self.master.conectar_db()
+            if isinstance(result, tuple):
+                conn, cursor = result
+            else:
+                conn = result
+                cursor = conn.cursor() if conn else None
+
+            if not conn or not cursor:
+                return
+
+            columnas_necesarias = {
+                'resolucion_provisional': "TEXT DEFAULT ''",
+                'obs_res_provisional': "TEXT DEFAULT ''",
+            }
+
+            try:
+                cursor.execute("PRAGMA table_info('rma_maestro')")
+                cols_actuales = [row[1] for row in cursor.fetchall()]
+            except Exception:
+                # Turso no soporta PRAGMA — intentar ADD COLUMN directamente
+                cols_actuales = []
+
+            for col_name, col_def in columnas_necesarias.items():
+                if col_name not in cols_actuales:
+                    try:
+                        cursor.execute(f"ALTER TABLE rma_maestro ADD COLUMN {col_name} {col_def}")
+                        conn.commit()
+                        logger.info(f"Columna '{col_name}' añadida a rma_maestro")
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if "duplicate" not in err_str and "already exists" not in err_str:
+                            logger.warning(f"Info al añadir '{col_name}' en rma_maestro: {e}")
+
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error en migración columnas resolución provisional rma_maestro: {e}")
 
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""

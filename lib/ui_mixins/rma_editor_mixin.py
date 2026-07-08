@@ -769,11 +769,27 @@ class RmaEditorMixin:
         self.crear_campo(general_frame, 3, "Email de Contacto:", "Email_de_Contacto")
         self.crear_campo(general_frame, 4, "Autorización:", "Autorizacion", tipo="optionmenu", opciones=self.OPCIONES["Autorizacion"], valor_defecto="NO")
         self.crear_campo(general_frame, 5, "Motivo Devolucion:", "motivo")
-        
+
+        # Resolución Provisional / Observ. Res. Provisional — resaltados y bloqueados
+        # una vez que "Resultado Expediente" (pestaña Contabilidad) tenga valor.
+        resolucion_prov_frame = ctk.CTkFrame(general_frame, fg_color="#fff8e1", corner_radius=6)
+        resolucion_prov_frame.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        resolucion_prov_frame.grid_columnconfigure(1, weight=1)
+
+        self.crear_campo(resolucion_prov_frame, 0, "Resolución Provisional:", "Resolucion_Provisional",
+                          tipo="optionmenu", opciones=self.OPCIONES["Resolucion_Provisional"], valor_defecto="")
+
+        self.lbl_resultado_expediente_ref = ctk.CTkLabel(
+            resolucion_prov_frame, text="", text_color="#6d4c00",
+            font=ctk.CTkFont(size=11, slant="italic"))
+        self.lbl_resultado_expediente_ref.grid(row=0, column=2, padx=(4, 10), pady=5, sticky="w")
+
+        self.crear_campo(resolucion_prov_frame, 1, "Observ. Res. Provisional:", "Obs_Res_Provisional")
+
         # Fechas y Creador (Solo lectura excepto admin)
-        self.crear_campo(general_frame, 6, "Fecha Emisión:", "Fecha_Emision", 
+        self.crear_campo(general_frame, 8, "Fecha Emisión:", "Fecha_Emision",
                          valor_defecto=fecha_emision_valor, deshabilitado=not es_admin)
-        self.crear_campo(general_frame, 7, "Creado Por:", "Creado_Por", 
+        self.crear_campo(general_frame, 9, "Creado Por:", "Creado_Por",
                          valor_defecto=usuario_actual, deshabilitado=not es_admin)
 
 
@@ -1098,7 +1114,35 @@ class RmaEditorMixin:
         self.crear_campo(contabilidad_frame, fila_cont, "Fecha Albarán Reposición:", "fecha_albaran_reposicion", tipo="date"); fila_cont += 1
         self.crear_campo(contabilidad_frame, fila_cont, "Nº Factura Abono:", "numero_factura_abono"); fila_cont += 1
         self.crear_campo(contabilidad_frame, fila_cont, "Fecha Factura Abono:", "fecha_factura_abono", tipo="date"); fila_cont += 1
-        
+
+        # --- Sincronización Resultado_Expediente -> Resolución Provisional (bloqueo + referencia) ---
+        # Una vez que "Resultado Expediente" tiene valor, "Resolución Provisional" y
+        # "Observ. Res. Provisional" (pestaña General) dejan de ser editables, y junto al
+        # primero se muestra en texto el valor actual de "Resultado Expediente".
+        def _sync_resolucion_provisional(choice=None):
+            try:
+                valor_resultado = self.entry_Resultado_Expediente.get()
+            except Exception:
+                valor_resultado = ""
+            if hasattr(self, 'lbl_resultado_expediente_ref'):
+                self.lbl_resultado_expediente_ref.configure(
+                    text=f"Resultado Expediente: {valor_resultado}" if valor_resultado else "")
+            bloquear = bool(str(valor_resultado).strip())
+            for campo in ('entry_Resolucion_Provisional', 'entry_Obs_Res_Provisional'):
+                widget = getattr(self, campo, None)
+                if widget is not None:
+                    try:
+                        widget.configure(state="disabled" if bloquear else "normal")
+                    except Exception:
+                        pass
+
+        self._sync_resolucion_provisional = _sync_resolucion_provisional
+        try:
+            self.entry_Resultado_Expediente.configure(command=_sync_resolucion_provisional)
+        except Exception:
+            pass
+        _sync_resolucion_provisional()  # Estado inicial (cubre el modo "nuevo")
+
         # E) PESTAÑA ADJUNTOS
         # 1. Botón para Añadir Adjunto
         self.btn_subir_adjunto = ctk.CTkButton(
@@ -2628,7 +2672,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
-            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica', 'Resolucion_Provisional', 'Obs_Res_Provisional',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
         
@@ -2701,7 +2745,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             
         datos_maestro['fecha_emision'] = self.entry_Fecha_Emision.get()
         datos_maestro['creado_por'] = self.entry_Creado_Por.get()
-        
+
+        if datos_maestro.get('resolucion_provisional'):
+            logger.info(
+                f"[RESOLUCION_PROVISIONAL] Nuevo expediente: 'resolucion_provisional'="
+                f"'{datos_maestro.get('resolucion_provisional')}' 'obs_res_provisional'="
+                f"'{datos_maestro.get('obs_res_provisional', '')}' (usuario={self.username})")
+
         # Definir estado inicial basado en Autorización
         # 1. INTEGRACIÓN DE LA TRAZABILIDAD
         datos_maestro['estado'] = self.determinar_estado_rma(datos_maestro)
@@ -2942,6 +2992,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
             'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Resolucion_Provisional', 'Obs_Res_Provisional',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
 
@@ -3641,6 +3692,15 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             self.articulos_data = articulos_db
             self.actualizar_listado_articulos()
 
+            # --- Aplicar bloqueo de Resolución Provisional según Resultado_Expediente cargado ---
+            # CTkOptionMenu.set() no dispara el command=, así que hay que forzar la sincronización
+            # ahora que "Resultado Expediente" ya tiene el valor real cargado desde la BD.
+            if hasattr(self, '_sync_resolucion_provisional'):
+                try:
+                    self._sync_resolucion_provisional()
+                except Exception as e:
+                    print(f"Error al sincronizar Resolución Provisional: {e}")
+
         except Exception as e:
             print(f"Error al cargar datos del RMA ID {rma_id}: {e}")
         finally:
@@ -3845,26 +3905,37 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         # Campos que no pertenecen a rma_maestro (se manejan en otras tablas)
         campos_excluir = {'num_order'}  # num_order está en rma_orders, no en rma_maestro
-        
+
+        # Resolución Provisional / Observ. Res. Provisional dejan de poder modificarse
+        # en cuanto Resultado_Expediente ya tiene valor (defensa server-side además del
+        # bloqueo de la UI en _sync_resolucion_provisional).
+        campos_bloqueados_si_resultado = {'resolucion_provisional', 'obs_res_provisional'}
+        resultado_expediente_actual = str(datos_antiguos.get('resultado_expediente') or '').strip()
+
         for columna_db, valor_nuevo in datos_nuevos.items():
             # Saltar campos que no pertenecen a rma_maestro
             if columna_db in campos_excluir:
                 continue
-                
+
+            if columna_db in campos_bloqueados_si_resultado and resultado_expediente_actual:
+                continue  # Bloqueado: Resultado Expediente ya está cumplimentado
+
             valor_antiguo = datos_antiguos.get(columna_db)
-            
+
             # SQLite almacena el boolean como int (1/0)
             if columna_db == 'autorizacion':
                 if valor_nuevo != valor_antiguo:
                     self.guardar_cambio_historial(rma_id, "Autorización", "NO" if valor_antiguo == 0 else "SI", "NO" if valor_nuevo == 0 else "SI", cursor=cursor)
                     campos_a_actualizar.append(f"{columna_db} = ?")
                     valores_a_actualizar.append(valor_nuevo)
-            
+
             # Comparación de campos normales (no boolean) usando la función de normalización
             elif valores_son_diferentes(valor_antiguo, valor_nuevo):
                 # No registrar obs_tecnica en historial (puede contener JSON con imágenes)
                 if columna_db != 'obs_tecnica':
                     self.guardar_cambio_historial(rma_id, columna_db.title().replace('_', ' '), str(valor_antiguo), str(valor_nuevo), cursor=cursor)
+                if columna_db in campos_bloqueados_si_resultado:
+                    logger.info(f"[RESOLUCION_PROVISIONAL] RMA {rma_id}: '{columna_db}' '{valor_antiguo}' -> '{valor_nuevo}' (usuario={self.username})")
                 campos_a_actualizar.append(f"{columna_db} = ?")
                 valores_a_actualizar.append(valor_nuevo)
         
