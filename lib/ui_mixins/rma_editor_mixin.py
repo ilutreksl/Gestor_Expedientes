@@ -199,6 +199,11 @@ class RmaEditorMixin:
     def mostrar_nuevo_rma(self, rma_id=None):
         """Muestra el formulario para crear (rma_id=None) o editar (rma_id=ID) un RMA."""
         self.limpiar_contenido()
+        # Recordar en qué content_frame se está construyendo esta ficha (puede ser el de
+        # la ventana principal o el de una RmaEditorWindow, que se intercambia temporalmente
+        # en lib/rma_editor_window.py). Permite reconstruir la ficha más tarde (p.ej. justo
+        # después de guardar un expediente nuevo) en el sitio correcto.
+        self._content_frame_ficha_actual = self.content_frame
         self.rma_actual_id = rma_id
         self.articulos_data = [] # Lista temporal que contendrá los artículos
         
@@ -2926,48 +2931,39 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             if not hasattr(self, 'es_modo_edicion') or not self.es_modo_edicion:
                 # Es un nuevo expediente - mostrar el número final asignado
                 codigo_final = datos_maestro['codigo_rma']
-                messagebox.showinfo("¡Expediente Creado!", 
+                messagebox.showinfo("¡Expediente Creado!",
                                     f"✅ Expediente creado exitosamente\n\n"
                                     f"📋 Número final asignado: {codigo_final}\n"
                                     f"👤 Cliente: {datos_maestro['cliente']}\n"
                                     f"💰 Total: {precio_total:.2f} €\n\n"
                                     f"Ya puede adjuntar archivos y gestionar el expediente.")
-                
-                # Actualizar el label con el código final
-                self.lbl_codigo_rma.configure(
-                    text=f"Nº EXPEDIENTE: {codigo_final}",
-                    text_color="green"  # Verde para indicar que ya está guardado
-                )
-                
-                # Actualizar el botón de guardar a verde para indicar que ya está guardado
-                if hasattr(self, 'btn_guardar_rma'):
-                    self.btn_guardar_rma.configure(
-                        text="💾 ACTUALIZAR"
-                    )
-                
-                # Ocultar el texto explicativo ya que ahora es definitivo
-                if hasattr(self, 'lbl_explicacion'):
-                    self.lbl_explicacion.configure(text="✅ Número definitivo asignado")
-                    self.lbl_explicacion.configure(text_color="green")
             else:
                 messagebox.showinfo("Expediente Guardado", "El expediente se ha actualizado correctamente.")
-            
+
             # IMPORTANTE: Actualizar ambos IDs para que el siguiente guardado use actualizar_rma()
             self.current_rma_id = rma_id_generado  # Asigna el ID al atributo de instancia
             self.rma_actual_id = rma_id_generado   # CRÍTICO: Actualizar para que guardar_rma_placeholder() use actualizar_rma()
             self.mode = 'editar'                    # Cambia la ventana a modo edición
             self.es_modo_edicion = True            # Actualizar el indicador
-            
-            # Eliminamos la llamada a self.mostrar_lista_rma() para mantener la vista abierta.
-            
-            # Actualizar el título de la pestaña si fuera necesario
-            self.tabview.set("📝 General")
-            
-            # Ya no necesitamos este mensaje duplicado - se maneja arriba
-            # messagebox.showinfo("Éxito", f"RMA {datos_maestro['codigo_rma']} creado y guardado. Ahora puede adjuntar archivos.")
-            
+
+            # Reconstruir la ficha completa en modo edición: varios botones (Email, Informe,
+            # Reposición/Devolución, Autorización, Reabrir, Eliminar) y la pestaña de Adjuntos
+            # solo se crean cuando es_edicion=True, así que hay que volver a llamar a
+            # mostrar_nuevo_rma() con el id ya asignado para que aparezcan sin necesidad de
+            # cerrar y reabrir la ventana. Se reutiliza el content_frame en el que se
+            # construyó originalmente esta ficha (ventana principal o RmaEditorWindow).
+            try:
+                content_frame_destino = getattr(self, '_content_frame_ficha_actual', self.content_frame)
+                content_frame_original = self.content_frame
+                self.content_frame = content_frame_destino
+                try:
+                    self.mostrar_nuevo_rma(self.rma_actual_id)
+                finally:
+                    self.content_frame = content_frame_original
+            except Exception as e:
+                logger.error(f"Error reconstruyendo la ficha tras guardar nuevo expediente: {e}")
+
             # NO volver al listado - mantener el expediente abierto para que puedan trabajar con él
-            # self.mostrar_lista_rma()
 
         except sqlite3.IntegrityError as e:
             if hasattr(conn, 'rollback'):
