@@ -3062,6 +3062,80 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         return datos_maestro
 
+    def _prompt_datos_solicitud_rma(self):
+        """Diálogo modal que solicita datos que no forman parte de la ficha del
+        expediente pero que son necesarios para rellenar la plantilla PDF de
+        Solicitud de RMA (número de unidades afectadas y pedido de compra).
+
+        Devuelve un dict {'unidades_afectadas': str, 'pedido_compra': str} o
+        None si el usuario cancela.
+        """
+        dlg = Toplevel(self)
+        dlg.title("Datos para la Solicitud de RMA")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        try:
+            width = 420
+            height = 220
+            dlg.update_idletasks()
+            px = self.winfo_rootx()
+            py = self.winfo_rooty()
+            pw = self.winfo_width() or self.winfo_screenwidth()
+            ph = self.winfo_height() or self.winfo_screenheight()
+            x = px + max(0, (pw - width) // 2)
+            y = py + max(0, (ph - height) // 2)
+            dlg.geometry(f"{width}x{height}+{x}+{y}")
+        except Exception:
+            try:
+                dlg.geometry("420x220")
+            except Exception:
+                pass
+
+        ctk.CTkLabel(
+            dlg,
+            text="Introduce los datos necesarios para la Solicitud de RMA:",
+            anchor="w"
+        ).pack(fill='x', padx=12, pady=(12, 8))
+
+        ctk.CTkLabel(dlg, text="Número de unidades afectadas:", anchor="w").pack(fill='x', padx=12)
+        entry_unidades = ctk.CTkEntry(dlg)
+        entry_unidades.pack(fill='x', padx=12, pady=(0, 8))
+        entry_unidades.focus_set()
+
+        ctk.CTkLabel(dlg, text="Pedido de Compra:", anchor="w").pack(fill='x', padx=12)
+        entry_pedido = ctk.CTkEntry(dlg)
+        entry_pedido.pack(fill='x', padx=12, pady=(0, 8))
+
+        result = {'value': None}
+
+        def _ok():
+            unidades = entry_unidades.get().strip()
+            pedido = entry_pedido.get().strip()
+            if not unidades or not pedido:
+                messagebox.showwarning(
+                    "Datos incompletos",
+                    "Debes rellenar el número de unidades afectadas y el pedido de compra.",
+                    parent=dlg
+                )
+                return
+            result['value'] = {'unidades_afectadas': unidades, 'pedido_compra': pedido}
+            dlg.destroy()
+
+        def _cancel():
+            dlg.destroy()
+
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+
+        btnf = ctk.CTkFrame(dlg)
+        btnf.pack(fill='x', pady=(6, 10), padx=12)
+        ctk.CTkButton(btnf, text='Confirmar', width=90, command=_ok).pack(side='right', padx=(6, 0))
+        ctk.CTkButton(btnf, text='Cancelar', width=90, command=_cancel).pack(side='right')
+
+        self.wait_window(dlg)
+        return result['value']
+
     def autorrellena_pdf(self):
         """Autorrellena la plantilla PDF con los datos del RMA actual y la guarda en Backblaze B2.
 
@@ -3079,6 +3153,12 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             codigo_rma = self.lbl_codigo_rma.cget("text").split(": ")[1]
         except Exception:
             messagebox.showerror("Error", "No se pudo determinar el código RMA.")
+            return
+
+        # Solicitar datos que no forman parte de la ficha del expediente pero
+        # que son necesarios para rellenar la plantilla PDF.
+        datos_adicionales = self._prompt_datos_solicitud_rma()
+        if not datos_adicionales:
             return
 
         # Determinar plantilla por defecto
@@ -3169,24 +3249,25 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # Rellenar PDF con datos obtenidos de Turso
         try:
             # Campos que queremos que queden vacíos y editables
-            force_empty = [
-                'Cantidad afectada', 'N Pedido', 'Nº de pedido  Albarán', 'Nº de pedido Albarán',
-                'N Pedido Albarán', 'Nº de pedido Albaran', 'Nº RMA'
-            ]
+            force_empty = ['Nº RMA']
 
             # Preparar valores para rellenar el PDF directamente con datos de Turso
             valores_pdf = {}
-            
+
             # Aplicar mapping: De campos PDF a valores de BD obtenidos de Turso
             if modelo:
                 valores_pdf['Modelo'] = modelo
-            if n_serie: 
+            if n_serie:
                 valores_pdf['Número de serie'] = n_serie
             if obs_tecnica:
                 valores_pdf['Ubicación de las fuentes en la instalación'] = obs_tecnica
             if codigo_rma:
                 valores_pdf['Referencia para devolución'] = codigo_rma
-            
+
+            # Datos recopilados en el diálogo previo (no forman parte de la ficha del expediente)
+            valores_pdf['Cantidad afectada'] = datos_adicionales['unidades_afectadas']
+            valores_pdf['Nº de pedido  Albarán'] = datos_adicionales['pedido_compra']
+
             # Campos que queremos que queden vacíos y editables
             for campo_vacio in force_empty:
                 valores_pdf[campo_vacio] = ''

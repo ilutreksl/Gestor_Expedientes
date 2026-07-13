@@ -1,4 +1,10 @@
-Cambio V.1.1.03 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.04 - ✨ Últimas mejoras implementadas:
+
+- Ventana autorellenable cuando se solicita numero de rma a Olfer para rellenar los campos de unidades afectadas y pedido de compra.
+
+
+
+Cambio V.1.1.03
 
 - (1.1.02)Añadidos dos nuevos campos en la pestaña General de la fichas de los expedientes.
 Estos campos son para la Resolucion Provisional.
