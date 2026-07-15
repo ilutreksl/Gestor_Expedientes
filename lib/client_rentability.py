@@ -384,12 +384,12 @@ def mostrar_rentabilidad_clientes(app):
                 def _on_double(evt=None, _rid=rid, _code=code):
                     logger.info(f"Abriendo expediente {_code} (ID: {_rid})")
                     try:
-                        app.mostrar_nuevo_rma(_rid)
-                        try:
-                            messagebox.showinfo('Expediente abierto', f'El expediente {_code} se ha abierto en la ventana principal.')
-                        except Exception:
-                            # No crítico; si showinfo falla, seguimos
-                            pass
+                        # Usar RmaEditorWindow (no app.mostrar_nuevo_rma directo): esa función
+                        # dibuja la ficha sobre el content_frame de la ventana principal, y su
+                        # botón "Cerrar" asume que está en una ventana emergente propia, así
+                        # que terminaba destruyendo la ventana principal entera al pulsarlo.
+                        from lib.rma_editor_window import RmaEditorWindow
+                        RmaEditorWindow(app, rma_id=_rid)
                         win.destroy()
                     except Exception as e:
                         logger.error(f"Error abriendo expediente {_code}: {e}", exc_info=True)

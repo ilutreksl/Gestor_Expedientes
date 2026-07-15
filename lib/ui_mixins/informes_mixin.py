@@ -972,14 +972,20 @@ class InformesMixin:
                         messagebox.showerror("Error BD", f"No se pudo actualizar el expediente: {e}")
 
                 def abrir_en_panel():
+                    # Usar RmaEditorWindow (no self.mostrar_nuevo_rma directo): esa función
+                    # dibuja la ficha sobre el content_frame que se le pase, y su botón
+                    # "Cerrar" asume que está en una ventana emergente propia. Llamarla
+                    # directamente aquí dibujaba la ficha sobre la ventana principal pero con
+                    # ese botón "Cerrar", que terminaba destruyendo la ventana principal entera.
                     try:
-                        self.mostrar_nuevo_rma(rma_id)
-                        vent.destroy()  # Cerrar la ventana actual al abrir en panel principal
+                        from lib.rma_editor_window import RmaEditorWindow
+                        RmaEditorWindow(self, rma_id)
+                        vent.destroy()
                     except Exception as e:
-                        messagebox.showerror("Error", f"No se pudo abrir en el panel principal: {e}")
+                        messagebox.showerror("Error", f"No se pudo abrir el expediente: {e}")
 
                 ctk.CTkButton(footer, text="Guardar cambios", command=guardar_maestro).pack(side="left")
-                ctk.CTkButton(footer, text="✏️ Abrir en panel principal", command=abrir_en_panel).pack(side="left", padx=8)
+                ctk.CTkButton(footer, text="✏️ Abrir expediente", command=abrir_en_panel).pack(side="left", padx=8)
                 ctk.CTkButton(footer, text="Cerrar", command=vent.destroy).pack(side="right")
 
             except sqlite3.Error as e:

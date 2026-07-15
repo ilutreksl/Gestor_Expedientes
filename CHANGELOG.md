@@ -1,4 +1,9 @@
-Cambio V.1.1.04 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.05 - ✨ Últimas mejoras implementadas:
+
+- Añadida estadistica visible de articulos defectuosos contra las ventas y compras. Los archivos de ventas y compras deberan ser importados manualmente.
+
+
+Cambio V.1.1.04
 
 - Ventana autorellenable cuando se solicita numero de rma a Olfer para rellenar los campos de unidades afectadas y pedido de compra.
 

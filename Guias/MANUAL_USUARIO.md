@@ -20,19 +20,25 @@
 9. [Adjuntar Archivos](#adjuntar-archivos)
 10. [Tareas y Recordatorios](#tareas-y-recordatorios)
 11. [Estadísticas e Informes](#estadísticas-e-informes)
-12. [Configuración Personal](#configuración-personal)
+12. [Ventas y Compras (a3ERP)](#ventas-y-compras-a3erp)
+    - [Importar un Excel de a3ERP](#importar-un-excel-de-a3erp)
+    - [Periodos Cargados](#periodos-cargados)
+    - [Comparativa vs Incidencias](#comparativa-vs-incidencias)
+    - [Alarmas de Incidencia](#alarmas-de-incidencia)
+    - [¿Dónde se guardan estos datos?](#dónde-se-guardan-estos-datos)
+13. [Configuración Personal](#configuración-personal)
     - [Cambiar el Tema de la Aplicación](#cambiar-el-tema-de-la-aplicación)
     - [Activar/Desactivar Tooltips](#activardesactivar-tooltips)
     - [Gestión de Firma Digital Personal](#gestión-de-firma-digital-personal)
     - [Configurar Backups Automáticos](#configurar-backups-automáticos-administradores)
     - [Restaurar una Copia de Seguridad](#restaurar-una-copia-de-seguridad-administradores)
-13. [Documentos de Autorización de Devolución](#documentos-de-autorización-de-devolución)
+14. [Documentos de Autorización de Devolución](#documentos-de-autorización-de-devolución)
     - [¿Qué es un Documento de Autorización?](#qué-es-un-documento-de-autorización)
     - [¿Quién puede Generar Autorizaciones?](#quién-puede-generar-autorizaciones)
     - [Generar un Documento de Autorización](#generar-un-documento-de-autorización)
     - [Gestión de Firma Digital](#gestión-de-firma-digital-personal)
-14. [Preguntas Frecuentes](#preguntas-frecuentes)
-15. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
+15. [Preguntas Frecuentes](#preguntas-frecuentes)
+16. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
 
 ---
 
@@ -1105,6 +1111,87 @@ Algunos informes tienen opción de **"Imprimir PDF"**:
 1. Haz clic en el botón
 2. Se genera un PDF con el informe formateado
 3. Elige dónde guardarlo
+
+---
+
+## Ventas y Compras (a3ERP)
+
+Esta sección permite importar los datos de ventas y compras exportados desde **a3ERP** (nuestro programa de gestión) y compararlos con las incidencias registradas en los expedientes RMA, para detectar qué referencias tienen una tasa de fallo anormalmente alta.
+
+Se accede desde el icono **"Ventas y Compras (a3ERP)"** del menú lateral, justo debajo de **Artículos**.
+
+a3ERP no exporta un fichero con fecha por cada línea de venta/compra: exporta un total por referencia del rango de fechas que tú mismo filtres dentro de a3ERP. Por eso, al importar, la aplicación te pide que indiques ese rango de fechas — no se puede deducir automáticamente del Excel.
+
+La ventana tiene tres pestañas:
+
+### Importar un Excel de a3ERP
+
+1. Abre **Ventas y Compras (a3ERP)** desde el menú lateral
+2. En la pestaña **📥 Importar**, elige:
+   - **Tipo de movimiento**: `venta` o `compra`
+   - **Tipo de carga**:
+     - **incremental**: para las cargas periódicas habituales (p. ej. semanales). Precarga por defecto los últimos 7 días, editable.
+     - **histórico**: para una carga inicial grande que sirva de fondo de referencia (p. ej. los últimos 2 años). Precarga por defecto los últimos 2 años, editable.
+3. Ajusta la **fecha de inicio** y **fecha de fin** del periodo si hace falta (deben coincidir con lo que hayas filtrado en a3ERP al generar el Excel)
+4. Haz clic en **📁 Seleccionar Excel e Importar** y elige el fichero exportado de a3ERP
+5. La aplicación reconoce automáticamente las columnas del Excel (Alias, Código, Descripción, Unidades, Bruto, Neto, Coste, Margen, etc.) tanto para ventas como para compras
+
+**Avisos que pueden aparecer al importar:**
+
+- Si ya existe una carga con el mismo tipo y exactamente el mismo rango de fechas, se pregunta si quieres **reemplazarla**
+- Si el rango se solapa con otra carga incremental ya existente, se avisa de que las unidades podrían contarse dos veces, pero puedes continuar si es intencional
+
+💡 **Consejo**: Si no sabes cuánto histórico cargar la primera vez, no pasa nada por probar — cualquier periodo importado se puede eliminar después desde la pestaña "Periodos cargados" y volver a cargarlo.
+
+### Periodos Cargados
+
+En la pestaña **🗂️ Periodos cargados** ves el listado de todo lo que se ha importado: tipo de movimiento, tipo de carga, rango de fechas, número de referencias, fichero de origen y fecha de importación.
+
+Cada fila tiene un botón **🗑️ Eliminar** para borrar ese periodo completo (y todas sus líneas) si te has equivocado o quieres volver a importarlo.
+
+### Comparativa vs Incidencias
+
+En la pestaña **📊 Comparativa vs Incidencias** puedes calcular, para cada referencia, qué porcentaje de las unidades vendidas (o compradas) ha tenido una incidencia problemática en RMA.
+
+1. Elige **venta** o **compra**
+2. Marca o desmarca **"Incluir bloque histórico"**
+3. Opcionalmente, indica un rango **Desde / Hasta** — este filtro solo afecta a las cargas incrementales (el bloque histórico no tiene fecha por línea, así que no se puede recortar)
+4. Haz clic en **🔄 Calcular Comparativa**
+
+El resultado muestra, por referencia: cantidad total, número de incidencias, unidades en incidencia y **% de incidencia**, coloreado:
+
+- 🟢 Verde: menos del 1%
+- 🟡 Amarillo: 1-3%
+- 🟠 Naranja: 3-5%
+- 🔴 Rojo: más del 5%
+
+Los estados que cuentan como incidencia ya no están fijos en el código: se eligen con el botón **⚙️ Estados que cuentan como incidencia**, que lista todos los estados de `Diccionarios/estados_articulo.json` con checkboxes múltiples — así, si algún día cambian los estados de producto, no hace falta tocar nada más que esa selección.
+
+**Impacto económico**: si el Excel de ventas trae las columnas Coste y Margen (las de compras no las traen), la tabla añade también:
+
+- **Coste/Ud**: coste medio de compra de la referencia
+- **Coste Incid.**: lo que le ha costado a la empresa comprar/producir las unidades que han acabado en una incidencia
+- **Margen Perdido** (solo ventas): beneficio dejado de ganar por esas unidades
+- **Ingreso en Riesgo** (solo ventas): valor de venta de las unidades con incidencia
+
+Puedes cambiar el criterio de orden de la tabla con **"Ordenar por: % incidencia / Coste incidencias (€)"** — una referencia con poco % de incidencia pero mucho volumen puede salir más cara en euros que otra con % más alto pero pocas unidades, así que conviene mirar ambos criterios.
+
+**Buscador**: el campo **🔍 Buscar** filtra la tabla en vivo por referencia. Además, **haz clic en cualquier referencia** de la tabla (o de la ventana de alarmas) para abrir una ventana con el desglose de estados de esa referencia y sus expedientes asociados, con opción de abrirlos directamente.
+
+Puedes exportar el resultado a Excel con **💾 Exportar**.
+
+⚠️ **Importante**: el bloque histórico mezcla varios años sin fecha por línea. Úsalo como volumen de referencia, pero para comparar tasas de fallo por antigüedad real usa el filtro de fechas (que solo aplica a las cargas incrementales).
+
+### Alarmas de Incidencia
+
+En la misma pestaña de Comparativa hay un apartado **🔔 Umbral de alarma (%)** (3% por defecto, editable con **💾 Guardar umbral**).
+
+- **Automático**: cada vez que se importa un Excel (venta o compra), la aplicación comprueba automáticamente si alguna referencia iguala o supera el umbral guardado, usando siempre el total acumulado (histórico + todas las cargas incrementales). Si hay alguna, aparece una ventana emergente con el listado: referencia, total de unidades, número de incidencias y porcentaje exacto.
+- **Manual**: el botón **🔔 Comprobar Alarmas Ahora** lanza la misma comprobación en cualquier momento, sin necesidad de importar nada nuevo — útil si se ha registrado una incidencia nueva y quieres revisar el estado actual.
+
+### ¿Dónde se guardan estos datos?
+
+Los datos importados se guardan en la misma base de datos de la aplicación (la nube configurada para Gestor de Expedientes), no en ficheros locales. Nada de lo que importes aquí sale de la aplicación salvo que lo exportes tú mismo a Excel.
 
 ---
 

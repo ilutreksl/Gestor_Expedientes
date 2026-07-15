@@ -319,6 +319,7 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         self.icon_user = None
         self.icon_papel = None
         self.icon_mas = None
+        self.icon_ventas_compras = None
         
         # Variables de paginación para lista principal
         self.pagina_actual_lista = 0
@@ -815,6 +816,7 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         self.icon_busqueda = _load_icon("busqueda.png")
         self.icon_bd = _load_icon("bd.png")
         self.icon_report = _load_icon("report.png")
+        self.icon_ventas_compras = _load_icon("ventas_compras.png") or _make_placeholder_icon("ventas_compras", shape="rect")
         
         # ... (Botones btn_lista, btn_buscar, btn_reportar en filas 1, 2, 3) ...
 
@@ -895,6 +897,19 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
                                            command=self.mostrar_articulos_window)
         self.btn_articulos.grid(row=fila, column=0, padx=20, pady=6)
         Tooltip(self.btn_articulos, "Artículos")
+        fila += 1
+
+        # Botón Ventas/Compras a3ERP: importación y comparativa con incidencias
+        self.btn_ventas_compras = ctk.CTkButton(self.sidebar_frame,
+                                           text="",
+                                           image=self.icon_ventas_compras,
+                                           width=44,
+                                           height=44,
+                                           fg_color=sidebar_bg,
+                                           hover_color=sidebar_bg,
+                                           command=self.mostrar_ventas_compras_a3erp)
+        self.btn_ventas_compras.grid(row=fila, column=0, padx=20, pady=6)
+        Tooltip(self.btn_ventas_compras, "Ventas y Compras (a3ERP)")
         fila += 1
 
         self.btn_estadisticas = ctk.CTkButton(self.sidebar_frame,
@@ -1165,6 +1180,18 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         except Exception as e:
             logger.error(f"Error abriendo ventana de ajustes: {e}", exc_info=True)
             messagebox.showerror("Error", f"No se pudo abrir la ventana de ajustes:\n{e}")
+
+    def mostrar_ventas_compras_a3erp(self):
+        """Abre la ventana de importación y comparativa de ventas/compras de a3ERP."""
+        try:
+            if hasattr(self, 'ventas_compras_window') and self.ventas_compras_window.winfo_exists():
+                self.ventas_compras_window.focus()
+                return
+            from lib.ventas_compras_a3erp import VentanaVentasComprasA3ERP
+            self.ventas_compras_window = VentanaVentasComprasA3ERP(self)
+        except Exception as e:
+            logger.error(f"Error abriendo ventana de ventas/compras a3ERP: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir la ventana de ventas/compras:\n{e}")
 
     def mostrar_manual_usuario(self):
         """Abre una ventana con el contenido del manual de usuario organizado por secciones."""

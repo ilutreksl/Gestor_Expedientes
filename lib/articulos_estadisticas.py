@@ -484,21 +484,13 @@ def mostrar_estadisticas_articulos(ventana_principal):
     )
     btn_aplicar.grid(row=2, column=1, padx=10, pady=10)
 
-    btn_comparativa = ctk.CTkButton(
-        filtros_frame,
-        text="📊 Comparativa con Ventas",
-        command=lambda: abrir_ventana_comparativa(ventana_principal),
-        width=180
-    )
-    btn_comparativa.grid(row=2, column=2, columnspan=2, padx=10, pady=10)
-
     btn_exportar = ctk.CTkButton(
         filtros_frame,
         text="💾 Exportar a Excel",
         command=exportar_a_excel,
         width=140
     )
-    btn_exportar.grid(row=2, column=4, columnspan=2, padx=10, pady=10)
+    btn_exportar.grid(row=2, column=2, columnspan=2, padx=10, pady=10)
 
     cargar_datos()
 
@@ -584,7 +576,3 @@ def abrir_selector_estados(estados_disponibles, estados_seleccionados, boton, ca
     ).pack(side="right", padx=5)
 
 
-def abrir_ventana_comparativa(ventana_principal):
-    """Abre la ventana de comparativa con ventas."""
-    from lib.comparativa_ventas import VentanaComparativaVentas
-    VentanaComparativaVentas(ventana_principal)

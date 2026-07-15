@@ -128,13 +128,19 @@ def mostrar_expedientes_por_articulo_y_estado(parent, referencia, estado):
     colors = ("#FFFFFF", "#F7F8FA")
 
     def abrir_editor(rma_id):
+        # Usar RmaEditorWindow (no parent.mostrar_nuevo_rma directo): mostrar_nuevo_rma
+        # dibuja la ficha sobre el content_frame que se le pase, y RmaEditorWindow es
+        # quien se encarga de intercambiarlo temporalmente por el suyo propio para que
+        # la ficha se abra en su propia ventana en vez de sobre la ventana principal.
+        # Llamar a mostrar_nuevo_rma directamente aquí dibujaba la ficha sobre la
+        # ventana principal pero con el botón "Cerrar" de una ventana emergente, que
+        # terminaba destruyendo la ventana principal entera al pulsarlo.
         try:
-            parent.mostrar_nuevo_rma(rma_id)
-        except Exception:
-            try:
-                parent.mostrar_nuevo_rma(rma_id)
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo abrir el editor: {e}")
+            from lib.rma_editor_window import RmaEditorWindow
+            RmaEditorWindow(parent, rma_id=rma_id)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el editor: {e}")
+            return
         try:
             vent.destroy()
         except Exception:

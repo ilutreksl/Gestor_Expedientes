@@ -1520,49 +1520,17 @@ class ClientesMixin:
 
     def abrir_rma_asociado(self, rma_id):
         """Abre un expediente asociado en una nueva ventana independiente."""
+        # Usar RmaEditorWindow en vez de intercambiar self.content_frame a mano:
+        # RmaEditorWindow restaura el content_frame original inmediatamente después de
+        # dibujar la ficha, mientras que este código lo dejaba sustituido mientras la
+        # ventana emergente permanecía abierta, con dos problemas: cualquier otra parte
+        # de la app que tocara self.content_frame mientras tanto dibujaba en el sitio
+        # equivocado, y el botón "Cerrar" de la ficha terminaba destruyendo la ventana
+        # principal en vez de solo esta ventana emergente.
         try:
-            # Guardar el content_frame actual
-            content_frame_original = self.content_frame
-            
-            # Crear una nueva ventana independiente
-            ventana_rma = ctk.CTkToplevel(self)
-            ventana_rma.title(f"Expediente Asociado")
-            ventana_rma.geometry("1400x900")
-            
-            # Crear un nuevo content_frame en la ventana nueva
-            nuevo_content_frame = ctk.CTkFrame(ventana_rma)
-            nuevo_content_frame.pack(fill="both", expand=True)
-            nuevo_content_frame.grid_rowconfigure(0, weight=1)
-            nuevo_content_frame.grid_columnconfigure(0, weight=1)
-            
-            # Temporalmente reemplazar el content_frame
-            self.content_frame = nuevo_content_frame
-            
-            # Mostrar el expediente en el nuevo frame
-            self.mostrar_nuevo_rma(rma_id)
-            
-            # Actualizar título con información del RMA
-            try:
-                conn, cursor = self.master.conectar_db()
-                if conn:
-                    cursor.execute("SELECT codigo_rma, cliente FROM rma_maestro WHERE id = ?", (rma_id,))
-                    row = cursor.fetchone()
-                    if row:
-                        ventana_rma.title(f"Expediente Asociado - {row[0]} - {row[1]}")
-                    conn.close()
-            except:
-                pass
-            
-            # Restaurar el content_frame original cuando se cierre la ventana
-            def al_cerrar():
-                self.content_frame = content_frame_original
-                ventana_rma.destroy()
-            
-            ventana_rma.protocol("WM_DELETE_WINDOW", al_cerrar)
-            
+            from lib.rma_editor_window import RmaEditorWindow
+            RmaEditorWindow(self, rma_id)
         except Exception as e:
-            # Restaurar el content_frame original en caso de error
-            self.content_frame = content_frame_original
             logger.error(f"Error abriendo RMA asociado: {e}")
             messagebox.showerror("Error", f"No se pudo abrir el expediente: {str(e)}")
 
