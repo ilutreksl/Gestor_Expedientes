@@ -114,7 +114,7 @@ def mostrar_incidencias_personas(app):
                 # Validar formato DD/MM/YYYY y convertir a ISO (YYYY-MM-DD)
                 fecha_obj = datetime.strptime(fecha_ini, '%d/%m/%Y')
                 fecha_iso = fecha_obj.strftime('%Y-%m-%d')
-                where.append("m.fecha_gestion >= ?")
+                where.append("date(h.fecha_cambio) >= ?")
                 params.append(fecha_iso)
                 logger.debug(f"  -> Aplicado filtro fecha inicio: {fecha_iso}")
             except ValueError:
@@ -129,7 +129,7 @@ def mostrar_incidencias_personas(app):
             try:
                 fecha_obj = datetime.strptime(fecha_fin, '%d/%m/%Y')
                 fecha_iso = fecha_obj.strftime('%Y-%m-%d')
-                where.append("m.fecha_gestion <= ?")
+                where.append("date(h.fecha_cambio) <= ?")
                 params.append(fecha_iso)
                 logger.debug(f"  -> Aplicado filtro fecha fin: {fecha_iso}")
             except ValueError:
