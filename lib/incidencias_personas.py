@@ -74,7 +74,8 @@ def mostrar_incidencias_personas(app):
     incluir_no_completados_chk = ctk.CTkCheckBox(
         controles,
         text="Incluir expedientes no completados",
-        variable=incluir_no_completados_var
+        variable=incluir_no_completados_var,
+        command=lambda: cargar_datos()
     )
     incluir_no_completados_chk.grid(row=1, column=2, columnspan=2, padx=6, pady=6, sticky="w")
 
