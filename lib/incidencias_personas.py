@@ -103,7 +103,7 @@ def mostrar_incidencias_personas(app):
         incluir_no_completados = incluir_no_completados_var.get()
         logger.debug(f"Incluir expedientes no completados: {incluir_no_completados}")
         if not incluir_no_completados:
-            where.append("(m.estado = 'Completado' OR m.fecha_gestion IS NOT NULL)")
+            where.append("(m.estado = 'Completado' OR (m.fecha_gestion IS NOT NULL AND m.fecha_gestion != ''))")
 
         # Filtro de fecha inicial
         fecha_ini = fecha_inicio_entry.get().strip()
