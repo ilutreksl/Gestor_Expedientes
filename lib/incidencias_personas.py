@@ -69,6 +69,15 @@ def mostrar_incidencias_personas(app):
     resultado_opt.grid(row=1, column=1, padx=6, pady=6, sticky="ew")
     resultado_opt.set(opciones_resultado[0])
 
+    # Checkbox: incluir expedientes no completados
+    incluir_no_completados_var = ctk.BooleanVar(value=False)
+    incluir_no_completados_chk = ctk.CTkCheckBox(
+        controles,
+        text="Incluir expedientes no completados",
+        variable=incluir_no_completados_var
+    )
+    incluir_no_completados_chk.grid(row=1, column=2, columnspan=2, padx=6, pady=6, sticky="w")
+
     # Botones: Aplicar Filtros y Exportar
     btn_frame = ctk.CTkFrame(controles)
     btn_frame.grid(row=2, column=0, columnspan=4, pady=10)
@@ -87,9 +96,15 @@ def mostrar_incidencias_personas(app):
         """
         where = ["1=1"]
         params = []
-        
+
         logger.debug("=== Construyendo filtros de incidencias por persona ===")
-        
+
+        # Filtro de expedientes completos (por defecto, solo completos)
+        incluir_no_completados = incluir_no_completados_var.get()
+        logger.debug(f"Incluir expedientes no completados: {incluir_no_completados}")
+        if not incluir_no_completados:
+            where.append("(m.estado = 'Completado' OR m.fecha_gestion IS NOT NULL)")
+
         # Filtro de fecha inicial
         fecha_ini = fecha_inicio_entry.get().strip()
         logger.debug(f"Filtro Fecha Inicio: '{fecha_ini}'")
