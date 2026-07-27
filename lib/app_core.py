@@ -36,6 +36,8 @@ from lib.resultado_expediente_manager import ResultadoExpedienteManager
 from lib.tipos_cliente_manager import cargar_tipos_cliente
 from lib import github_issue_manager
 from lib import rma_asociaciones
+from lib import rma_correos_asociados
+from lib import correo_parser
 from lib import tareas_notificaciones
 from lib.tareas_panel import TareasBadge, PanelTareas
 from lib.rich_text_editor import RichTextEditor
@@ -328,7 +330,7 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.1.05"
+APP_VERSION = "v1.1.06"
 DB_FILENAME = "rma_app.db"
 
 # Session global para Turso (reutiliza conexiones HTTP)
@@ -445,22 +447,31 @@ def connect_db(timeout: float | None = None):
                     
                     # Usar session persistente para mejor rendimiento
                     session = _get_turso_session()
-                    
+
                     # Hacer request a la API REST de Turso (v2/pipeline format)
                     request_payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]}
-                    
-                    response = session.post(
-                        self._url,
-                        headers={
-                            "Authorization": f"Bearer {self._token}"
-                        },
-                        json=request_payload,
-                        timeout=10  # Timeout de 10 segundos
-                    )
-                    
+
+                    try:
+                        response = session.post(
+                            self._url,
+                            headers={
+                                "Authorization": f"Bearer {self._token}"
+                            },
+                            json=request_payload,
+                            timeout=30  # Campos como obs_tecnica pueden incluir imágenes
+                                        # en base64 y tardar más de 10s en subirse
+                        )
+                    except requests.exceptions.RequestException as e:
+                        # Sin esto, un timeout/error de red se propaga como Exception
+                        # genérica y el código que llama (que solo captura
+                        # sqlite3.Error) no lo detecta: el guardado falla en
+                        # silencio y el usuario no ve ningún aviso.
+                        print(f"Error de conexión con Turso: {e}")
+                        raise sqlite3.OperationalError(f"Error de conexión con Turso: {e}")
+
                     if response.status_code != 200:
                         print(f"Error - Response status: {response.status_code}, text: {response.text}")
-                        raise Exception(f"Turso API error: {response.status_code} - {response.text}")
+                        raise sqlite3.OperationalError(f"Turso API error: {response.status_code} - {response.text}")
                     
                     data = response.json()
                     results = data.get("results", [])
@@ -524,21 +535,30 @@ def connect_db(timeout: float | None = None):
                         })
                     
                     session = _get_turso_session()
-                    response = session.post(
-                        self._url,
-                        headers={
-                            "Authorization": f"Bearer {self._token}"
-                        },
-                        json={"requests": requests_batch},
-                        timeout=30  # Timeout mayor para batch
-                    )
-                    
+                    try:
+                        response = session.post(
+                            self._url,
+                            headers={
+                                "Authorization": f"Bearer {self._token}"
+                            },
+                            json={"requests": requests_batch},
+                            timeout=30  # Timeout mayor para batch
+                        )
+                    except requests.exceptions.RequestException as e:
+                        print(f"Error de conexión con Turso: {e}")
+                        raise sqlite3.OperationalError(f"Error de conexión con Turso: {e}")
+
                     if response.status_code != 200:
-                        raise Exception(f"Turso API error: {response.status_code} - {response.text}")
-                    
+                        raise sqlite3.OperationalError(f"Turso API error: {response.status_code} - {response.text}")
+
                     # Para executemany, solo guardamos el último resultado
                     data = response.json()
                     results = data.get("results", [])
+                    for result_item in results:
+                        if result_item.get("type") == "error":
+                            error_msg = result_item.get("error", {}).get("message", "Unknown error")
+                            print(f"SQL Error (executemany): {error_msg}")
+                            raise sqlite3.OperationalError(f"SQLite error: {error_msg}")
                     if results and len(results) > 0:
                         last_result = results[-1].get("response", {}).get("result", {})
                         self._result = last_result

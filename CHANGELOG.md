@@ -1,4 +1,11 @@
-Cambio V.1.1.05 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.06 - ✨ Últimas mejoras implementadas:
+
+- Añadido a la ventana de asociaciones de la ficha de los expedientes, el poder importar emails y asi asociarlos al expediente.
+El email puede estar en formato .eml y .msg
+Como se guarda como adjunto, es posible abrirlo desde la propia app.
+
+
+Cambio V.1.1.05
 
 - Añadida estadistica visible de articulos defectuosos contra las ventas y compras. Los archivos de ventas y compras deberan ser importados manualmente.
 

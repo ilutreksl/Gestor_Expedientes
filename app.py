@@ -350,6 +350,7 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         try:
             self.crear_tabla_rma_orders()
             self.crear_tabla_adjuntos()
+            self.crear_tabla_correos_asociados()
             self.crear_tabla_tareas()
             
             # Actualizar estructura de tabla tareas (añadir columnas asignado_a y prioridad)
@@ -1477,6 +1478,33 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             logger.info("Tabla rma_orders creada o verificada correctamente")
         except Exception as e:
             logger.error(f"Error al crear tabla rma_orders: {e}")
+
+    def crear_tabla_correos_asociados(self):
+        """Crea la tabla rma_correos_asociados si no existe."""
+        conn, cursor = self.master.conectar_db()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rma_correos_asociados (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rma_id INTEGER NOT NULL,
+                    asunto TEXT,
+                    remitente TEXT,
+                    fecha_correo TEXT,
+                    cuerpo TEXT,
+                    nombre_archivo_original TEXT,
+                    ruta_relativa_adjunto TEXT,
+                    tipo_almacenamiento TEXT DEFAULT 'local',
+                    fecha_importacion TEXT,
+                    usuario_importacion TEXT,
+                    FOREIGN KEY (rma_id) REFERENCES rma_maestro (id)
+                )
+            """)
+            conn.commit()
+            logger.info("Tabla rma_correos_asociados creada o verificada correctamente")
+        except Exception as e:
+            logger.error(f"Error al crear tabla rma_correos_asociados: {e}")
+        finally:
+            conn.close()
 
     def crear_tabla_adjuntos(self):
         """Crea la tabla rma_adjuntos si no existe."""

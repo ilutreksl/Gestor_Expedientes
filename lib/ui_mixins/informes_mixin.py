@@ -266,15 +266,18 @@ class InformesMixin:
                         rPr = _OE('w:rPr')
                         tiene_formato = False
 
-                        # Familia de fuente
-                        family = seg.get("family")
-                        if family:
-                            rFonts = _OE('w:rFonts')
-                            rFonts.set(_qn('w:ascii'),    family)
-                            rFonts.set(_qn('w:hAnsi'),    family)
-                            rFonts.set(_qn('w:eastAsia'), family)
-                            rPr.append(rFonts)
-                            tiene_formato = True
+                        # Familia de fuente — siempre explícita (si el usuario no la
+                        # cambió, se usa la misma por defecto que muestra el editor:
+                        # "Segoe UI"). Si no se escribe, Word aplica la fuente por
+                        # defecto de la plantilla/estilo, que puede no coincidir con
+                        # lo que se ve en el editor.
+                        family = seg.get("family") or "Segoe UI"
+                        rFonts = _OE('w:rFonts')
+                        rFonts.set(_qn('w:ascii'),    family)
+                        rFonts.set(_qn('w:hAnsi'),    family)
+                        rFonts.set(_qn('w:eastAsia'), family)
+                        rPr.append(rFonts)
+                        tiene_formato = True
 
                         # Negrita
                         if seg.get("bold"):
@@ -300,16 +303,18 @@ class InformesMixin:
                             rPr.append(_OE('w:strike'))
                             tiene_formato = True
 
-                        # Tamaño (en half-points: pt * 2)
-                        size = seg.get("size")
-                        if size and size != 11:
-                            sz = _OE('w:sz')
-                            sz.set(_qn('w:val'), str(int(size * 2)))
-                            szCs = _OE('w:szCs')
-                            szCs.set(_qn('w:val'), str(int(size * 2)))
-                            rPr.append(sz)
-                            rPr.append(szCs)
-                            tiene_formato = True
+                        # Tamaño (en half-points: pt * 2) — siempre explícito, igual
+                        # que con la familia, para que coincida con el tamaño (11 por
+                        # defecto) que se ve en el editor en lugar de heredar el de
+                        # la plantilla.
+                        size = seg.get("size") or 11
+                        sz = _OE('w:sz')
+                        sz.set(_qn('w:val'), str(int(size * 2)))
+                        szCs = _OE('w:szCs')
+                        szCs.set(_qn('w:val'), str(int(size * 2)))
+                        rPr.append(sz)
+                        rPr.append(szCs)
+                        tiene_formato = True
 
                         # Color de fuente
                         color = seg.get("color")

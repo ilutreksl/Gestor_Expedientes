@@ -1214,12 +1214,38 @@ class ClientesMixin:
         # Frame para la lista de asociaciones
         self.asociaciones_list_frame = ctk.CTkFrame(scroll_frame)
         self.asociaciones_list_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        
+
         # Guardar el rma_id para refrescos
         self.asociaciones_rma_id = rma_id
-        
+
         # Cargar asociaciones
         self.cargar_lista_asociaciones()
+
+        # --- Separador entre expedientes asociados y correos asociados ---
+        ctk.CTkFrame(scroll_frame, height=2, fg_color="gray30").pack(fill="x", padx=10, pady=(25, 15))
+
+        # Frame para el encabezado de correos asociados
+        header_correos_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        header_correos_frame.pack(fill="x", padx=10, pady=(5, 15))
+
+        ctk.CTkLabel(header_correos_frame,
+                    text="✉️ Correos asociados",
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(side="left", padx=5)
+
+        ctk.CTkButton(header_correos_frame,
+                     text="📥 Importar correo (.eml / .msg)",
+                     command=lambda: self.importar_correo_asociado(rma_id),
+                     width=220).pack(side="right", padx=5)
+
+        # Frame para la lista de correos asociados
+        self.correos_asociados_list_frame = ctk.CTkFrame(scroll_frame)
+        self.correos_asociados_list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Guardar el rma_id para refrescos
+        self.correos_asociados_rma_id = rma_id
+
+        # Cargar correos asociados
+        self.cargar_lista_correos_asociados()
 
     def cargar_lista_asociaciones(self):
         """Carga y muestra la lista de expedientes asociados."""
@@ -1372,6 +1398,416 @@ class ClientesMixin:
             lbl.bind("<Button-1>", _seleccionar_fila_asoc)
             lbl.bind("<Double-Button-1>", lambda e: self.abrir_rma_asociado(rma_id))
             lbl.configure(cursor="hand2")
+
+    # ------------------------------------------------------------------
+    # Correos asociados (importados desde archivos .eml / .msg)
+    # ------------------------------------------------------------------
+
+    def cargar_lista_correos_asociados(self):
+        """Carga y muestra la lista de correos importados asociados al RMA actual."""
+        for widget in self.correos_asociados_list_frame.winfo_children():
+            widget.destroy()
+
+        if not hasattr(self, 'correos_asociados_rma_id') or self.correos_asociados_rma_id is None:
+            ctk.CTkLabel(self.correos_asociados_list_frame,
+                        text="No se pueden cargar los correos asociados",
+                        text_color="red").pack(pady=20)
+            return
+
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                ctk.CTkLabel(self.correos_asociados_list_frame,
+                            text="Error de conexión a base de datos",
+                            text_color="red").pack(pady=20)
+                return
+
+            correos = rma_correos_asociados.obtener_correos_asociados(self.correos_asociados_rma_id, conn)
+            conn.close()
+
+            if not correos:
+                ctk.CTkLabel(self.correos_asociados_list_frame,
+                            text="No hay correos importados para este expediente",
+                            text_color="gray",
+                            font=ctk.CTkFont(size=12)).pack(pady=20)
+                return
+
+            headers_frame = ctk.CTkFrame(self.correos_asociados_list_frame)
+            headers_frame.pack(fill="x", padx=5, pady=(0, 5))
+
+            ctk.CTkLabel(headers_frame, text="Fecha correo", width=130,
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Remitente", width=220,
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Asunto", width=250,
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(headers_frame, text="Acciones", width=150,
+                        font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5, pady=5)
+
+            for correo in correos:
+                self.crear_fila_correo_asociado(correo)
+
+        except Exception as e:
+            logger.error(f"Error cargando correos asociados: {e}")
+            ctk.CTkLabel(self.correos_asociados_list_frame,
+                        text=f"Error: {str(e)}",
+                        text_color="red").pack(pady=20)
+
+    def crear_fila_correo_asociado(self, correo):
+        """Crea una fila visual para un correo asociado."""
+        row_frame = ctk.CTkFrame(self.correos_asociados_list_frame)
+        row_frame.pack(fill="x", padx=5, pady=2)
+
+        lbl_fecha = ctk.CTkLabel(row_frame, text=correo['fecha_correo'] or "-", width=130)
+        lbl_fecha.pack(side="left", padx=5, pady=5)
+
+        remitente_texto = correo['remitente'][:35] + "..." if len(correo['remitente']) > 35 else correo['remitente']
+        lbl_remitente = ctk.CTkLabel(row_frame, text=remitente_texto or "-", width=220)
+        lbl_remitente.pack(side="left", padx=5, pady=5)
+
+        asunto_texto = correo['asunto'][:40] + "..." if len(correo['asunto']) > 40 else correo['asunto']
+        lbl_asunto = ctk.CTkLabel(row_frame, text=asunto_texto, width=250)
+        lbl_asunto.pack(side="left", padx=5, pady=5)
+
+        acciones_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+        acciones_frame.pack(side="left", padx=5, pady=5)
+
+        btn_ver = ctk.CTkButton(acciones_frame,
+                     text="👁️",
+                     width=40,
+                     command=lambda c=correo: self.ver_correo_asociado_completo(c))
+        btn_ver.pack(side="left", padx=2)
+
+        btn_eliminar = ctk.CTkButton(acciones_frame,
+                     text="❌",
+                     width=40,
+                     fg_color="darkred",
+                     hover_color="red",
+                     command=lambda c=correo: self.confirmar_eliminar_correo_asociado(c))
+        btn_eliminar.pack(side="left", padx=2)
+
+        for widget in (row_frame, lbl_fecha, lbl_remitente, lbl_asunto):
+            widget.bind("<Double-Button-1>", lambda e, c=correo: self.ver_correo_asociado_completo(c))
+
+    def _puede_importar_msg(self):
+        """Indica si el rol del usuario actual puede importar correos .msg (Outlook).
+
+        La importación .msg depende de la librería 'extract-msg', que aún no está
+        instalada en todos los puestos. Se restringe a Dpto. Técnico hasta que se
+        vaya desplegando al resto de usuarios. La importación .eml no depende de
+        ninguna librería externa y está disponible para todos los roles.
+        """
+        rol_norm = str(getattr(self, 'rol', '')).strip().lower()
+        return rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico")
+
+    def importar_correo_asociado(self, rma_id):
+        """Abre un archivo .eml/.msg, extrae sus datos y los muestra para revisión antes de guardarlos."""
+        if not getattr(self, 'current_rma_id', None):
+            messagebox.showwarning("Advertencia",
+                                    "Debe guardar el expediente al menos una vez antes de importar correos.")
+            return
+
+        puede_msg = self._puede_importar_msg()
+
+        if puede_msg:
+            filetypes = (
+                ("Correos electrónicos", "*.eml;*.msg"),
+                ("Outlook (.msg)", "*.msg"),
+                ("Correo estándar (.eml)", "*.eml"),
+                ("Todos los archivos", "*.*"),
+            )
+        else:
+            # .msg todavía no disponible para este rol: no se ofrece ni en el selector
+            filetypes = (
+                ("Correo estándar (.eml)", "*.eml"),
+                ("Todos los archivos", "*.*"),
+            )
+
+        filepath = filedialog.askopenfilename(
+            title="Seleccionar correo a importar",
+            filetypes=filetypes
+        )
+        if not filepath:
+            return
+
+        extension = os.path.splitext(filepath)[1].lower()
+        if extension == '.msg' and not puede_msg:
+            messagebox.showwarning(
+                "Función no disponible todavía",
+                "La importación de correos .msg (Outlook) todavía no está habilitada para tu usuario.\n\n"
+                "De momento solo está disponible para Dpto. Técnico mientras se termina de desplegar. "
+                "Si necesitas asociar este correo, guárdalo como .eml desde Outlook "
+                "(Archivo > Guardar como > Correo electrónico) y vuelve a intentarlo."
+            )
+            return
+
+        try:
+            datos_correo = correo_parser.parsear_correo_archivo(filepath)
+        except ImportError as e:
+            messagebox.showerror("Falta una librería", str(e))
+            return
+        except Exception as e:
+            logger.error(f"Error al parsear correo '{filepath}': {e}")
+            messagebox.showerror("Error al leer el correo",
+                                  f"No se pudo extraer la información del archivo:\n{e}")
+            return
+
+        self._mostrar_dialogo_revision_correo(rma_id, filepath, datos_correo)
+
+    def _mostrar_dialogo_revision_correo(self, rma_id, filepath, datos_correo):
+        """Muestra el correo extraído en un diálogo editable antes de guardarlo definitivamente.
+
+        El recorte de firma es heurístico y puede fallar, así que el usuario revisa
+        y ajusta el texto (asunto, remitente, fecha y cuerpo) antes de confirmar.
+        """
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("📥 Revisar correo importado")
+        dlg.geometry("700x650")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        dlg.update_idletasks()
+        x = (dlg.winfo_screenwidth() // 2) - (700 // 2)
+        y = (dlg.winfo_screenheight() // 2) - (650 // 2)
+        dlg.geometry(f"700x650+{x}+{y}")
+
+        main_frame = ctk.CTkFrame(dlg)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        ctk.CTkLabel(main_frame, text="📥 Revisar antes de asociar al expediente",
+                    font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", pady=(0, 5))
+        ctk.CTkLabel(main_frame,
+                    text="El recorte de firma/citas es automático y puede no ser exacto: revisa el cuerpo antes de guardar.",
+                    font=ctk.CTkFont(size=11), text_color="gray", wraplength=660,
+                    justify="left").pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkLabel(main_frame, text="Asunto:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        entry_asunto = ctk.CTkEntry(main_frame)
+        entry_asunto.insert(0, datos_correo.get('asunto', ''))
+        entry_asunto.pack(fill="x", pady=(0, 8))
+
+        fila_meta = ctk.CTkFrame(main_frame, fg_color="transparent")
+        fila_meta.pack(fill="x", pady=(0, 8))
+
+        frame_remitente = ctk.CTkFrame(fila_meta, fg_color="transparent")
+        frame_remitente.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ctk.CTkLabel(frame_remitente, text="Remitente:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        entry_remitente = ctk.CTkEntry(frame_remitente)
+        entry_remitente.insert(0, datos_correo.get('remitente', ''))
+        entry_remitente.pack(fill="x")
+
+        frame_fecha = ctk.CTkFrame(fila_meta, fg_color="transparent")
+        frame_fecha.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        ctk.CTkLabel(frame_fecha, text="Fecha:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        entry_fecha = ctk.CTkEntry(frame_fecha)
+        entry_fecha.insert(0, datos_correo.get('fecha', ''))
+        entry_fecha.pack(fill="x")
+
+        fila_cuerpo_header = ctk.CTkFrame(main_frame, fg_color="transparent")
+        fila_cuerpo_header.pack(fill="x", pady=(4, 2))
+        ctk.CTkLabel(fila_cuerpo_header, text="Cuerpo:", font=ctk.CTkFont(weight="bold")).pack(side="left")
+
+        incluir_firma_var = ctk.BooleanVar(value=False)
+
+        cuerpo_sin_firma = datos_correo.get('cuerpo_sin_firma', '')
+        cuerpo_completo = datos_correo.get('cuerpo_completo', '')
+
+        textbox_cuerpo = ctk.CTkTextbox(main_frame, height=280, wrap="word")
+        textbox_cuerpo.pack(fill="both", expand=True, pady=(0, 8))
+        textbox_cuerpo.insert("1.0", cuerpo_sin_firma)
+
+        def _toggle_firma():
+            texto_actual = textbox_cuerpo.get("1.0", "end-1c")
+            # Solo sustituir si el usuario no ha editado ya el texto manualmente
+            if incluir_firma_var.get():
+                if texto_actual.strip() == cuerpo_sin_firma.strip():
+                    textbox_cuerpo.delete("1.0", "end")
+                    textbox_cuerpo.insert("1.0", cuerpo_completo)
+            else:
+                if texto_actual.strip() == cuerpo_completo.strip():
+                    textbox_cuerpo.delete("1.0", "end")
+                    textbox_cuerpo.insert("1.0", cuerpo_sin_firma)
+
+        ctk.CTkCheckBox(fila_cuerpo_header, text="Mostrar firma / texto citado completo",
+                        variable=incluir_firma_var, command=_toggle_firma).pack(side="right")
+
+        lbl_archivo = ctk.CTkLabel(main_frame, text=f"📎 Archivo original: {os.path.basename(filepath)}",
+                                   font=ctk.CTkFont(size=11), text_color="gray")
+        lbl_archivo.pack(anchor="w", pady=(0, 10))
+
+        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        botones_frame.pack(fill="x")
+
+        def _confirmar():
+            asunto = entry_asunto.get().strip()
+            remitente = entry_remitente.get().strip()
+            fecha = entry_fecha.get().strip()
+            cuerpo = textbox_cuerpo.get("1.0", "end-1c").strip()
+
+            btn_guardar.configure(state="disabled", text="Guardando...")
+            btn_cancelar.configure(state="disabled")
+            dlg.update()
+
+            self._guardar_correo_asociado(rma_id, filepath, asunto, remitente, fecha, cuerpo, dlg)
+
+        btn_guardar = ctk.CTkButton(botones_frame, text="✅ Asociar al expediente",
+                                    command=_confirmar, height=38,
+                                    font=ctk.CTkFont(weight="bold"))
+        btn_guardar.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", width=100,
+                                     fg_color="gray40", hover_color="gray30",
+                                     command=dlg.destroy)
+        btn_cancelar.pack(side="right")
+
+    def _guardar_correo_asociado(self, rma_id, filepath, asunto, remitente, fecha, cuerpo, dlg):
+        """Sube el archivo original de correo y guarda sus metadatos en rma_correos_asociados."""
+        try:
+            texto_completo = self.lbl_codigo_rma.cget("text")
+            codigo_rma = texto_completo.split(": ")[1].strip()
+        except Exception:
+            messagebox.showerror("Error", "No se pudo determinar el código del expediente.")
+            dlg.destroy()
+            return
+
+        extension = os.path.splitext(filepath)[1]
+        marca_tiempo = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        nombre_archivo = f"{codigo_rma}_CORREO_{marca_tiempo}{extension}"
+
+        if usar_b2():
+            exito, ruta_relativa = self._subir_archivo_b2(filepath, codigo_rma, nombre_archivo, None)
+            tipo_almacenamiento = 'backblaze'
+        else:
+            exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
+            tipo_almacenamiento = 'local'
+
+        if not exito:
+            dlg.destroy()
+            return
+
+        datos = {
+            'asunto': asunto,
+            'remitente': remitente,
+            'fecha_correo': fecha,
+            'cuerpo': cuerpo,
+            'nombre_archivo_original': os.path.basename(filepath),
+            'ruta_relativa_adjunto': ruta_relativa,
+            'tipo_almacenamiento': tipo_almacenamiento,
+            'fecha_importacion': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'usuario_importacion': self.username,
+        }
+
+        try:
+            conn, cursor = self.master.conectar_db()
+            exito_bd, mensaje = rma_correos_asociados.insertar_correo_asociado(rma_id, datos, conn)
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error guardando correo asociado en BD: {e}")
+            self._limpiar_archivo_subido(ruta_relativa)
+            messagebox.showerror("Error", f"No se pudo guardar el correo: {e}")
+            dlg.destroy()
+            return
+
+        dlg.destroy()
+
+        if exito_bd:
+            messagebox.showinfo("Correo asociado", "✅ El correo se ha importado y asociado correctamente al expediente.")
+            self.cargar_lista_correos_asociados()
+        else:
+            self._limpiar_archivo_subido(ruta_relativa)
+            messagebox.showerror("Error", mensaje)
+
+    def ver_correo_asociado_completo(self, correo):
+        """Muestra un correo asociado como conversación: si el cuerpo contiene un hilo
+        de respuestas/reenvíos citados, se detecta y se muestra como mensajes apilados
+        (más reciente arriba); si no, se muestra como un único bloque de texto."""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("✉️ Correo asociado")
+        dlg.geometry("700x650")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        dlg.update_idletasks()
+        x = (dlg.winfo_screenwidth() // 2) - (700 // 2)
+        y = (dlg.winfo_screenheight() // 2) - (650 // 2)
+        dlg.geometry(f"700x650+{x}+{y}")
+
+        main_frame = ctk.CTkFrame(dlg)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        ctk.CTkLabel(main_frame, text=correo['asunto'],
+                    font=ctk.CTkFont(size=15, weight="bold"), wraplength=650,
+                    justify="left").pack(anchor="w", pady=(0, 4))
+
+        ctk.CTkLabel(main_frame,
+                    text=f"Importado por {correo['usuario_importacion']} el {correo['fecha_importacion']}",
+                    anchor="w", font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w", pady=(0, 10))
+
+        hilo = correo_parser.dividir_hilo(correo.get('cuerpo', ''))
+        if not hilo:
+            hilo = [{'remitente': '', 'fecha': '', 'texto': ''}]
+
+        if len(hilo) > 1:
+            ctk.CTkLabel(main_frame, text=f"🧵 Hilo detectado: {len(hilo)} mensajes",
+                        font=ctk.CTkFont(size=11, weight="bold"), text_color="gray").pack(anchor="w", pady=(0, 5))
+
+        scroll_hilo = ctk.CTkScrollableFrame(main_frame)
+        scroll_hilo.pack(fill="both", expand=True, pady=(0, 10))
+
+        for idx, mensaje in enumerate(hilo):
+            # El primer mensaje es siempre el propio correo: su remitente/fecha
+            # vienen de las cabeceras del archivo, no del texto del cuerpo.
+            remitente_msg = mensaje['remitente'] or (correo['remitente'] if idx == 0 else '')
+            fecha_msg = mensaje['fecha'] or (correo['fecha_correo'] if idx == 0 else '')
+
+            card = ctk.CTkFrame(scroll_hilo)
+            card.pack(fill="x", padx=5, pady=5)
+
+            header_texto = remitente_msg or "Mensaje citado anterior"
+            if fecha_msg:
+                header_texto += f"   ·   {fecha_msg}"
+            ctk.CTkLabel(card, text=header_texto, font=ctk.CTkFont(size=12, weight="bold"),
+                        anchor="w").pack(fill="x", padx=10, pady=(8, 4))
+
+            ctk.CTkLabel(card, text=mensaje['texto'] or "(sin contenido)", anchor="w", justify="left",
+                        wraplength=610).pack(fill="x", padx=10, pady=(0, 10))
+
+        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        botones_frame.pack(fill="x")
+
+        if correo['ruta_relativa_adjunto']:
+            btn_abrir_original = ctk.CTkButton(
+                botones_frame, text="📎 Abrir archivo original",
+                command=lambda: self.abrir_adjunto(correo['ruta_relativa_adjunto']))
+            btn_abrir_original.pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(botones_frame, text="Cerrar", width=100,
+                     fg_color="gray40", hover_color="gray30",
+                     command=dlg.destroy).pack(side="right")
+
+    def confirmar_eliminar_correo_asociado(self, correo):
+        """Confirma y elimina un correo asociado (registro en BD y archivo original)."""
+        if not messagebox.askyesno("Confirmar",
+                                    f"¿Eliminar el correo '{correo['asunto']}' asociado a este expediente?\n\n"
+                                    "Esta acción también elimina el archivo original importado."):
+            return
+
+        try:
+            conn, cursor = self.master.conectar_db()
+            exito, mensaje = rma_correos_asociados.eliminar_correo_asociado(correo['id'], conn)
+            conn.close()
+
+            if exito:
+                if correo['ruta_relativa_adjunto']:
+                    self._limpiar_archivo_subido(correo['ruta_relativa_adjunto'])
+                messagebox.showinfo("Éxito", mensaje)
+                self.cargar_lista_correos_asociados()
+            else:
+                messagebox.showerror("Error", mensaje)
+
+        except Exception as e:
+            logger.error(f"Error al eliminar correo asociado: {e}")
+            messagebox.showerror("Error", f"Error inesperado: {str(e)}")
 
     def mostrar_dialogo_asociar_rma(self, rma_id):
         """Muestra un diálogo para buscar y asociar un expediente RMA."""
