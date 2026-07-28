@@ -9,6 +9,62 @@ from lib.app_core import *  # noqa: F401,F403 - helpers/constantes/imports compa
 from lib.app_core import _get_cached_query, invalidate_cache  # nombres "privados" que el wildcard import no trae
 
 class InformesMixin:
+    @staticmethod
+    def _reemplazar_marcador_en_parrafo(paragraph, clave, valor_str):
+        """Sustituye todas las apariciones de `clave` dentro de un párrafo,
+        aunque Word haya partido el marcador en varios runs (p.ej. por
+        autocorrección o revisión ortográfica: "[[COD" + "IGO_RMA]]"). El
+        formato del run donde empieza cada aparición se conserva; los runs
+        que quedan completamente "consumidos" por el marcador se vacían.
+        """
+        while True:
+            runs = paragraph.runs
+            texto_completo = ''.join(r.text for r in runs)
+            idx = texto_completo.find(clave)
+            if idx == -1:
+                return
+            fin = idx + len(clave)
+
+            pos = 0
+            primer_run_usado = False
+            for run in runs:
+                run_ini, run_fin = pos, pos + len(run.text)
+                pos = run_fin
+                if run_fin <= idx or run_ini >= fin:
+                    continue  # este run no se solapa con el marcador
+                texto_antes   = run.text[:max(0, idx - run_ini)]
+                texto_despues = run.text[max(0, fin - run_ini):]
+                if not primer_run_usado:
+                    run.text = texto_antes + valor_str + texto_despues
+                    primer_run_usado = True
+                else:
+                    run.text = texto_antes + texto_despues
+
+    def _reemplazar_marcadores_preservando_formato(self, document, mapeo):
+        """Reemplaza marcadores [[CLAVE]] manteniendo el formato original de la
+        plantilla (fuente, tamaño, negrita, etc.), incluso si un marcador está
+        repartido en varios runs dentro del mismo párrafo.
+
+        Sustituye a la asignación de `paragraph.text`, que en python-docx
+        borra todos los runs del párrafo y los reemplaza por uno solo con el
+        formato por defecto, perdiendo el de la plantilla.
+        """
+        def _procesar_parrafo(paragraph):
+            for clave, valor in mapeo.items():
+                valor_str = str(valor) if valor is not None else ""
+                if clave in paragraph.text:
+                    self._reemplazar_marcador_en_parrafo(paragraph, clave, valor_str)
+
+        for paragraph in document.paragraphs:
+            _procesar_parrafo(paragraph)
+
+        # También procesar tablas si las hay
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        _procesar_parrafo(paragraph)
+
     def generar_informe_dinamico(self):
         """
         Genera un informe dinámico usando python-docx, lo guarda en Backblaze B2 
@@ -97,7 +153,7 @@ class InformesMixin:
                 # Campos nuevos de rma_maestro
                 '[[NUMERO_DOC]]': datos.get('numero_documento_cliente', 'N/A'),
                 '[[MOTIVO]]': datos.get('motivo', 'N/A'),
-                '[[NUMERO_ALBARAN]]': datos.get('Numero_Albaran', 'N/A'),
+                '[[NUMERO_ALBARAN]]': datos.get('numero_albaran', 'N/A'),
                 
                 # Campos de artículos mejorados
                 '[[LISTA_ARTICULOS]]': articulos_formateados,  # Lista estructurada completa
@@ -108,25 +164,8 @@ class InformesMixin:
                 '[[TOTAL_ARTICULOS]]': str(len(articulos_data)) if articulos_data else '0'
             }
             
-            # 4. Función auxiliar para reemplazar texto preservando formato
-            def reemplazar_texto_preservando_formato(document, mapeo):
-                """Reemplaza texto manteniendo el formato original de la plantilla (fuentes, tamaños, etc.)"""
-                for paragraph in document.paragraphs:
-                    for run in paragraph.runs:
-                        for clave, valor in mapeo.items():
-                            if clave in run.text:
-                                # Reemplazar manteniendo el formato del run original
-                                run.text = run.text.replace(clave, str(valor))
-                
-                # También procesar tablas si las hay
-                for table in document.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    for clave, valor in mapeo.items():
-                                        if clave in run.text:
-                                            run.text = run.text.replace(clave, str(valor))
+            # 4. Reemplazar marcadores preservando el formato de la plantilla
+            reemplazar_texto_preservando_formato = self._reemplazar_marcadores_preservando_formato
 
             # 4.2. Función auxiliar para insertar Obs_Tecnica enriquecida (texto + imágenes)
             def insertar_obs_tecnica_enriquecida(document, marcador='[[OBS_TECNICA]]'):
@@ -143,6 +182,7 @@ class InformesMixin:
                 from docx.oxml.ns import qn
                 from docx.oxml import OxmlElement
                 from PIL import Image as _PILImage
+                from lib.rich_text_editor import DEFAULT_FAMILY as _RTE_DEFAULT_FAMILY, DEFAULT_SIZE as _RTE_DEFAULT_SIZE
 
                 # Obtener JSON del editor
                 obs_json = ""
@@ -267,11 +307,10 @@ class InformesMixin:
                         tiene_formato = False
 
                         # Familia de fuente — siempre explícita (si el usuario no la
-                        # cambió, se usa la misma por defecto que muestra el editor:
-                        # "Segoe UI"). Si no se escribe, Word aplica la fuente por
-                        # defecto de la plantilla/estilo, que puede no coincidir con
-                        # lo que se ve en el editor.
-                        family = seg.get("family") or "Segoe UI"
+                        # cambió, se usa la misma por defecto que muestra el editor).
+                        # Si no se escribe, Word aplica la fuente por defecto de la
+                        # plantilla/estilo, que puede no coincidir con el editor.
+                        family = seg.get("family") or _RTE_DEFAULT_FAMILY
                         rFonts = _OE('w:rFonts')
                         rFonts.set(_qn('w:ascii'),    family)
                         rFonts.set(_qn('w:hAnsi'),    family)
@@ -304,10 +343,10 @@ class InformesMixin:
                             tiene_formato = True
 
                         # Tamaño (en half-points: pt * 2) — siempre explícito, igual
-                        # que con la familia, para que coincida con el tamaño (11 por
-                        # defecto) que se ve en el editor en lugar de heredar el de
+                        # que con la familia, para que coincida con el tamaño por
+                        # defecto que se ve en el editor en lugar de heredar el de
                         # la plantilla.
-                        size = seg.get("size") or 11
+                        size = seg.get("size") or _RTE_DEFAULT_SIZE
                         sz = _OE('w:sz')
                         sz.set(_qn('w:val'), str(int(size * 2)))
                         szCs = _OE('w:szCs')
@@ -559,26 +598,65 @@ class InformesMixin:
             messagebox.showerror("Error", f"No se encontró la plantilla requerida en:\n{plantilla_path}")
             return
             
+        # 1.5. Obtener artículos del expediente (rma_detalles) para la tabla de material
+        conn_art, cursor_art = self.master.conectar_db()
+        articulos_reposicion = []
+        if conn_art:
+            try:
+                cursor_art.execute("""
+                    SELECT referencia_articulo, cantidad_entregada
+                    FROM rma_detalles
+                    WHERE rma_id = ?
+                    ORDER BY id
+                """, (self.current_rma_id,))
+                articulos_reposicion = cursor_art.fetchall()
+            except Exception as e:
+                print(f"Error al obtener artículos para el documento de Reposición: {e}")
+            finally:
+                conn_art.close()
+
         try:
             # 4. Cargar la plantilla y definir mapeo de marcadores
             document = docx.Document(plantilla_path)
-            
-            # Mapeo: Reutilizamos el mapeo existente
+
+            # Mapeo de los marcadores de la plantilla actual
             mapeo = {
-                '[[CODIGO_RMA]]': codigo_rma,
-                '[[CLIENTE]]': nombre_cliente,
-                '[[FECHA_EMISION]]': datos.get('fecha_emision', 'N/A'),
-                '[[ESTADO_ACTUAL]]': datos.get('estado', 'N/A'),
-                '[[USUARIO_CREADOR]]': datos.get('creado_por', self.username)
+                '[[CODIGO_RMA]]':  codigo_rma,
+                '[[CLIENTE]]':     nombre_cliente,
+                '[[FECHA]]':       datetime.datetime.now().strftime("%Y-%m-%d"),
+                '[[DOC_CLIENTE]]': datos.get('numero_documento_cliente', 'N/A'),
+                '[[NOM_CLIENTE]]': datos.get('persona_de_contacto', 'N/A'),
+                '[[ALBARAN]]':     datos.get('numero_albaran', 'N/A'),
             }
-            
-            # 5. Reemplazar marcadores en párrafos
-            for p in document.paragraphs:
-                for clave, valor in mapeo.items():
-                    valor_a_insertar = str(valor) if valor is not None else "" 
-                    if clave in p.text:
-                        p.text = p.text.replace(clave, valor_a_insertar)
-            
+
+            # 5. Reemplazar marcadores preservando el formato de la plantilla
+            # (antes se hacía con `p.text = p.text.replace(...)`, que en
+            # python-docx borra todos los runs del párrafo y los sustituye por
+            # uno solo con formato por defecto, perdiendo el de la plantilla)
+            self._reemplazar_marcadores_preservando_formato(document, mapeo)
+
+            # 5.1. Rellenar la tabla de material (UNIDADES / REFERENCIA) con los
+            # artículos del expediente, una fila por artículo. La plantilla trae
+            # una fila de datos en blanco ya formateada (fuente/tamaño de la
+            # plantilla); se reutiliza para el primer artículo y se clonan filas
+            # adicionales para el resto. MED. CORTE y DESCRIPCION quedan en
+            # blanco: no hay un dato equivalente en el expediente.
+            if document.tables and articulos_reposicion:
+                tabla_material = document.tables[0]
+                fila_plantilla = tabla_material.rows[-1]
+
+                def _rellenar_fila(fila, referencia, cantidad):
+                    unidades_cell, referencia_cell = fila.cells[0], fila.cells[1]
+                    unidades_cell.paragraphs[0].add_run(str(cantidad) if cantidad else '')
+                    referencia_cell.paragraphs[0].add_run(str(referencia) if referencia else 'N/A')
+
+                for i, (ref_articulo, cantidad) in enumerate(articulos_reposicion):
+                    if i == 0:
+                        fila_destino = fila_plantilla
+                    else:
+                        fila_destino = tabla_material.add_row()
+                    _rellenar_fila(fila_destino, ref_articulo, cantidad)
+
             # 6. Guardar temporalmente para subirlo a Backblaze B2
             temp_dir = tempfile.mkdtemp(prefix="reposicion_rma_")
             temp_file_path = os.path.join(temp_dir, nombre_archivo_final)

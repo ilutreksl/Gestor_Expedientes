@@ -26,9 +26,10 @@ except ImportError:
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 FONT_SIZES       = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36]
-DEFAULT_SIZE     = 11
-DEFAULT_FAMILY   = "Segoe UI"
+DEFAULT_SIZE     = 12
+DEFAULT_FAMILY   = "Verdana Pro"
 FONT_FAMILIES    = [
+    "Verdana Pro",
     "Aptos",
     "Segoe UI",
     "Arial",
@@ -293,7 +294,7 @@ class RichTextEditor(tk.Frame):
             frame,
             wrap="word",
             height=height,
-            font=("Segoe UI", DEFAULT_SIZE),
+            font=(DEFAULT_FAMILY, DEFAULT_SIZE),
             bg=t["txt_bg"], fg=t["txt_fg"],
             insertbackground=t["ins"],
             selectbackground=t["sel"],
@@ -326,8 +327,8 @@ class RichTextEditor(tk.Frame):
         self.text.bind("<Button-3>", self._context_menu)
 
     def _configure_tags(self):
-        self.text.tag_configure("bold",          font=("Segoe UI", DEFAULT_SIZE, "bold"))
-        self.text.tag_configure("italic",        font=("Segoe UI", DEFAULT_SIZE, "italic"))
+        self.text.tag_configure("bold",          font=(DEFAULT_FAMILY, DEFAULT_SIZE, "bold"))
+        self.text.tag_configure("italic",        font=(DEFAULT_FAMILY, DEFAULT_SIZE, "italic"))
         self.text.tag_configure("underline",     underline=True)
         self.text.tag_configure("strikethrough", overstrike=True)
 
