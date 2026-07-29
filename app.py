@@ -381,6 +381,13 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             app_core.USER_SETTINGS = self.user_settings
         except Exception:
             pass
+
+        # Aplicar idioma del corrector ortográfico del editor de Observaciones Técnicas
+        try:
+            from lib.spellcheck_utils import set_idioma_ortografia
+            set_idioma_ortografia(self.user_settings.get("idioma_ortografia", "es"))
+        except Exception as e:
+            logger.error(f"No se pudo aplicar el idioma del corrector ortográfico: {e}")
         
         # ----------------------------------------------------
         # 🛠️ AJUSTE DE PESO PARA EXPANDIR EL ÁREA DE TRABAJO 🛠️

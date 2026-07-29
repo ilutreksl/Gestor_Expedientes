@@ -4303,24 +4303,73 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             # Encabezados
             header_font = ctk.CTkFont(weight="bold")
             resultados_frame.grid_columnconfigure(2, weight=1)  # Descripción se expande
-            ctk.CTkLabel(resultados_frame, text="FECHA/HORA", font=header_font).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            header_font_label = ctk.CTkLabel(resultados_frame, text="FECHA/HORA", font=header_font)
+            header_font_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(resultados_frame, text="USUARIO", font=header_font).grid(row=0, column=1, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(resultados_frame, text="DESCRIPCIÓN DEL CAMBIO", font=header_font).grid(row=0, column=2, padx=5, pady=5, sticky="w")
             
             if not registros:
                 ctk.CTkLabel(resultados_frame, text="No hay registros que coincidan con los filtros aplicados.", text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=20)
                 return
-            
+
+            # CTkLabel no permite seleccionar texto con el ratón, así que para las celdas
+            # usamos widgets nativos de tkinter en modo "solo lectura": permiten seleccionar
+            # y copiar (Ctrl+C) el contenido, pero no editarlo.
+            def _resolver_color(valor):
+                if isinstance(valor, (list, tuple)):
+                    return valor[0] if ctk.get_appearance_mode() == "Light" else valor[1]
+                return valor
+
+            bg_color = _resolver_color(resultados_frame.cget("fg_color"))
+            fg_color = _resolver_color(header_font_label.cget("text_color"))
+            body_font = ctk.CTkFont()
+            ancho_max_px = 500  # mismo ancho que usaba wraplength en el CTkLabel anterior
+            avg_char_px = max(1, body_font.measure("0123456789") / 10)
+            ancho_desc = max(20, int(ancho_max_px / avg_char_px))
+
+            def _contar_lineas_envueltas(texto):
+                # Calculado a partir de las métricas de la fuente en vez de pedirle al widget
+                # su altura renderizada: la pestaña de Historial puede no estar visible todavía
+                # (CTkTabview no mapea las pestañas inactivas), y un Text sin mapear siempre
+                # devuelve un ancho de 1px, lo que dispara alturas absurdas si se usa count().
+                total = 0
+                for parrafo in texto.split("\n"):
+                    linea = ""
+                    lineas_parrafo = 0
+                    for palabra in parrafo.split(" "):
+                        candidato = (linea + " " + palabra).strip()
+                        if linea and body_font.measure(candidato) > ancho_max_px:
+                            lineas_parrafo += 1
+                            linea = palabra
+                        else:
+                            linea = candidato
+                    lineas_parrafo += 1
+                    total += lineas_parrafo
+                return max(1, total)
+
             # Mostrar los registros
             for i, reg in enumerate(registros):
                 fecha, usuario, descripcion = reg
                 row = i + 1
-                
-                ctk.CTkLabel(resultados_frame, text=fecha).grid(row=row, column=0, padx=5, pady=2, sticky="w")
-                ctk.CTkLabel(resultados_frame, text=usuario).grid(row=row, column=1, padx=5, pady=2, sticky="w")
-                
-                # Usamos wrap para que el texto de la descripción no se salga
-                ctk.CTkLabel(resultados_frame, text=descripcion, wraplength=500, justify="left").grid(row=row, column=2, padx=5, pady=2, sticky="w")
+
+                for col, valor in ((0, fecha), (1, usuario)):
+                    texto_valor = str(valor) if valor is not None else ""
+                    entry = tk.Entry(resultados_frame, bd=0, highlightthickness=0,
+                                      bg=bg_color, fg=fg_color, readonlybackground=bg_color,
+                                      disabledforeground=fg_color, font=body_font,
+                                      width=max(len(texto_valor), 1))
+                    entry.insert(0, texto_valor)
+                    entry.configure(state="readonly")
+                    entry.grid(row=row, column=col, padx=5, pady=2, sticky="w")
+
+                # Descripción: Text de solo lectura (permite seleccionar/copiar y hace wrap del texto)
+                texto_desc = str(descripcion) if descripcion is not None else ""
+                texto_widget = tk.Text(resultados_frame, wrap="word", height=1, width=ancho_desc,
+                                        bd=0, highlightthickness=0, bg=bg_color, fg=fg_color,
+                                        font=body_font, padx=0, pady=0, cursor="xterm")
+                texto_widget.insert("1.0", texto_desc)
+                texto_widget.configure(state="disabled", height=_contar_lineas_envueltas(texto_desc))
+                texto_widget.grid(row=row, column=2, padx=5, pady=2, sticky="w")
         
         # Botones de acción
         btn_aplicar = ctk.CTkButton(botones_frame, text="🔍 Aplicar Filtros", command=aplicar_filtros)

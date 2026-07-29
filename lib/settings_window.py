@@ -14,6 +14,7 @@ import bcrypt
 from lib.logger_config import get_logger
 from lib.firma_manager import subir_firma_usuario_b2, eliminar_firma_usuario_b2
 from lib.changelog_window import mostrar_ventana_cambios
+from lib.spellcheck_utils import IDIOMAS_DISPONIBLES, IDIOMA_POR_DEFECTO, set_idioma_ortografia
 
 logger = get_logger()
 
@@ -76,6 +77,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.var_tooltips = tk.BooleanVar(value=self.user_settings.get("show_tooltips", True))
         self.var_compact = tk.BooleanVar(value=self.user_settings.get("compact_mode", True))
         self.var_icon_size = tk.IntVar(value=self.user_settings.get("icon_size", 24))
+        self.var_idioma_ortografia = tk.StringVar(value=self.user_settings.get("idioma_ortografia", "es"))
         
         # Notificaciones
         self.var_sonido = tk.BooleanVar(value=self.user_settings.get("notificaciones_sonoras", True))
@@ -199,12 +201,32 @@ class SettingsWindow(ctk.CTkToplevel):
         self.icon_label.pack(side="left")
         self._add_tooltip(self.icon_slider, "Ajusta el tamaño de los iconos en la interfaz (16-32 px)")
         row += 1
-        
+
+        # Idioma del corrector ortográfico
+        ctk.CTkLabel(frame, text="Idioma del corrector ortográfico:",
+                    font=("Arial", 12)).grid(row=row, column=0, sticky="w", padx=10, pady=8)
+
+        self._idioma_ortografia_codigo_a_nombre = dict(IDIOMAS_DISPONIBLES)
+        self._idioma_ortografia_nombre_a_codigo = {v: k for k, v in IDIOMAS_DISPONIBLES.items()}
+        nombres_idiomas = list(self._idioma_ortografia_codigo_a_nombre.values())
+
+        self.idioma_ortografia_menu = ctk.CTkOptionMenu(
+            frame, values=nombres_idiomas, width=200,
+            command=lambda v: self._on_setting_changed())
+        codigo_actual = self.var_idioma_ortografia.get() or IDIOMA_POR_DEFECTO
+        self.idioma_ortografia_menu.set(
+            self._idioma_ortografia_codigo_a_nombre.get(codigo_actual, self._idioma_ortografia_codigo_a_nombre[IDIOMA_POR_DEFECTO]))
+        self.idioma_ortografia_menu.grid(row=row, column=1, sticky="w", padx=10, pady=8)
+        self._add_tooltip(self.idioma_ortografia_menu,
+                          "Idioma que usa el corrector ortográfico del editor de "
+                          "Observaciones Técnicas (subrayado en rojo de palabras no reconocidas)")
+        row += 1
+
         # Espaciador
         ctk.CTkLabel(frame, text="").grid(row=row, column=0, pady=10)
         row += 1
-        
-        logger.debug("Pestaña General creada con 4 ajustes")
+
+        logger.debug("Pestaña General creada con 5 ajustes")
     
     def _create_appearance_tab(self):
         """Crea la pestaña Apariencia."""
@@ -1319,6 +1341,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 "show_tooltips": True,
                 "compact_mode": True,
                 "icon_size": 24,
+                "idioma_ortografia": IDIOMA_POR_DEFECTO,
                 "theme": "themes/BH_rime.json",
                 "appearance_mode": "light",
                 "notificaciones_sonoras": True,
@@ -1494,7 +1517,13 @@ class SettingsWindow(ctk.CTkToplevel):
                 app_core.USER_SETTINGS = self.user_settings
             except Exception as e:
                 logger.error(f"No se pudo sincronizar USER_SETTINGS para tooltips: {e}", exc_info=True)
-            
+
+            # Aplicar el idioma del corrector ortográfico inmediatamente, sin esperar a reiniciar
+            try:
+                set_idioma_ortografia(self.user_settings.get("idioma_ortografia", IDIOMA_POR_DEFECTO))
+            except Exception as e:
+                logger.error(f"No se pudo sincronizar el idioma del corrector ortográfico: {e}", exc_info=True)
+
             # Redibujar listado si cambió compact mode
             try:
                 self.app.mostrar_lista_rma()
@@ -1527,6 +1556,8 @@ class SettingsWindow(ctk.CTkToplevel):
             "show_tooltips": self.var_tooltips.get(),
             "compact_mode": self.var_compact.get(),
             "icon_size": self.var_icon_size.get(),
+            "idioma_ortografia": self._idioma_ortografia_nombre_a_codigo.get(
+                self.idioma_ortografia_menu.get(), IDIOMA_POR_DEFECTO),
             "theme": f"themes/{archivo_tema}",
             "appearance_mode": appearance_mode,
             "notificaciones_sonoras": self.var_sonido.get(),
@@ -1561,6 +1592,10 @@ class SettingsWindow(ctk.CTkToplevel):
             if "icon_size" in config:
                 self.var_icon_size.set(config["icon_size"])
                 self.icon_label.configure(text=f"{config['icon_size']} px")
+            if "idioma_ortografia" in config:
+                nombre = self._idioma_ortografia_codigo_a_nombre.get(
+                    config["idioma_ortografia"], self._idioma_ortografia_codigo_a_nombre[IDIOMA_POR_DEFECTO])
+                self.idioma_ortografia_menu.set(nombre)
             
             # Apariencia
             if "theme" in config:

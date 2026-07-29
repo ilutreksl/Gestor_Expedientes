@@ -18,11 +18,25 @@ import os
 import tempfile
 import threading
 
+from lib.logger_config import get_logger
+from lib.spellcheck_utils import (
+    SPELLCHECKER_AVAILABLE, detectar_palabras_incorrectas,
+    obtener_sugerencias, añadir_palabra_personalizada,
+)
+
+logger = get_logger()
+
 try:
     from PIL import Image, ImageTk
     PILLOW_AVAILABLE = True
 except ImportError:
     PILLOW_AVAILABLE = False
+
+try:
+    from lib.image_editor_dialog import ImageEditorDialog
+    IMAGE_EDITOR_AVAILABLE = True
+except ImportError:
+    IMAGE_EDITOR_AVAILABLE = False
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 FONT_SIZES       = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36]
@@ -98,6 +112,9 @@ class RichTextEditor(tk.Frame):
         self._current_size    = DEFAULT_SIZE
         self._current_family  = DEFAULT_FAMILY
 
+        self._ortografia_activa   = SPELLCHECKER_AVAILABLE
+        self._ortografia_after_id = None
+
         self._build_toolbar()
         if modo_expandido:
             self._build_toolbar_avanzada()
@@ -134,15 +151,35 @@ class RichTextEditor(tk.Frame):
                     padx=6, pady=2, cursor="hand2",
                     font=("Segoe UI", 9))
 
-        def btn(parent, text, cmd, **extra):
+        def btn(parent, text, cmd, side="left", **extra):
             kw = {**base, **extra}
             b = tk.Button(parent, text=text, command=cmd, **kw)
-            b.pack(side="left", padx=2)
+            b.pack(side=side, padx=2)
             return b
 
-        def sep():
+        def sep(side="left"):
             tk.Frame(toolbar, width=1, bg="#888").pack(
-                side="left", fill="y", padx=4, pady=2)
+                side=side, fill="y", padx=4, pady=2)
+
+        # Expandir y Ortografía se empaquetan PRIMERO, ancladas al borde
+        # derecho: en tk.Pack el hueco disponible se va repartiendo en el
+        # orden en que se llama a pack() (no según el "side"), así que si se
+        # empaquetaran al final, cuando el contenedor es estrecho (como en la
+        # vista compacta de la ficha) se quedan sin espacio y quedan ocultas.
+        # Empaquetándolas antes que el resto, se garantiza que siempre tengan
+        # hueco reservado; si algo tiene que desbordarse por falta de espacio,
+        # que sea alguno de los botones de la izquierda (siempre accesibles
+        # abriendo "Expandir").
+        btn(toolbar, "⛶ Expandir", self._abrir_ventana_expandida, side="right")
+        sep(side="right")
+        if SPELLCHECKER_AVAILABLE:
+            self._ortografia_btn = btn(toolbar, "✓ Ortografía", self._alternar_ortografia, side="right")
+            self._actualizar_boton_ortografia()
+        else:
+            tk.Label(toolbar, text="(instala pyspellchecker para el corrector)",
+                     bg=t["tb"], fg="#ff8800",
+                     font=("Segoe UI", 8)).pack(side="right", padx=4)
+        sep(side="right")
 
         # Formato de texto
         btn(toolbar, "N", self._toggle_bold,
@@ -206,10 +243,9 @@ class RichTextEditor(tk.Frame):
 
         btn(toolbar, "✕ Limpiar formato", self._clear_format)
 
-        # Expandir — alineado a la derecha
+        # Relleno flexible: absorbe el espacio sobrante entre los botones de
+        # la izquierda y los anclados a la derecha (Expandir / Ortografía).
         tk.Frame(toolbar, bg=t["tb"]).pack(side="left", fill="x", expand=True)
-        sep()
-        btn(toolbar, "⛶ Expandir", self._abrir_ventana_expandida)
 
     def _build_toolbar_avanzada(self):
         """Segunda barra de herramientas — solo visible en modo expandido."""
@@ -326,11 +362,17 @@ class RichTextEditor(tk.Frame):
         # Clic derecho: menú contextual con copiar/pegar/cortar
         self.text.bind("<Button-3>", self._context_menu)
 
+        # Corrector ortográfico: revisar tras cada cambio de contenido (con debounce)
+        self.text.bind("<<Modified>>", self._on_text_modified)
+
     def _configure_tags(self):
         self.text.tag_configure("bold",          font=(DEFAULT_FAMILY, DEFAULT_SIZE, "bold"))
         self.text.tag_configure("italic",        font=(DEFAULT_FAMILY, DEFAULT_SIZE, "italic"))
         self.text.tag_configure("underline",     underline=True)
         self.text.tag_configure("strikethrough", overstrike=True)
+        # Marca visual del corrector ortográfico. No es un tag "real" de
+        # formato: se excluye explícitamente al serializar en get_content().
+        self.text.tag_configure("ortografia_error", underline=True, foreground="#e53935")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Copiar / Pegar / Menú contextual
@@ -372,13 +414,17 @@ class RichTextEditor(tk.Frame):
         return "break"   # evitar el paste doble nativo de Tk
 
     def _context_menu(self, event):
-        """Menú contextual con Cortar / Copiar / Pegar."""
+        """Menú contextual con Cortar / Copiar / Pegar y, si se hace clic sobre
+        una palabra marcada por el corrector ortográfico, sugerencias de
+        corrección."""
         t = self._theme()
         menu = tk.Menu(self.text, tearoff=0,
                        bg=t["btn"], fg=t["fg"],
                        activebackground=t["act"],
                        activeforeground=t["fg"],
                        relief="flat", bd=0)
+
+        self._agregar_sugerencias_ortografia(menu, event)
 
         menu.add_command(label="✂  Cortar",   command=lambda: self.text.event_generate("<<Cut>>"))
         menu.add_command(label="⎘  Copiar",   command=lambda: self.text.event_generate("<<Copy>>"))
@@ -391,6 +437,126 @@ class RichTextEditor(tk.Frame):
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _agregar_sugerencias_ortografia(self, menu, event):
+        """Si el clic derecho cae sobre una palabra marcada como incorrecta,
+        añade al menú contextual las sugerencias de corrección y la opción de
+        añadirla al diccionario personalizado."""
+        if not SPELLCHECKER_AVAILABLE:
+            return
+
+        idx_click = self.text.index(f"@{event.x},{event.y}")
+        rangos = self.text.tag_ranges("ortografia_error")
+        rango_encontrado = None
+        for i in range(0, len(rangos), 2):
+            inicio, fin = rangos[i], rangos[i + 1]
+            if self.text.compare(inicio, "<=", idx_click) and self.text.compare(idx_click, "<", fin):
+                rango_encontrado = (inicio, fin)
+                break
+
+        if rango_encontrado is None:
+            return
+
+        inicio, fin = rango_encontrado
+        palabra = self.text.get(inicio, fin)
+        sugerencias = obtener_sugerencias(palabra)
+
+        if sugerencias:
+            for sugerencia in sugerencias:
+                menu.add_command(
+                    label=f"✓ {sugerencia}",
+                    command=lambda s=sugerencia, i=inicio, f=fin: self._corregir_palabra(i, f, s))
+        else:
+            menu.add_command(label="(sin sugerencias)", state="disabled")
+
+        menu.add_command(
+            label=f"➕ Añadir '{palabra}' al diccionario",
+            command=lambda p=palabra: self._añadir_al_diccionario(p))
+        menu.add_separator()
+
+    def _corregir_palabra(self, inicio, fin, sugerencia):
+        self.text.delete(inicio, fin)
+        self.text.insert(inicio, sugerencia)
+        self._programar_correccion_ortografica()
+
+    def _añadir_al_diccionario(self, palabra):
+        añadir_palabra_personalizada(palabra)
+        self._ejecutar_correccion_ortografica()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Corrector ortográfico
+    # ──────────────────────────────────────────────────────────────────────────
+    def _on_text_modified(self, event=None):
+        """Se dispara con cada cambio de contenido (Tk solo lo hace una vez
+        hasta que se resetea el flag 'modified')."""
+        if not self.text.edit_modified():
+            return
+        self.text.edit_modified(False)
+        self._programar_correccion_ortografica()
+
+    def _programar_correccion_ortografica(self):
+        if not self._ortografia_activa or not SPELLCHECKER_AVAILABLE:
+            return
+        if self._ortografia_after_id:
+            self.after_cancel(self._ortografia_after_id)
+        # Debounce: se espera a que el usuario deje de escribir para no
+        # relanzar el análisis en cada pulsación.
+        self._ortografia_after_id = self.after(600, self._ejecutar_correccion_ortografica)
+
+    def _construir_texto_plano_y_mapa(self):
+        """Reconstruye el texto (sin imágenes) junto con la posición real en
+        el widget de cada carácter, para poder mapear los offsets que
+        devuelve el corrector a índices válidos de tk.Text."""
+        items = self.text.dump("1.0", "end-1c", text=True, image=True)
+        caracteres = []
+        indices = []
+        for kind, value, index in items:
+            if kind == "text":
+                for offset, ch in enumerate(value):
+                    caracteres.append(ch)
+                    indices.append(f"{index}+{offset}c")
+        return "".join(caracteres), indices
+
+    def _ejecutar_correccion_ortografica(self):
+        self._ortografia_after_id = None
+        self.text.tag_remove("ortografia_error", "1.0", "end")
+        if not self._ortografia_activa or not SPELLCHECKER_AVAILABLE:
+            return
+        try:
+            texto, indices = self._construir_texto_plano_y_mapa()
+            errores = detectar_palabras_incorrectas(texto)
+        except Exception as e:
+            logger.error(f"Error ejecutando el corrector ortográfico: {e}")
+            return
+
+        for inicio, fin, _palabra in errores:
+            if fin > len(indices):
+                continue
+            idx_inicio = indices[inicio]
+            idx_fin = f"{indices[fin - 1]}+1c"
+            self.text.tag_add("ortografia_error", idx_inicio, idx_fin)
+
+        if errores:
+            self.text.tag_raise("ortografia_error")
+        logger.debug(f"Corrector ortográfico: {len(errores)} palabra(s) marcada(s)")
+
+    def _alternar_ortografia(self):
+        self._ortografia_activa = not self._ortografia_activa
+        self._actualizar_boton_ortografia()
+        logger.debug(f"Corrector ortográfico {'activado' if self._ortografia_activa else 'desactivado'} en el editor")
+        if self._ortografia_activa:
+            self._ejecutar_correccion_ortografica()
+        else:
+            self.text.tag_remove("ortografia_error", "1.0", "end")
+        self.text.focus_set()
+
+    def _actualizar_boton_ortografia(self):
+        if not hasattr(self, '_ortografia_btn'):
+            return
+        if self._ortografia_activa:
+            self._ortografia_btn.config(relief="sunken", text="✓ Ortografía")
+        else:
+            self._ortografia_btn.config(relief="flat", text="✗ Ortografía")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Tags helpers
@@ -724,6 +890,24 @@ class RichTextEditor(tk.Frame):
         # Aplicar tag con start Y end (sin end, tag_add no hace nada en tk.Text)
         self.text.tag_add(img_id, pos_img, f"{pos_img}+1c")
 
+    def _editar_imagen_antes_de_insertar(self, pil_img):
+        """Abre el diálogo de recorte/marcado antes de insertar una imagen.
+
+        Devuelve la imagen resultante (editada, o la original si el usuario
+        no tocó nada), o None si el usuario canceló la inserción de esa
+        imagen en concreto. Si el editor no está disponible por algún
+        motivo, se inserta la imagen tal cual (degradación segura).
+        """
+        if not IMAGE_EDITOR_AVAILABLE:
+            return pil_img
+        try:
+            dlg = ImageEditorDialog(self, pil_img)
+            self.wait_window(dlg)
+            return dlg.result
+        except Exception as e:
+            logger.error(f"Error abriendo el editor de imágenes, se inserta sin editar: {e}")
+            return pil_img
+
     def _insert_image_from_file(self):
         if not PILLOW_AVAILABLE:
             messagebox.showwarning("Pillow no disponible", "Instala Pillow:\npip install Pillow")
@@ -738,7 +922,10 @@ class RichTextEditor(tk.Frame):
         for path in paths:
             try:
                 img = Image.open(path); img.load(); img = img.copy()
-                self._insert_pil_image(img)  # sin nombre_adjunto → base64 temporal
+                img_editada = self._editar_imagen_antes_de_insertar(img)
+                if img_editada is None:
+                    continue  # el usuario canceló la inserción de esta imagen
+                self._insert_pil_image(img_editada)  # sin nombre_adjunto → base64 temporal
             except Exception as e:
                 errores.append(f"{os.path.basename(path)}: {e}")
         if errores:
@@ -824,8 +1011,23 @@ class RichTextEditor(tk.Frame):
         if local and os.path.exists(local):
             try:
                 img = Image.open(local); img.load(); img = img.copy()
-                self.after(0, lambda i=img, n=nombre:
-                           self._insert_pil_image(i, nombre_adjunto=n))
+
+                def _editar_e_insertar(imagen_original=img, nombre_adj=nombre):
+                    resultado = self._editar_imagen_antes_de_insertar(imagen_original)
+                    if resultado is None:
+                        return  # el usuario canceló la inserción
+                    if (resultado.size == imagen_original.size
+                            and resultado.tobytes() == imagen_original.tobytes()):
+                        # Sin cambios: se mantiene la referencia al adjunto original
+                        self._insert_pil_image(resultado, nombre_adjunto=nombre_adj)
+                    else:
+                        # Editada: ya no es fiel al adjunto original, se guarda
+                        # embebida (si se guardara como referencia, al reabrir el
+                        # documento se recargaría la foto original sin el recorte
+                        # ni las marcas).
+                        self._insert_pil_image(resultado)
+
+                self.after(0, _editar_e_insertar)
             except Exception as ex:
                 self.after(0, lambda: messagebox.showerror(
                     "Error", f"No se pudo cargar la imagen:\n{ex}"))
@@ -1036,12 +1238,12 @@ class RichTextEditor(tk.Frame):
             kind = item[0]
             if kind == "tagon":
                 tag = item[1]
-                if not tag.startswith("img_") and tag != "sel":
+                if not tag.startswith("img_") and tag not in ("sel", "ortografia_error"):
                     new_tags = active_tags | {tag}
                     cur = frozenset(t for t in active_tags
-                                    if not t.startswith("img_") and t != "sel")
+                                    if not t.startswith("img_") and t not in ("sel", "ortografia_error"))
                     nxt = frozenset(t for t in new_tags
-                                    if not t.startswith("img_") and t != "sel")
+                                    if not t.startswith("img_") and t not in ("sel", "ortografia_error"))
                     if run_chars and nxt != run_tags:
                         _flush()
                         run_tags = nxt
@@ -1052,9 +1254,9 @@ class RichTextEditor(tk.Frame):
             elif kind == "tagoff":
                 tag = item[1]
                 active_tags.discard(tag)
-                if not tag.startswith("img_") and tag != "sel":
+                if not tag.startswith("img_") and tag not in ("sel", "ortografia_error"):
                     nxt = frozenset(t for t in active_tags
-                                    if not t.startswith("img_") and t != "sel")
+                                    if not t.startswith("img_") and t not in ("sel", "ortografia_error"))
                     if run_chars and nxt != run_tags:
                         _flush()
                         run_tags = nxt
@@ -1095,20 +1297,25 @@ class RichTextEditor(tk.Frame):
         self._image_refs.clear()
         self._image_data.clear()
 
-        if not raw:
-            return
-        raw = str(raw).strip()
+        try:
+            if not raw:
+                return
+            raw = str(raw).strip()
 
-        if JSON_MARKER in raw:
-            try:
-                data = json.loads(raw)
-                if data.get("version") == 1:
-                    self._load_from_json(data)
-                    return
-            except (json.JSONDecodeError, KeyError):
-                pass
+            if JSON_MARKER in raw:
+                try:
+                    data = json.loads(raw)
+                    if data.get("version") == 1:
+                        self._load_from_json(data)
+                        return
+                except (json.JSONDecodeError, KeyError):
+                    pass
 
-        self.text.insert("1.0", raw)   # texto plano
+            self.text.insert("1.0", raw)   # texto plano
+        finally:
+            # Revisar ortografía del contenido recién cargado (no solo lo que
+            # se escriba a partir de ahora).
+            self._programar_correccion_ortografica()
 
     def _load_from_json(self, data):
         for seg in data.get("segments", []):

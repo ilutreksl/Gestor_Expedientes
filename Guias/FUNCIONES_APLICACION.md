@@ -1290,6 +1290,96 @@ Llama `lib.avisos_manager.AvisosManager()`
 - Gráficos comparativos
 - Análisis de tendencias
 
+### lib/rich_text_editor.py
+**Clase**: `RichTextEditor(tk.Frame)` — editor de texto enriquecido usado en el
+campo "Observaciones Técnicas" de la ficha de expedientes (pestaña
+Información Técnica).
+
+- **Formato**: negrita, cursiva, subrayado, tachado, tamaño, familia de
+  fuente, color de fuente, resaltado, alineación, sangría.
+  - Fuente y tamaño por defecto: **Verdana Pro, 12pt** (`DEFAULT_FAMILY` /
+    `DEFAULT_SIZE`).
+- **Imágenes**: inserción desde archivo o desde los adjuntos del expediente
+  (descarga de Backblaze B2 si aplica). Antes de insertarse, cada imagen pasa
+  por el **editor de imágenes** (`lib/image_editor_dialog.py`) para poder
+  recortarla o marcarla; se puede pulsar "Insertar imagen" sin tocar nada
+  para insertarla tal cual.
+- **Corrector ortográfico** (`lib/spellcheck_utils.py`): subraya en rojo las
+  palabras no reconocidas mientras se escribe (con debounce). Botón
+  "✓ Ortografía" en la barra de herramientas para activar/desactivar. Clic
+  derecho sobre una palabra marcada → sugerencias de corrección o "Añadir al
+  diccionario" (persiste en
+  `Diccionarios/diccionario_personalizado_ortografia.json`).
+  Requiere `pip install pyspellchecker`; si no está instalado, el botón no
+  aparece y el editor funciona igual sin corrector.
+  - **Idioma**: configurable en Ajustes de Usuario → pestaña "📋 General" →
+    "Idioma del corrector ortográfico" (`user_settings["idioma_ortografia"]`,
+    por defecto `"es"`). El cambio se aplica al momento, sin reiniciar la
+    app. Idiomas disponibles: los que trae pyspellchecker de fábrica (es, en,
+    fr, pt, de, it, nl, ru, ar, eu, fa, lv) — ver
+    `spellcheck_utils.IDIOMAS_DISPONIBLES`. Solo español tiene el diccionario
+    ampliado propio (tildes); el resto usa el diccionario básico de
+    pyspellchecker.
+- **Almacenamiento**: `get_content()` serializa todo (texto, formato,
+  imágenes) como JSON en el campo `obs_tecnica` de `rma_maestro`. Las marcas
+  de ortografía son solo visuales: nunca se guardan ni se exportan.
+- **Ventana expandida**: botón "⛶ Expandir" abre una ventana grande con una
+  segunda barra de herramientas (resaltado, alineación, tachado, sangría).
+
+### lib/image_editor_dialog.py
+**Clase**: `ImageEditorDialog(tk.Toplevel)` — ventana modal para recortar y
+marcar una imagen antes de insertarla en `RichTextEditor`.
+
+- **Herramientas**: recortar, rectángulo, flecha, lápiz (trazo libre), texto.
+- Color y grosor configurables; deshacer (hasta 8 pasos) y restablecer a la
+  imagen original.
+- Devuelve la imagen resultante (`dlg.result`) en el atributo `result` tras
+  cerrarse; `None` si se cancela.
+- Si se edita una imagen que venía "desde adjuntos" (por nombre, no
+  embebida), el resultado editado se guarda embebido en base64 en vez de
+  como referencia, para no perder el recorte/las marcas al reabrir el
+  expediente.
+
+### lib/spellcheck_utils.py
+**Corrector ortográfico en español** (envoltorio sobre `pyspellchecker`).
+
+- `get_spellchecker()`: instancia compartida (se crea una sola vez). Combina
+  el diccionario básico de `pyspellchecker` con
+  `Diccionarios/es_palabras_frecuentes.txt` (~143.000 palabras, generado una
+  única vez a partir de `wordfreq` — no hace falta tener `wordfreq`
+  instalado para usar la app, solo se usó para generar ese fichero). Esto
+  reduce mucho los falsos positivos frente al diccionario básico, que no
+  reconocía formas verbales conjugadas de uso corriente (p.ej. "tiene").
+- **Tildes**: al generar `es_palabras_frecuentes.txt` se podó a propósito la
+  forma sin tilde de cada palabra que en el corpus real aparece claramente
+  con más frecuencia acentuada (p.ej. "recepcion", "numero", "articulo",
+  "codigo", "albaran", "gestion" quedan fuera del diccionario; solo se
+  aceptan "recepción", "número", "artículo"...), así que un error de tilde en
+  ese tipo de palabras sí se marca. Se respeta una lista de excepciones con
+  los pares clásicos de "tilde diacrítica" del español donde ambas formas son
+  palabras legítimas con significado distinto (el/él, tu/tú, mi/mí, se/sé,
+  de/dé, si/sí, mas/más, aun/aún, solo/sólo, este/esté,
+  que/qué, como/cómo, cuando/cuándo, donde/dónde, quien/quién, cual/cuál,
+  cuanto/cuánto, porque/porqué...) y con conjugaciones verbales de uso muy
+  frecuente que coinciden con la forma sin tilde de otra palabra (p.ej.
+  "trabajo", "cambio", "espero", "abandono" no se marcan). El criterio usado
+  para decidir qué podar: se compara la frecuencia de uso real (vía
+  `wordfreq.zipf_frequency`) de la forma con tilde y sin tilde; si la que no
+  lleva tilde es notablemente menos frecuente, se considera un error y se
+  quita del diccionario.
+- `detectar_palabras_incorrectas(texto)`: devuelve posiciones de palabras no
+  reconocidas.
+- `obtener_sugerencias(palabra)`: sugerencias de corrección, con la más
+  probable primero (usa `SpellChecker.correction()`, que prioriza la misma
+  palabra con la tilde correcta cuando aplica).
+- `añadir_palabra_personalizada(palabra)`: persiste una excepción en
+  `Diccionarios/diccionario_personalizado_ortografia.json`.
+- **Limitación conocida**: fuera de la lista de excepciones y de las
+  conjugaciones verbales muy frecuentes, algunas palabras poco comunes que
+  coinciden con la forma sin tilde de otra (homógrafos) podrían no detectarse
+  o, más raramente, marcarse cuando no tocaba. Para esos casos puntuales,
+  "Añadir al diccionario" soluciona el problema para siempre.
+
 ---
 
 ## DICCIONARIOS JSON
@@ -1308,6 +1398,11 @@ Tipos de resultado de expedientes
 
 ### Diccionarios/tipos_cliente.json
 Tipos de clientes
+
+### Diccionarios/diccionario_personalizado_ortografia.json
+Palabras añadidas por los usuarios al corrector ortográfico del editor de
+Observaciones Técnicas (ver `lib/spellcheck_utils.py`). Se crea la primera
+vez que alguien usa "Añadir al diccionario".
 
 ---
 
