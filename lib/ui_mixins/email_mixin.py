@@ -68,20 +68,13 @@ class EmailMixin:
             cursor.execute("SELECT id, ruta_relativa, nombre_archivo FROM rma_adjuntos WHERE rma_id = ?", (self.rma_actual_id,))
             adjuntos_disponibles = cursor.fetchall()
             
-            # Crear ventana de diálogo
+            # Crear ventana de diálogo (oculta hasta que se calcule el tamaño real)
             dialogo = Toplevel(self)
+            dialogo.withdraw()
             dialogo.title("📧 Preparar Email con Adjuntos")
-            dialogo.geometry("700x600")
             dialogo.resizable(True, True)
             dialogo.transient(self)
-            dialogo.grab_set()
-            
-            # Centrar en pantalla
-            dialogo.update_idletasks()
-            x = (dialogo.winfo_screenwidth() // 2) - (700 // 2)
-            y = (dialogo.winfo_screenheight() // 2) - (600 // 2)
-            dialogo.geometry(f"700x600+{x}+{y}")
-            
+
             # Frame principal
             main_frame = ctk.CTkFrame(dialogo)
             main_frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -256,12 +249,27 @@ class EmailMixin:
                 "El cliente de correo se abrirá con el email preparado y los archivos listos para adjuntar."
             )
             
-            ctk.CTkLabel(nota_frame, text=nota_text, 
-                        font=ctk.CTkFont(size=10), 
+            ctk.CTkLabel(nota_frame, text=nota_text,
+                        font=ctk.CTkFont(size=10),
                         text_color="gray",
                         wraplength=650).pack(pady=10, padx=10)
-            
+
+            # Calcular tamaño real necesario para mostrar todo el contenido sin recortes
+            dialogo.update_idletasks()
+            ancho = max(dialogo.winfo_reqwidth() + 20, 700)
+            alto = min(dialogo.winfo_reqheight() + 20, dialogo.winfo_screenheight() - 100)
+            x = (dialogo.winfo_screenwidth() // 2) - (ancho // 2)
+            y = (dialogo.winfo_screenheight() // 2) - (alto // 2)
+            dialogo.geometry(f"{ancho}x{alto}+{x}+{y}")
+            dialogo.minsize(700, min(600, alto))
+            dialogo.deiconify()
+            dialogo.grab_set()
+
         except Exception as e:
+            try:
+                dialogo.destroy()
+            except (NameError, UnboundLocalError, tk.TclError):
+                pass
             messagebox.showerror("Error", f"Error preparando email: {e}")
         finally:
             conn.close()
