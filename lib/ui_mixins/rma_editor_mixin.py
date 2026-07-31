@@ -1048,6 +1048,7 @@ class RmaEditorMixin:
 
         # C) PESTAÑA ARTÍCULOS (Mantener la lógica de listado y añadir artículo)
         articulos_tab.grid_columnconfigure(0, weight=1)
+        articulos_tab.grid_rowconfigure(0, weight=1)
         articulos_frame = ctk.CTkFrame(articulos_tab) # Este marco no necesita scroll, la lista interna sí
         articulos_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         articulos_frame.grid_columnconfigure(0, weight=1)
