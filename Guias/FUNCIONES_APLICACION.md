@@ -627,90 +627,67 @@ Extrae datos del formulario actual
 
 ### Búsqueda Global
 
-#### `mostrar_busqueda_global(self)`
-**Vista de búsqueda rápida**
-- Entry de búsqueda
-- Placeholder: "Buscar en todos los campos..."
-- Enter → `ejecutar_busqueda_global()`
-- Área de resultados con secciones
+La búsqueda global usa un único flujo (texto libre + filtros opcionales) y
+muestra los resultados como un listado compacto (una fila fina por resultado),
+no como tarjetas. Un clic en cualquier fila abre el expediente correspondiente
+en una ventana aparte (`_abrir_editor_rma`).
 
-#### `ejecutar_busqueda_global(self)`
-**Búsqueda multi-tabla**
-- Llama `buscar_en_todos_los_campos(termino)`
-- Muestra `mostrar_resultados_busqueda()`
+#### `mostrar_busqueda_global(self)`
+**Construye la interfaz**
+- Barra de búsqueda de una sola fila (entry + Buscar + Limpiar + Filtros + Historial)
+- Panel de filtros plegable (oculto por defecto, no reserva espacio en pantalla)
+- Área de resultados (`CTkScrollableFrame`) a pantalla completa
+
+#### `ejecutar_busqueda(self)`
+**Búsqueda unificada (texto + filtros)**
+- Valida fechas y que haya al menos un tipo de resultado incluido
+- Llama `buscar_global(termino, filtros)`
+- Muestra `mostrar_resultados()`
 - Guarda en historial
 
-#### `buscar_en_todos_los_campos(self, termino: str) -> dict`
-**Query exhaustiva en 4 tablas**
-- **Expedientes** (rma_maestro):
-  - Campos: numero_rma, nombre_cliente, motivo, observaciones, etc.
-- **Productos** (rma_detalles):
-  - Campo: referencia_articulo
-- **Historial** (historial_cambios):
-  - Campos: campo, valor_antiguo, valor_nuevo
-- **Tareas**:
-  - Campo: descripcion
+#### `buscar_global(self, termino: str, filtros: dict) -> dict`
+**Consulta las tablas seleccionadas en `filtros["tipos"]`**
+- **Expedientes** (rma_maestro): búsqueda dinámica sobre todas las columnas
+  de texto (vía `PRAGMA table_info`) + filtros por `estado`, `fecha_emision`,
+  `cliente`, `numero_documento_cliente`, `rma_proveedor`
+- **Productos** (rma_detalles, JOIN rma_maestro): búsqueda dinámica +
+  filtros por `estado_producto`, `referencia_articulo` y los filtros del
+  expediente padre
+- **Historial** (rma_historial, JOIN rma_maestro)
+- **Tareas** (tareas, LEFT JOIN rma_maestro por `codigo_rma`)
 - **Returns**: `{expedientes: [], productos: [], historial: [], tareas: []}`
 
-#### `mostrar_resultados_busqueda(self, expedientes: list, productos: list, historial: list, tareas: list, termino: str)`
-**Renderiza resultados agrupados**
-- **Secciones**:
-  1. Expedientes (con highlight del término)
-  2. Productos (con botón "Ir a expediente")
-  3. Historial de cambios
-  4. Tareas relacionadas
-- Resalta término buscado en amarillo
-- Click en resultado → Navega al expediente
+#### `mostrar_resultados(self, resultados: dict, termino: str, filtros: dict)`
+**Renderiza resultados agrupados en filas compactas**
+- Una sección por tipo con resultados, cada una con filas finas (icono,
+  identificador, detalle, estado con color, fecha)
+- Clic en una fila → abre el expediente en una ventana aparte
 
-### Búsqueda Avanzada
+### Filtros avanzados
 
 #### `crear_controles_filtros(self)`
-**Panel de filtros avanzados**
-- **Filtros disponibles**:
-  - Estado (dropdown)
-  - Rango de fechas (desde/hasta)
-  - Cliente (entry)
-  - Código RMA (entry)
-  - Artículo (entry)
-- Botón "Buscar" → `ejecutar_busqueda_con_filtros()`
-- Botón "Limpiar" → `limpiar_filtros()`
-- Toggle "Filtros avanzados" (expand/collapse)
+**Panel de filtros (plegable, rejilla de 4 columnas)**
+- Estado del expediente (dropdown, cargado dinámicamente desde la BD)
+- Proveedor (entry, columna `rma_proveedor`)
+- Rango de fechas de emisión (desde/hasta)
+- Cliente y documento de cliente (entry)
+- Estado del producto (dropdown, valores desde `OPCIONES["Estado_Producto"]`)
+- Referencia del artículo (entry)
+- Checkboxes "Incluir en resultados": Expedientes / Productos / Tareas / Historial
+- Botones "Aplicar filtros" y "Limpiar filtros" (ambos llaman a `ejecutar_busqueda()` / `limpiar_filtros()`)
 
-#### `ejecutar_busqueda_con_filtros(self)`
-**Búsqueda con múltiples criterios**
-- Construye filtros desde widgets
-- Llama `buscar_en_maestro_con_filtros()`
-- Llama `buscar_en_detalles_con_filtros()`
-- Muestra `mostrar_resultados_busqueda_avanzada()`
+### Historial de búsquedas
 
-#### `buscar_en_maestro_con_filtros(self, termino: str, filtros: dict) -> list`
-**Query dinámica en rma_maestro**
-- WHERE con múltiples AND
-- Parámetros parameterizados para seguridad
-- **Returns**: Lista de expedientes
-
-#### `buscar_en_detalles_con_filtros(self, termino: str, filtros: dict) -> list`
-**Query en rma_detalles con JOIN a maestro**
-- Filtra por referencia_articulo
-- JOIN para obtener datos del expediente
-- **Returns**: Lista de productos con datos de expediente
-
-### Historial de Búsquedas
-
-#### `actualizar_historial_ui(self)`
-Renderiza últimas 10 búsquedas
+#### `mostrar_historial_dropdown(self)`
+Muestra un menú desplegable (no un panel fijo) con las últimas 10 búsquedas
 - Llama `cargar_historial_busquedas()`
-- Crea card por búsqueda con:
-  - Término buscado
-  - Fecha/hora
-  - Botón "Repetir" → `usar_busqueda_historial()`
-  - Botón "✕" → Eliminar
+- Cada entrada ejecuta `usar_busqueda_historial()` al seleccionarla
+- Incluye opción "Limpiar historial"
 
 #### `usar_busqueda_historial(self, entrada: dict)`
-**Repite búsqueda desde historial**
-- Carga término y filtros
-- Ejecuta búsqueda
-- Navega a resultados
+**Repite una búsqueda guardada**
+- Restaura término y filtros
+- Ejecuta `ejecutar_busqueda()`
 
 ---
 

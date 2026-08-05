@@ -78,6 +78,11 @@
       "theme": "themes/teal_corporate.json",
       "appearance_mode": "light",
       "tiene_firma": true,
+      "mostrar_tareas_dashboard": true,
+      "mostrar_todas_tareas_dashboard": true,
+      "mostrar_prioritarias_dashboard": false,
+      "mostrar_calendario_dashboard": true,
+      "idioma_ortografia": "es",
       "mostrar_aviso": true,
       "notificaciones_sonoras": true,
       "notificar_al_iniciar": true,
@@ -88,7 +93,69 @@
       "busqueda_albaranes_activa": true,
       "ruta_carpeta_albaranes": "C:/Users/Carlos.ILUTREKSL/OneDrive - ILUTREK, S.L/Aplicaciones/Gestor_Expedientes_Compartida/Albaranes",
       "formato_albaran_usuario": "AL{Y}/{N}",
-      "formato_archivo_pdf": "Albarán 1-AL{Y}-{N0}*.pdf"
+      "formato_archivo_pdf": "Albarán 1-AL{Y}-{N0}*.pdf",
+      "historial_busquedas": [
+        {
+          "termino": "realizado",
+          "filtros": {
+            "estado": "",
+            "fecha_desde": "",
+            "fecha_hasta": "",
+            "cliente": "",
+            "documento": "",
+            "proveedor": "",
+            "estado_producto": "",
+            "referencia": "",
+            "tipos": [
+              "expedientes",
+              "productos",
+              "tareas",
+              "historial"
+            ]
+          },
+          "fecha": "2026-08-05T11:00:10.844322"
+        },
+        {
+          "termino": "31-1100",
+          "filtros": {
+            "estado": "",
+            "fecha_desde": "",
+            "fecha_hasta": "",
+            "cliente": "",
+            "documento": "",
+            "proveedor": "",
+            "estado_producto": "",
+            "referencia": "",
+            "tipos": [
+              "expedientes",
+              "productos",
+              "tareas",
+              "historial"
+            ]
+          },
+          "fecha": "2026-08-05T10:58:46.173595"
+        },
+        {
+          "termino": "24-1121",
+          "filtros": {
+            "estado": "",
+            "fecha_desde": "",
+            "fecha_hasta": "",
+            "cliente": "",
+            "documento": "",
+            "proveedor": "",
+            "estado_producto": "",
+            "referencia": "",
+            "tipos": [
+              "expedientes",
+              "productos",
+              "tareas",
+              "historial"
+            ]
+          },
+          "fecha": "2026-08-05T10:57:31.833285"
+        }
+      ]
     }
   }
 }

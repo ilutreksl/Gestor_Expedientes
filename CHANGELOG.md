@@ -1,5 +1,6 @@
-Cambio V.1.1.08 - ✨ Últimas mejoras implementadas:
+Cambio V.1.1.09 - ✨ Últimas mejoras implementadas:
 
+- Rediseñada la ventana de la busqueda global avanzada.
 - Añadido editor de imagenes en el editor de texto. Ahora cuando se va a adjuntar una imagen, te permitira editarla antes de embedirla. Las acciones que perimte son: Recortar, marcar, anotar y flecha.
 - Añadido corrector ortografico en el editor de texto. Se debe de instalar la libreria pyspellchecker. Leer el archivo README.md para poder instalarlo. En caso de no instalarlo, el editor funciona pero sin esa funcion.
 En ajustes de usuario, en la pestaña General, se puede cambiar el idioma.
