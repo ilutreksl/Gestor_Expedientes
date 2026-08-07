@@ -13,6 +13,7 @@ from lib.ui_mixins.articulos_mixin import ArticulosMixin
 from lib.ui_mixins.recepciones_mixin import RecepcionesMixin
 from lib.ui_mixins.email_mixin import EmailMixin
 from lib.ui_mixins.clientes_mixin import ClientesMixin
+from lib.ui_mixins.dispositivos_qr_mixin import DispositivosQRMixin
 
 #try:
 #    locale.setlocale(locale.LC_ALL, 'es_ES.UTF-8')
@@ -253,7 +254,7 @@ class LoginApp(ctk.CTk):
 # 2. CLASE DE LA VENTANA PRINCIPAL DE LA APLICACIÓN
 # ----------------------------------------------------------------------
 
-class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDashboardMixin, RmaListadoMixin, RmaEditorMixin, BackupsMixin, AdjuntosMixin, InformesMixin, AdminMixin, ArticulosMixin, RecepcionesMixin, EmailMixin, ClientesMixin):
+class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDashboardMixin, RmaListadoMixin, RmaEditorMixin, BackupsMixin, AdjuntosMixin, InformesMixin, AdminMixin, ArticulosMixin, RecepcionesMixin, EmailMixin, ClientesMixin, DispositivosQRMixin):
     """Ventana principal que gestiona el listado, creación y edición de RMAs."""
     
     # Opciones predefinidas para desplegables

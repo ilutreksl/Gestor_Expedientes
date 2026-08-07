@@ -337,22 +337,110 @@ def obtener_uso_turso():
         }
 
 
+def obtener_uso_cloudflare_worker(nombre_script="recepcion-ilutrek"):
+    """
+    Obtiene el número de peticiones recibidas hoy por el Worker de recepción
+    por QR, vía la API de Analytics de Cloudflare (GraphQL).
+
+    Returns:
+        dict: {
+            'peticiones_hoy': int,
+            'limite_diario': int,   # límite fijo del plan gratuito de Workers
+            'tipo_cuenta': str,
+            'error': str (si hay error)
+        }
+    """
+    try:
+        import requests
+        from datetime import datetime, timedelta, timezone
+
+        token = os.getenv("CLOUDFLARE_API_TOKEN")
+        account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+
+        if not token or not account_id:
+            logger.warning("Cloudflare API no configurada")
+            return {'error': 'No configurado'}
+
+        ahora = datetime.now(timezone.utc)
+        inicio_dia = ahora.strftime("%Y-%m-%dT00:00:00Z")
+        inicio_dia_siguiente = (ahora + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+
+        query = """
+        query GetWorkerUsage($accountTag: string, $scriptName: string, $start: string, $end: string) {
+          viewer {
+            accounts(filter: { accountTag: $accountTag }) {
+              workersInvocationsAdaptive(
+                limit: 10,
+                filter: { scriptName: $scriptName, datetime_geq: $start, datetime_lt: $end }
+              ) {
+                sum { requests }
+              }
+            }
+          }
+        }
+        """
+        variables = {
+            "accountTag": account_id,
+            "scriptName": nombre_script,
+            "start": inicio_dia,
+            "end": inicio_dia_siguiente,
+        }
+
+        response = requests.post(
+            "https://api.cloudflare.com/client/v4/graphql",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"query": query, "variables": variables},
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Error consultando Cloudflare Analytics: {response.status_code}")
+            return {'error': 'Error de conexión'}
+
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"Error GraphQL Cloudflare: {data['errors']}")
+            return {'error': 'Error en la consulta'}
+
+        accounts = data.get("data", {}).get("viewer", {}).get("accounts", [])
+        peticiones_hoy = 0
+        if accounts:
+            invocaciones = accounts[0].get("workersInvocationsAdaptive", [])
+            if invocaciones:
+                peticiones_hoy = invocaciones[0].get("sum", {}).get("requests", 0)
+
+        logger.info(f"Cloudflare Worker '{nombre_script}': {peticiones_hoy} peticiones hoy")
+
+        return {
+            'peticiones_hoy': peticiones_hoy,
+            'limite_diario': 100_000,  # Límite del plan gratuito de Workers
+            'tipo_cuenta': 'FREE',
+            'error': None
+        }
+
+    except Exception as e:
+        logger.error(f"Error obteniendo uso de Cloudflare Worker: {e}")
+        return {'error': str(e)}
+
+
 def obtener_todos_los_usos():
     """
     Obtiene el uso de almacenamiento de todos los servicios.
-    
+
     Returns:
         dict: {
             'backblaze': dict,
-            'turso': dict
+            'turso': dict,
+            'cloudflare_worker': dict
         }
     """
     logger.info("Consultando uso de almacenamiento de todos los servicios...")
-    
+
     resultado = {
         'backblaze': obtener_uso_backblaze(),
-        'turso': obtener_uso_turso()
+        'turso': obtener_uso_turso(),
+        'cloudflare_worker': obtener_uso_cloudflare_worker()
     }
-    
+
     logger.info("Consulta de almacenamiento completada")
     return resultado

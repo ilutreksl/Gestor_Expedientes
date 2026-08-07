@@ -11,6 +11,7 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from lib.qr_recepcion import generar_imagen_qr
 try:
     from docx2pdf import convert as docx2pdf_convert
     DOCX2PDF_AVAILABLE = True
@@ -168,10 +169,19 @@ def generar_autorizacion_docx(
         reemplazar_texto_preservando_formato(document, mapeo)
         logger.info("Texto reemplazado en el documento")
         
+        # Generar el QR de recepción para este expediente (si falla, se deja
+        # el cuadro de texto [[QR]] vacío en vez de abortar todo el documento)
+        ruta_qr_temp = None
+        try:
+            ruta_qr_temp = generar_imagen_qr(str(codigo_rma))
+        except Exception as e:
+            logger.warning(f"No se pudo generar el QR de recepción para {codigo_rma}: {e}")
+
         # Añadir imágenes en cuadros de texto
-        # Buscar cuadros de texto con marcadores [[CUNO]] y [[FIRMA]]
+        # Buscar cuadros de texto con marcadores [[CUNO]], [[FIRMA]] y [[QR]]
         firma_agregada = False
         cuno_agregado = False
+        qr_agregado = False
         
         # En python-docx, los cuadros de texto son shapes dentro del documento
         # Necesitamos acceder al XML del documento directamente
@@ -294,7 +304,27 @@ def generar_autorizacion_docx(
                                 logger.info(f"Firma añadida en cuadro de texto")
                         else:
                             logger.info("Cuadro de texto de firma dejado vacío (no se proporcionó firma)")
-        
+
+                    # Verificar si contiene el marcador de QR de recepción
+                    elif '[[QR]]' in texto_completo:
+                        # Limpiar el contenido del cuadro de texto (eliminar todos los runs)
+                        for run in list(paragraph.iter(qn('w:r'))):
+                            paragraph.remove(run)
+
+                        if ruta_qr_temp and os.path.exists(ruta_qr_temp):
+                            if anadir_imagen_a_parrafo_xml(paragraph, ruta_qr_temp, ancho_box, alto_box):
+                                qr_agregado = True
+                                logger.info("QR de recepción añadido en cuadro de texto")
+                        else:
+                            logger.info("Cuadro de texto de QR dejado vacío (no se pudo generar el QR)")
+
+        # Eliminar el PNG temporal del QR, ya copiado dentro del DOCX
+        if ruta_qr_temp and os.path.exists(ruta_qr_temp):
+            try:
+                os.remove(ruta_qr_temp)
+            except Exception as e:
+                logger.warning(f"No se pudo eliminar el PNG temporal del QR: {e}")
+
         # Guardar el documento DOCX temporalmente
         document.save(ruta_destino)
         logger.info(f"Documento DOCX generado: {ruta_destino}")

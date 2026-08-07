@@ -1196,8 +1196,29 @@ Llama `lib.avisos_manager.AvisosManager()`
 
 ### lib/personas_recepcion_manager.py
 **Clase**: `PersonasRecepcionManager`
-- Personas específicas de recepción
-- Estadísticas de recepciones
+- Personas específicas de recepción (usadas también por el flujo de recepción por QR)
+- Almacenadas en Turso (tabla `config_recepcion_qr`, columna `personas_recepcion`), no en JSON local — mismo interfaz pública que antes (`cargar_personas`, `guardar_personas`, `añadir_persona`, `eliminar_persona`, `editar_persona`)
+- Import de `connect_db` diferido dentro de cada método (evita ciclo de importación con `lib/app_core.py`, que importa esta clase)
+
+### lib/qr_recepcion.py
+**Funciones**: `generar_url_recepcion(codigo_rma) -> str`, `generar_imagen_qr(codigo_rma, ruta_destino=None) -> str`
+- Genera la URL firmada (HMAC-SHA256, `QR_RECEPCION_HMAC_SECRET`) que se codifica en el QR de recepción
+- Genera la imagen PNG del QR (librería `qrcode`)
+- Usado por `lib/autorizacion_docx.py` para insertar el QR en el cuadro de texto `[[QR]]` de la plantilla
+
+### lib/dispositivos_qr_manager.py
+**Clase**: `DispositivosQRManager`
+- Genera y cancela PINs de un solo uso (`generar_pin`, `cancelar_pin`, `listar_pins_pendientes`)
+- Lista y revoca dispositivos registrados (`listar_dispositivos`, `revocar_dispositivo`)
+- Lee/edita configuración de recepción por QR: mensaje de Incidencias, intentos máximos de PIN, caducidad del PIN (`obtener_config`, `actualizar_config`)
+- El registro real del dispositivo (validación del PIN, alta en `dispositivos_qr`) lo hace el Worker de Cloudflare, no esta clase — aquí solo se administra desde la app de escritorio
+
+### lib/ui_mixins/dispositivos_qr_mixin.py
+**Clase**: `DispositivosQRMixin`
+- Pantalla de administración (`mostrar_gestor_dispositivos_qr`), solo accesible con rol admin/administrador
+- Pestaña "Dispositivos y PINs": generar PIN, cancelar PIN pendiente, revocar dispositivo
+- Pestaña "Configuración": mensaje de Incidencias, intentos máximos y caducidad del PIN
+- Registrado en `mostrar_menu_admin` (`lib/ui_mixins/admin_mixin.py`) y en la herencia múltiple de `VentanaPrincipal` (`app.py`)
 
 ### lib/resultado_expediente_manager.py
 **Clase**: `ResultadoExpedienteManager`
@@ -1516,6 +1537,62 @@ CREATE TABLE rma_asociaciones (
 )
 ```
 
+### Recepción de paquetes por QR
+
+Añadido en `rma_maestro`: columna `metodo_recepcion TEXT` (`NULL` / `'QR'` / `'Manual'`). Reutiliza las columnas ya existentes `fecha_recepcion` y `recepcionado_por` — el Worker las rellena igual que lo haría el flujo manual, solo añade `metodo_recepcion` para poder diferenciarlos en estadísticas.
+
+### Tabla: dispositivos_qr
+```sql
+CREATE TABLE dispositivos_qr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,       -- token opaco aleatorio, guardado como cookie en el móvil
+    tipo TEXT NOT NULL CHECK (tipo IN ('almacen', 'personal')),
+    nombre_persona TEXT,              -- solo si tipo = 'personal'
+    fecha_registro TEXT NOT NULL,
+    revocado INTEGER NOT NULL DEFAULT 0,
+    fecha_revocado TEXT
+)
+```
+
+### Tabla: pins_qr
+```sql
+CREATE TABLE pins_qr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pin TEXT NOT NULL,                -- 6 dígitos
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'usado', 'caducado', 'bloqueado')),
+    creado_por TEXT NOT NULL,         -- usuario admin que lo generó
+    fecha_creacion TEXT NOT NULL,
+    fecha_caducidad TEXT NOT NULL,
+    intentos_fallidos INTEGER NOT NULL DEFAULT 0,
+    dispositivo_id INTEGER REFERENCES dispositivos_qr(id)
+)
+```
+
+### Tabla: config_recepcion_qr
+```sql
+CREATE TABLE config_recepcion_qr (
+    id INTEGER PRIMARY KEY CHECK (id = 1),  -- fila única
+    personas_recepcion TEXT NOT NULL DEFAULT '[]',   -- JSON, gestionado por PersonasRecepcionManager
+    mensaje_incidencias TEXT NOT NULL DEFAULT '',
+    pin_max_intentos INTEGER NOT NULL DEFAULT 5,
+    pin_caducidad_minutos INTEGER NOT NULL DEFAULT 15
+)
+```
+
+### Tabla: auditoria_qr
+```sql
+CREATE TABLE auditoria_qr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    codigo_rma TEXT,
+    resultado TEXT NOT NULL,   -- 'exito' | 'ya_registrado' | 'nombre_no_coincide' | 'firma_invalida' | 'expediente_no_encontrado'
+    dispositivo_id INTEGER,
+    detalle TEXT
+)
+```
+
+Estas 4 tablas se crean con `scripts/setup_qr_recepcion.py` (idempotente, seguro de re-ejecutar).
+
 ---
 
 ## CONFIGURACIÓN Y DEPLOYMENT
@@ -1541,7 +1618,30 @@ B2_BUCKET_NAME=your_bucket
 # GitHub (Issues)
 GITHUB_TOKEN=your_github_token
 GITHUB_REPO=user/repo
+
+# Recepción de paquetes por QR (Cloudflare Worker)
+QR_RECEPCION_HMAC_SECRET=mismo_secreto_que_HMAC_SECRET_del_worker
+QR_RECEPCION_WORKER_URL=https://tu-worker.tu-subdominio.workers.dev
+
+# Cloudflare API (opcional, solo lectura de Analytics — panel de Storage)
+CLOUDFLARE_API_TOKEN=token_con_permiso_account_analytics_read
+CLOUDFLARE_ACCOUNT_ID=id_de_la_cuenta_cloudflare
 ```
+
+### Worker de recepción por QR (Cloudflare)
+
+Directorio `cloudflare-worker-recepcion/` (proyecto Node/Wrangler independiente, fuera del entorno Python):
+```
+cloudflare-worker-recepcion/
+├── wrangler.toml       # name, main, compatibility_date
+└── src/
+    └── index.js        # Único archivo: rutas /r, /registro, /confirmar
+```
+
+- Se despliega con `wrangler deploy` desde ese directorio (requiere `wrangler login` una vez).
+- Secretos configurados con `wrangler secret put <NOMBRE>` (nunca en el repo): `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (mismas credenciales que la app de escritorio), `HMAC_SECRET` (debe coincidir con `QR_RECEPCION_HMAC_SECRET` del `.env`), `DEVICE_TOKEN_SECRET` (reservado, no usado actualmente — los tokens de dispositivo son valores aleatorios opacos verificados por búsqueda en Turso, no firmados).
+- Habla con Turso directamente por la misma API HTTP `v2/pipeline` que usa `lib/app_core.py::connect_db()` — no hay backend intermedio propio.
+- **Precaución con `wrangler secret put` desde PowerShell**: `Write-Output $valor | wrangler secret put NOMBRE` puede colar un BOM UTF-8 al inicio del valor y romper la conexión a Turso (URL inválida). Usar redirección de archivo sin BOM (`wrangler secret put NOMBRE < archivo.txt`, con el archivo escrito en UTF-8 sin BOM) en su lugar — funciona sin problemas desde Git Bash.
 
 ### Dependencias (requirements.txt)
 ```

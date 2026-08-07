@@ -4450,7 +4450,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 "No tiene permisos para generar autorizaciones."
             )
             return
-        
+
+        # Avisar si falta la librería del QR de recepción (no bloquea, el
+        # documento se genera igualmente pero sin el QR)
+        from lib.qr_recepcion import qrcode_disponible, MENSAJE_QRCODE_NO_INSTALADO
+        if not qrcode_disponible():
+            messagebox.showwarning("Falta una librería", MENSAJE_QRCODE_NO_INSTALADO)
+
         # Obtener datos del expediente
         conn, cursor = self.master.conectar_db()
         try:

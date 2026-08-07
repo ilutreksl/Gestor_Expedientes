@@ -1,0 +1,4 @@
+[2026-08-07 08:51:22] [SYSTEM] [INFO] [logger_config.py:70] ================================================================================
+[2026-08-07 08:51:22] [SYSTEM] [INFO] [logger_config.py:71] Sistema de logging inicializado
+[2026-08-07 08:51:22] [SYSTEM] [INFO] [logger_config.py:72] ================================================================================
+[2026-08-07 08:51:23] [SYSTEM] [INFO] [qr_recepcion.py:74] QR de recepción generado para RMA26999-TEST: C:\Users\CARLOS~1.ILU\AppData\Local\Temp\qr_RMA26999-TEST_om3cgrd5.png

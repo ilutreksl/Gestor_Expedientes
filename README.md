@@ -13,7 +13,7 @@ Sistema completo para la gestión de expedientes de devolución de mercancías (
 Copia y ejecuta este comando en tu terminal para instalar todas las librerías necesarias:
 
 ```bash
-pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab docx2pdf extract-msg pyspellchecker
+pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab docx2pdf extract-msg pyspellchecker qrcode
 ```
 
 ### **📋 LIBRERÍAS OBLIGATORIAS**
@@ -65,6 +65,9 @@ pip install extract-msg
 
 # Corrector ortográfico del editor de Observaciones Técnicas
 pip install pyspellchecker
+
+# Generación de QR de recepción en el documento de Autorización
+pip install qrcode[pil]
 ```
 
 ### **📋 LIBRERÍAS OPCIONALES (Mejoran funcionalidad)**
@@ -113,6 +116,26 @@ TURSO_AUTH_TOKEN=tu-token-de-autenticacion
 ### **💾 SQLite Local (Por defecto)**
 
 Si no configuras Turso, la aplicación usará automáticamente una base de datos SQLite local.
+
+### **📱 Recepción de paquetes por QR (requiere Turso)**
+
+Además de Turso, añade en el `.env`:
+
+```env
+QR_RECEPCION_HMAC_SECRET=mismo-secreto-que-el-HMAC_SECRET-del-Worker
+QR_RECEPCION_WORKER_URL=https://tu-worker.tu-subdominio.workers.dev
+```
+
+`QR_RECEPCION_HMAC_SECRET` debe coincidir exactamente con el secreto `HMAC_SECRET` configurado en el Worker de Cloudflare (ver `cloudflare-worker-recepcion/`) — es lo que permite firmar y verificar los QR en ambos lados.
+
+Opcional, para ver en el panel de Storage cuántas peticiones diarias lleva consumidas el Worker:
+
+```env
+CLOUDFLARE_API_TOKEN=token-de-solo-lectura-de-analytics
+CLOUDFLARE_ACCOUNT_ID=id-de-tu-cuenta-de-cloudflare
+```
+
+El token se crea en https://dash.cloudflare.com/profile/api-tokens con permiso **Account → Account Analytics → Read** (no necesita permisos de escritura).
 
 ---
 

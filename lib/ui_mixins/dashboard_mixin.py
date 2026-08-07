@@ -294,13 +294,27 @@ class DashboardMixin:
                 else:
                     turso_texto = f"Turso: N/A / {total_gb:.0f}GB ({tipo})"
                 
-                lbl_turso = ctk.CTkLabel(self.storage_info_frame, 
-                                        text=turso_texto, 
+                lbl_turso = ctk.CTkLabel(self.storage_info_frame,
+                                        text=turso_texto,
                                         font=ctk.CTkFont(size=9),
                                         anchor="w",
                                         wraplength=180)
                 lbl_turso.pack(fill="x", padx=10, pady=2)
-            
+
+            # Mostrar Cloudflare Worker (recepción por QR)
+            cf_info = usos.get('cloudflare_worker', {})
+            if not cf_info.get('error'):
+                peticiones = cf_info.get('peticiones_hoy', 0)
+                limite = cf_info.get('limite_diario', 100_000)
+                cf_texto = f"CF Worker: {peticiones:,} / {limite:,} peticiones hoy".replace(",", ".")
+
+                lbl_cf = ctk.CTkLabel(self.storage_info_frame,
+                                     text=cf_texto,
+                                     font=ctk.CTkFont(size=9),
+                                     anchor="w",
+                                     wraplength=180)
+                lbl_cf.pack(fill="x", padx=10, pady=2)
+
         except Exception as e:
             logger.error(f"Error actualizando UI de storage: {e}")
 

@@ -1,4 +1,13 @@
-Cambio V.1.1.09 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.00 - ✨ Últimas mejoras implementadas:
+
+- Nuevo sistema para la recepcion de paquetes.
+Cuando se genera la autorizacion, en el documento se implementa un codigo QR, el cual si se escanea con un movil, automaticamente se registra su entrada en la app. Si ya esta registrado, sale mensaje de advertencia.
+- Para este sistema se ha implementado un sistema de PINs, para registrar dispositivos moviles, dejando un dispositivo denominado Almacen, como dispositivo que siempre pregunta quien ha recepcionado el paquete. Si es otro dispositivo movil que este registrado, se guardar con ese nombre.
+El usuario admin es el que puede generar los PINs y revocar dispositivos moviles.
+- Se a añadido a la guia de usuario todo el sistema y como se usa y ejecuta.
+
+
+Cambio V.1.1.09
 
 - Rediseñada la ventana de la busqueda global avanzada.
 - Añadido editor de imagenes en el editor de texto. Ahora cuando se va a adjuntar una imagen, te permitira editarla antes de embedirla. Las acciones que perimte son: Recortar, marcar, anotar y flecha.

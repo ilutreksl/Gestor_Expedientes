@@ -46,6 +46,7 @@ class AdminMixin:
             ("📋 Gestionar Estados Artículos", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_estados()]),
             ("👥 Gestionar Personas", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas()]),
             ("👤 Gestionar Personas Recepción", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()]),
+            ("📱 Dispositivos QR Recepción", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_dispositivos_qr()]),
             ("📊 Gestionar Resultado Expediente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()]),
             ("🏢 Gestionar Tipos de Cliente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()]),
         ]

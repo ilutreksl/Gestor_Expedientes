@@ -37,8 +37,13 @@
     - [¿Quién puede Generar Autorizaciones?](#quién-puede-generar-autorizaciones)
     - [Generar un Documento de Autorización](#generar-un-documento-de-autorización)
     - [Gestión de Firma Digital](#gestión-de-firma-digital-personal)
-15. [Preguntas Frecuentes](#preguntas-frecuentes)
-16. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
+15. [Recepción de Paquetes por QR](#recepción-de-paquetes-por-qr)
+    - [¿Qué es y cómo funciona?](#qué-es-y-cómo-funciona)
+    - [Registrar un móvil nuevo](#registrar-un-móvil-nuevo)
+    - [Escanear y confirmar una recepción](#escanear-y-confirmar-una-recepción)
+    - [Gestión de Dispositivos y PINs (Administradores)](#gestión-de-dispositivos-y-pins-administradores)
+16. [Preguntas Frecuentes](#preguntas-frecuentes)
+17. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
 
 ---
 
@@ -1782,6 +1787,82 @@ El documento PDF generado contendrá:
 - No uses imágenes de firma de baja calidad
 - No olvides incluir observaciones relevantes
 - No uses fechas de autorización incorrectas
+
+## Recepción de Paquetes por QR
+
+### ¿Qué es y cómo funciona?
+
+Cada documento de Autorización incluye un **código QR** único para ese expediente. Cuando el paquete llega al almacén, un trabajador escanea ese QR con la cámara del móvil y confirma la recepción directamente desde ahí — sin necesidad de instalar ninguna app ni abrir la aplicación de escritorio.
+
+El flujo completo:
+
+1. Se genera la Autorización → el PDF incluye el QR de ese expediente.
+2. El cliente envía el paquete con esa Autorización.
+3. Al recibirlo, un trabajador del almacén escanea el QR con la cámara del móvil.
+4. Se abre una página con el resumen del expediente (cliente, motivo, fecha, contacto) para comprobar que el paquete corresponde a ese expediente.
+5. Se confirma la recepción, y opcionalmente se añade un comentario.
+6. La aplicación de escritorio refleja el cambio al instante: fecha de recepción, quién la registró y el comentario en el historial del expediente.
+
+**Importante**: cada QR solo se puede usar una vez. Si el expediente ya tiene una recepción registrada (por QR o a mano), un nuevo escaneo del mismo QR lo avisará y no la sobrescribirá.
+
+### Registrar un móvil nuevo
+
+Por seguridad, **solo los móviles registrados previamente pueden confirmar recepciones** — así se evita que alguien ajeno a la empresa (por ejemplo, el propio cliente, que también tiene el PDF con el QR) pueda registrar una recepción falsa.
+
+El registro se hace **una sola vez por móvil**, no en cada escaneo:
+
+1. Al escanear un QR desde un móvil no registrado, la página pide un **PIN**.
+2. Pide ese PIN a un administrador (ver [Gestión de Dispositivos y PINs](#gestión-de-dispositivos-y-pins-administradores)).
+3. Introduce el PIN y elige el tipo de móvil:
+   - **Compartido de almacén**: si varios compañeros usan el mismo teléfono. En cada escaneo se preguntará quién recepciona.
+   - **Personal**: si es tu propio móvil y solo lo usas tú. Se pide tu nombre una única vez y no se vuelve a preguntar en escaneos posteriores.
+4. Tras registrar, el móvil queda autorizado de forma indefinida hasta que un administrador lo revoque.
+
+El PIN es de un solo uso y caduca a los pocos minutos, así que pide uno nuevo cada vez que necesites registrar un móvil.
+
+### Escanear y confirmar una recepción
+
+1. Abre la cámara del móvil y apunta al QR del documento de Autorización (o del paquete, si se ha adjuntado también ahí).
+2. Toca el enlace que aparece — se abre automáticamente en el navegador, sin instalar nada.
+3. Revisa el resumen del expediente que aparece en pantalla y comprueba que corresponde al paquete que tienes delante.
+4. Si el móvil es compartido, escribe tu nombre (se acepta con pequeñas erratas, no hace falta escribirlo exactamente igual que en la lista). Si es personal, este paso no aparece.
+5. Añade un comentario si quieres (por ejemplo, el estado en que llega el paquete) — quedará en el historial del expediente.
+6. Pulsa **Confirmar recepción**.
+
+Si el nombre introducido no coincide con nadie de la lista de personas de recepción, verás un aviso pidiendo contactar con el Departamento de Incidencias — no se registrará nada hasta resolverlo.
+
+### Gestión de Dispositivos y PINs (Administradores)
+
+Disponible en el menú de administración: **📱 Dispositivos QR Recepción**.
+
+**Pestaña "Dispositivos y PINs":**
+- **Generar PIN nuevo**: crea un PIN de un solo uso para que un trabajador registre su móvil. Muestra el PIN y cuánto tarda en caducar — pásaselo directamente.
+- **PINs pendientes**: PINs generados que aún no se han usado. Se pueden cancelar antes de que alguien los use.
+- **Dispositivos registrados**: lista de móviles ya autorizados (tipo, nombre si es personal, fecha de registro). Cada uno se puede **revocar** — el móvil dejará de poder confirmar recepciones hasta que se registre de nuevo con un PIN nuevo. Revoca un dispositivo si se pierde, se cambia de móvil, o un trabajador deja la empresa.
+
+**Pestaña "Configuración":**
+- **Mensaje de Incidencias**: texto que se muestra cuando el nombre introducido no coincide con nadie autorizado. Edítalo para incluir el contacto real del Departamento de Incidencias.
+- **Intentos máximos de PIN**: cuántos intentos fallidos se permiten antes de bloquear un PIN pendiente (protección frente a que alguien intente adivinarlo).
+- **Caducidad del PIN (minutos)**: cuánto tiempo sigue siendo válido un PIN generado antes de caducar automáticamente si no se usa.
+
+La lista de **personas de recepción** (los nombres válidos contra los que se comprueba en el móvil compartido) se sigue gestionando desde **👤 Gestionar Personas Recepción**, en el mismo menú de administración — no ha cambiado de sitio, solo de dónde se guarda internamente (ahora en la nube, para que el móvil pueda consultarla).
+
+### Solución de Problemas
+
+**Problema**: Al escanear el QR, pide un PIN aunque ya había registrado este móvil antes
+- **Solución**: Es normal si borraste los datos de navegación/caché del móvil recientemente — el registro se pierde con ellos. Pide un PIN nuevo al administrador y vuelve a registrar el móvil.
+
+**Problema**: El PIN no funciona
+- **Solución**: Comprueba que lo escribes exactamente (6 dígitos) y que no ha caducado. Si se ha superado el número de intentos permitido, el PIN queda bloqueado y hace falta uno nuevo.
+
+**Problema**: Sale el mensaje de "no coincide, contacta con Incidencias" aunque el nombre es correcto
+- **Solución**: Comprueba que la persona está en la lista de personas de recepción (**Gestionar Personas Recepción**, en el menú de administración). Si no está, un administrador debe añadirla.
+
+**Problema**: El QR no se puede escanear (ilegible)
+- **Solución**: Comprueba que el documento no está doblado justo sobre el QR ni fotocopiado con mala calidad. Si el problema persiste, contacta con administración para revisar la plantilla de Autorización.
+
+**Problema**: Ya se ha escaneado el QR pero la recepción no aparece en el expediente
+- **Solución**: Verifica en el expediente si ya tenía una fecha de recepción previa (por QR o manual) — si es así, el sistema no permite sobrescribirla y por eso no se actualizó nada nuevo.
 
 ### Configurar Backups Automáticos (Administradores)
 
