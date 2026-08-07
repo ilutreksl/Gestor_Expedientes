@@ -921,7 +921,7 @@ class SettingsWindow(ctk.CTkToplevel):
         btn_ayuda = ctk.CTkButton(btn_frame, text="❓ Ayuda", command=self._abrir_ayuda,
                      width=120, height=35)
         btn_ayuda.grid(row=0, column=2, padx=5)
-        self._add_tooltip(btn_ayuda, "Abre el manual de usuario en la sección de ajustes")
+        self._add_tooltip(btn_ayuda, "Abre la wiki de ayuda (manual de usuario y referencia técnica)")
         
         self.btn_aplicar = ctk.CTkButton(btn_frame, text="✓ Aplicar", command=self._on_apply,
                                         width=120, height=35)
@@ -1397,13 +1397,13 @@ class SettingsWindow(ctk.CTkToplevel):
             logger.error(f"Error abriendo changelog: {e}", exc_info=True)
     
     def _abrir_ayuda(self):
-        """Abre el manual de usuario."""
-        logger.info("Abriendo manual de usuario desde ajustes")
+        """Abre la wiki de ayuda."""
+        logger.info("Abriendo wiki de ayuda desde ajustes")
         try:
-            self.app.mostrar_manual_usuario()
+            self.app.abrir_wiki_ayuda()
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir el manual:\n{e}", parent=self)
-            logger.error(f"Error abriendo manual: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir la wiki de ayuda:\n{e}", parent=self)
+            logger.error(f"Error abriendo wiki de ayuda: {e}", exc_info=True)
     
     def _on_apply(self):
         """Aplica los cambios sin cerrar la ventana."""

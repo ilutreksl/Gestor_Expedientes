@@ -1030,7 +1030,23 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             Tooltip(self.btn_ajustes, "Ajustes")
         except Exception:
             pass
-        
+
+        # Botón de Ayuda - abre la wiki local (manual de usuario + referencia técnica)
+        try:
+            fila += 1
+            self.btn_ayuda = ctk.CTkButton(self.sidebar_frame,
+                                           text="",
+                                           image=self.icon_info,
+                                           width=44,
+                                           height=44,
+                                           fg_color=sidebar_bg if sidebar_bg is not None else None,
+                                           hover_color=sidebar_bg if sidebar_bg is not None else None,
+                                           command=self.abrir_wiki_ayuda)
+            self.btn_ayuda.grid(row=fila, column=0, padx=20, pady=6)
+            Tooltip(self.btn_ayuda, "Ayuda / Wiki")
+        except Exception:
+            pass
+
         # Botón de menú Admin (solo para administradores) - AL FINAL
         if str(self.rol).strip().lower() in ("admin", "administrador"):
             fila += 1
@@ -1202,196 +1218,22 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             logger.error(f"Error abriendo ventana de ventas/compras a3ERP: {e}", exc_info=True)
             messagebox.showerror("Error", f"No se pudo abrir la ventana de ventas/compras:\n{e}")
 
-    def mostrar_manual_usuario(self):
-        """Abre una ventana con el contenido del manual de usuario organizado por secciones."""
-        import os
-        import re
-        
+    def abrir_wiki_ayuda(self):
+        """Abre la wiki local de ayuda (manual de usuario + referencia técnica) en el navegador."""
         try:
-            # Ruta al archivo del manual
-            ruta_manual = os.path.join(os.path.dirname(__file__), "Guias", "MANUAL_USUARIO.md")
-            
-            if not os.path.exists(ruta_manual):
-                messagebox.showwarning("Manual no encontrado", 
-                                      f"No se encontró el archivo del manual en:\n{ruta_manual}")
-                logger.warning(f"Manual de usuario no encontrado en: {ruta_manual}")
-                return
-            
-            # Leer el contenido del manual
-            with open(ruta_manual, 'r', encoding='utf-8') as f:
-                lineas = f.readlines()
-            
-            # Parsear secciones del markdown (headers que empiezan con ##)
-            secciones = []
-            contenido_secciones = {}
-            seccion_actual = None
-            contenido_actual = []
-            
-            for linea in lineas:
-                # Detectar headers de nivel 2 (## Titulo)
-                match = re.match(r'^##\s+(.+)$', linea.strip())
-                if match:
-                    # Guardar sección anterior si existe
-                    if seccion_actual:
-                        contenido_secciones[seccion_actual] = ''.join(contenido_actual)
-                    
-                    # Nueva sección
-                    titulo_seccion = match.group(1)
-                    # Limpiar emojis y caracteres especiales para el key
-                    key_seccion = re.sub(r'[^\w\s-]', '', titulo_seccion).strip()
-                    secciones.append((titulo_seccion, key_seccion))
-                    seccion_actual = key_seccion
-                    contenido_actual = [linea]
-                else:
-                    if seccion_actual:
-                        contenido_actual.append(linea)
-            
-            # Guardar última sección
-            if seccion_actual:
-                contenido_secciones[seccion_actual] = ''.join(contenido_actual)
-            
-            # Crear ventana para mostrar el manual
-            ventana_manual = ctk.CTkToplevel(self)
-            ventana_manual.title("📖 Manual de Usuario - Gestor de Expedientes")
-            ventana_manual.geometry("1200x750")
-            
-            # Hacer que la ventana esté siempre al frente
-            ventana_manual.transient(self)
-            ventana_manual.lift()
-            ventana_manual.focus_force()
-            ventana_manual.attributes('-topmost', True)
-            # Después de un momento, quitar el topmost para que pueda moverse normalmente
-            ventana_manual.after(100, lambda: ventana_manual.attributes('-topmost', False))
-            
-            # Agregar icono
-            try:
-                ventana_manual.iconbitmap("Icono_Ilutrek.ico")
-            except Exception:
-                pass
-            
-            # Frame principal con grid para dividir en dos columnas
-            frame_principal = ctk.CTkFrame(ventana_manual)
-            frame_principal.pack(fill="both", expand=True, padx=10, pady=10)
-            frame_principal.grid_columnconfigure(1, weight=1)
-            frame_principal.grid_rowconfigure(1, weight=1)
-            
-            # Título superior
-            titulo_label = ctk.CTkLabel(frame_principal, 
-                                       text="📖 Manual de Usuario - Gestor de Expedientes RMA",
-                                       font=ctk.CTkFont(size=18, weight="bold"))
-            titulo_label.grid(row=0, column=0, columnspan=2, pady=(10, 5), sticky="ew")
-            
-            # ===== PANEL IZQUIERDO: ÍNDICE DE SECCIONES =====
-            indice_frame = ctk.CTkScrollableFrame(frame_principal, 
-                                                  label_text="📑 Índice de Secciones",
-                                                  width=280)
-            indice_frame.grid(row=1, column=0, padx=(5, 5), pady=5, sticky="nsew")
-            
-            # ===== PANEL DERECHO: CONTENIDO =====
-            contenido_container = ctk.CTkFrame(frame_principal)
-            contenido_container.grid(row=1, column=1, padx=(5, 5), pady=5, sticky="nsew")
-            contenido_container.grid_rowconfigure(0, weight=1)
-            contenido_container.grid_columnconfigure(0, weight=1)
-            
-            # Frame scrollable para el contenido
-            contenido_frame = ctk.CTkScrollableFrame(contenido_container, 
-                                                     label_text="Contenido")
-            contenido_frame.grid(row=0, column=0, sticky="nsew")
-            
-            # Label para mostrar el contenido de la sección actual
-            contenido_label = ctk.CTkLabel(contenido_frame,
-                                          text="",
-                                          font=ctk.CTkFont(size=11, family="Segoe UI"),
-                                          justify="left",
-                                          anchor="nw",
-                                          wraplength=750)
-            contenido_label.pack(fill="both", expand=True, padx=15, pady=15)
-            
-            # Función para mostrar una sección
-            def mostrar_seccion(titulo_seccion, key_seccion, btn_clickeado=None):
-                """Muestra el contenido de una sección específica."""
-                contenido = contenido_secciones.get(key_seccion, "Sección no encontrada")
-                contenido_label.configure(text=contenido)
-                contenido_frame.configure(label_text=f"📄 {titulo_seccion}")
-                
-                # Resetear colores de todos los botones del índice
-                for widget in indice_frame.winfo_children():
-                    if isinstance(widget, ctk.CTkButton):
-                        widget.configure(fg_color="#1f538d", hover_color="#14375e")
-                
-                # Destacar el botón clickeado
-                if btn_clickeado:
-                    btn_clickeado.configure(fg_color="#14375e", hover_color="#0d2943")
-                
-                logger.debug(f"Manual: mostrando sección '{titulo_seccion}'")
-            
-            # Crear botones para cada sección en el índice
-            primer_boton = None
-            for i, (titulo, key) in enumerate(secciones):
-                # Truncar títulos muy largos para el botón
-                titulo_boton = titulo if len(titulo) <= 35 else titulo[:32] + "..."
-                
-                btn = ctk.CTkButton(indice_frame,
-                                   text=f"{i+1}. {titulo_boton}",
-                                   font=ctk.CTkFont(size=11),
-                                   anchor="w",
-                                   height=32,
-                                   fg_color="#1f538d",
-                                   hover_color="#14375e")
-                btn.pack(fill="x", padx=5, pady=3)
-                
-                # Configurar comando con lambda que captura el botón
-                btn.configure(command=lambda t=titulo, k=key, b=btn: mostrar_seccion(t, k, b))
-                Tooltip(btn, titulo)  # Tooltip con el título completo
-                
-                if i == 0:
-                    primer_boton = btn
-            
-            # Frame de botones inferior
-            botones_frame = ctk.CTkFrame(frame_principal, fg_color="transparent")
-            botones_frame.grid(row=2, column=0, columnspan=2, pady=(10, 5), sticky="ew")
-            
-            def cerrar_manual():
-                ventana_manual.destroy()
-                logger.info("Manual de usuario cerrado")
-            
-            def abrir_archivo():
-                """Abre el archivo del manual con el programa predeterminado."""
-                try:
-                    if os.name == 'nt':  # Windows
-                        os.startfile(ruta_manual)
-                    elif os.name == 'posix':  # macOS/Linux
-                        import subprocess
-                        subprocess.call(['open' if sys.platform == 'darwin' else 'xdg-open', ruta_manual])
-                    logger.info(f"Manual de usuario abierto: {ruta_manual}")
-                except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo abrir el archivo:\n{e}")
-                    logger.error(f"Error abriendo archivo del manual: {e}")
-            
-            # Botones
-            btn_abrir = ctk.CTkButton(botones_frame, 
-                                     text="📄 Abrir archivo original",
-                                     command=abrir_archivo,
-                                     width=180)
-            btn_abrir.pack(side="left", padx=5)
-            Tooltip(btn_abrir, "Abre el archivo Markdown del manual con tu editor predeterminado")
-            
-            btn_cerrar = ctk.CTkButton(botones_frame,
-                                      text="Cerrar",
-                                      command=cerrar_manual,
-                                      width=100)
-            btn_cerrar.pack(side="right", padx=5)
-            Tooltip(btn_cerrar, "Cierra esta ventana")
-            
-            # Mostrar la primera sección por defecto
-            if primer_boton and secciones:
-                mostrar_seccion(secciones[0][0], secciones[0][1], primer_boton)
-            
-            logger.info(f"Manual de usuario mostrado con {len(secciones)} secciones")
-            
+            from lib.wiki_generator import asegurar_wiki_generada
+            ruta_wiki = asegurar_wiki_generada()
+
+            if os.name == 'nt':  # Windows
+                os.startfile(ruta_wiki)
+            elif os.name == 'posix':  # macOS/Linux
+                import subprocess
+                subprocess.call(['open' if sys.platform == 'darwin' else 'xdg-open', ruta_wiki])
+
+            logger.info(f"Wiki de ayuda abierta: {ruta_wiki}")
         except Exception as e:
-            messagebox.showerror("Error", f"Error al abrir el manual de usuario:\n{e}")
-            logger.error(f"Error mostrando manual de usuario: {e}", exc_info=True)
+            messagebox.showerror("Error", f"No se pudo abrir la wiki de ayuda:\n{e}")
+            logger.error(f"Error abriendo la wiki de ayuda: {e}", exc_info=True)
 
     def crear_campo(self, parent, fila, label_text, campo_bd, valor_defecto="", deshabilitado=False, tipo="entry", opciones=None):
         """Función auxiliar para crear etiquetas y campos de entrada/desplegables en el formulario."""

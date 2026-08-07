@@ -1864,6 +1864,8 @@ La lista de **personas de recepción** (los nombres válidos contra los que se c
 **Problema**: Ya se ha escaneado el QR pero la recepción no aparece en el expediente
 - **Solución**: Verifica en el expediente si ya tenía una fecha de recepción previa (por QR o manual) — si es así, el sistema no permite sobrescribirla y por eso no se actualizó nada nuevo.
 
+## Gestor de Copias de Seguridad (Backups)
+
 ### Configurar Backups Automáticos (Administradores)
 
 Si eres administrador:
