@@ -41,6 +41,7 @@
     - [¿Qué es y cómo funciona?](#qué-es-y-cómo-funciona)
     - [Registrar un móvil nuevo](#registrar-un-móvil-nuevo)
     - [Escanear y confirmar una recepción](#escanear-y-confirmar-una-recepción)
+    - [Después de recepcionar: comentarios, datos y fotos](#después-de-recepcionar-comentarios-datos-y-fotos)
     - [Gestión de Dispositivos y PINs (Administradores)](#gestión-de-dispositivos-y-pins-administradores)
 16. [Preguntas Frecuentes](#preguntas-frecuentes)
 17. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
@@ -1802,8 +1803,9 @@ El flujo completo:
 4. Se abre una página con el resumen del expediente (cliente, motivo, fecha, contacto) para comprobar que el paquete corresponde a ese expediente.
 5. Se confirma la recepción, y opcionalmente se añade un comentario.
 6. La aplicación de escritorio refleja el cambio al instante: fecha de recepción, quién la registró y el comentario en el historial del expediente.
+7. A partir de ahí, ese mismo QR se puede volver a escanear siempre que haga falta para añadir comentarios, consultar datos del expediente o subir fotos — ver [Después de recepcionar](#después-de-recepcionar-comentarios-datos-y-fotos).
 
-**Importante**: cada QR solo se puede usar una vez. Si el expediente ya tiene una recepción registrada (por QR o a mano), un nuevo escaneo del mismo QR lo avisará y no la sobrescribirá.
+**Importante**: la recepción en sí solo se puede confirmar una vez. Si el expediente ya tiene una recepción registrada (por QR o a mano) y se vuelve a escanear el QR, ya no se pide confirmarla de nuevo — en su lugar se abre el menú de opciones posteriores a la recepción.
 
 ### Registrar un móvil nuevo
 
@@ -1830,6 +1832,26 @@ El PIN es de un solo uso y caduca a los pocos minutos, así que pide uno nuevo c
 6. Pulsa **Confirmar recepción**.
 
 Si el nombre introducido no coincide con nadie de la lista de personas de recepción, verás un aviso pidiendo contactar con el Departamento de Incidencias — no se registrará nada hasta resolverlo.
+
+### Después de recepcionar: comentarios, datos y fotos
+
+Una vez un expediente ya tiene la recepción confirmada, volver a escanear el mismo QR ya no pide confirmarla de nuevo — se abre un menú con tres opciones:
+
+- **💬 Añadir un comentario**: escribe un texto y queda en el historial del expediente, igual que un comentario añadido desde el ordenador.
+- **📄 Revisar datos del expediente**: muestra en el móvil los datos del expediente (cliente, motivo, fechas, contacto, resultado) en modo solo lectura.
+- **📷 Añadir fotos**: hacer una foto o elegir una de la galería, recortarla y marcarla directamente en el móvil, y subirla al expediente ya comprimida — sin pasar por el ordenador ni por Paint.
+
+**Añadir fotos, paso a paso:**
+
+1. Toca **📷 Añadir fotos** en el menú.
+2. Si el móvil es compartido, indica quién sube las fotos (igual que al recepcionar). Si es personal, este paso no aparece.
+3. Elige **📸 Hacer foto** (abre la cámara) o **🖼️ Elegir de galería** (si la foto ya existía en el móvil).
+4. Recorta la foto y, si hace falta, márcala con lápiz, flecha, rectángulo o texto. **↩️ Deshacer** revierte el último cambio, incluido un recorte.
+5. Pulsa **⬆️ Guardar y subir**. La foto se comprime automáticamente antes de subirse (con el mismo criterio que ya usa la aplicación de escritorio) y queda adjunta al expediente.
+6. Tras cada foto puedes hacer o elegir otra directamente, sin volver a pasar por el menú — un contador arriba indica cuántas llevas subidas en esta sesión.
+7. Pulsa **← Terminar y volver al menú** cuando hayas acabado.
+
+Como con la recepción, solo los móviles ya registrados pueden usar estas tres opciones (ver [Registrar un móvil nuevo](#registrar-un-móvil-nuevo)).
 
 ### Gestión de Dispositivos y PINs (Administradores)
 
@@ -1863,6 +1885,15 @@ La lista de **personas de recepción** (los nombres válidos contra los que se c
 
 **Problema**: Ya se ha escaneado el QR pero la recepción no aparece en el expediente
 - **Solución**: Verifica en el expediente si ya tenía una fecha de recepción previa (por QR o manual) — si es así, el sistema no permite sobrescribirla y por eso no se actualizó nada nuevo.
+
+**Problema**: Al escanear el QR de un expediente ya recibido, sigue pidiendo confirmar la recepción en vez de mostrar el menú
+- **Solución**: Comprueba que el expediente tiene realmente una fecha de recepción guardada. Si no la tiene (por ejemplo, se recepcionó a mano pero no se guardó bien), regístrala primero y vuelve a escanear.
+
+**Problema**: "No se pudo subir la foto" al intentar subir una imagen
+- **Solución**: Suele ser un problema de conexión del móvil en ese momento (poca cobertura o wifi inestable). Vuelve a intentarlo; la foto editada no se pierde, solo hay que pulsar de nuevo en **Guardar y subir**.
+
+**Problema**: El botón de "Hacer foto" no abre la cámara, o el de "Elegir de galería" no deja elegir de la galería
+- **Solución**: Depende del navegador del móvil y puede variar entre modelos. Si uno de los dos botones no funciona como se espera, prueba con el otro (por ejemplo, elegir la foto de galería después de haberla hecho con la cámara del propio móvil).
 
 ## Gestor de Copias de Seguridad (Backups)
 

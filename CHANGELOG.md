@@ -1,4 +1,11 @@
-Cambio V.1.2.00 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.01 - ✨ Últimas mejoras implementadas:
+
+- Ampliado el sistema de recepción de paquetes por QR: una vez el expediente ya está recepcionado, volver a escanear el mismo QR abre un menú con tres opciones nuevas: añadir un comentario al historial, revisar los datos del expediente en modo solo lectura, y añadir fotos.
+- Las fotos se pueden hacer con la cámara del móvil o elegir de la galería, recortar y marcar (lápiz, flecha, rectángulo, texto) directamente ahí, y se suben ya comprimidas al expediente sin pasar por el ordenador.
+- Se ha añadido a la guía de usuario la explicación completa de este menú nuevo.
+
+
+Cambio V.1.2.00
 
 - Nuevo sistema para la recepcion de paquetes.
 Cuando se genera la autorizacion, en el documento se implementa un codigo QR, el cual si se escanea con un movil, automaticamente se registra su entrada en la app. Si ya esta registrado, sale mensaje de advertencia.
