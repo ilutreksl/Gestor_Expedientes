@@ -201,6 +201,20 @@ async function obtenerConfig(env) {
   };
 }
 
+// Misma lógica que determinar_estado_rma() en lib/ui_mixins/rma_editor_mixin.py:
+// el campo "estado" de rma_maestro es una columna guardada (no se recalcula al
+// mostrar la ficha), así que cualquier escritura que cambie una fecha clave
+// tiene que recalcularlo también, o la ventana principal y el panel de
+// estadísticas se quedan con el valor antiguo para siempre.
+function determinarEstadoRma({ fechaGestion, fechaProceso, fechaRecepcion, fechaAutorizacion, fechaEmision }) {
+  if (fechaGestion) return "Completado";
+  if (fechaProceso) return "En Trámite";
+  if (fechaRecepcion) return "Recibido";
+  if (fechaAutorizacion) return "Autorizado";
+  if (fechaEmision) return "Pendiente de Autorizacion";
+  return "Pendiente de Autorizacion";
+}
+
 // Resuelve el nombre de quien actúa: para un móvil "personal" es el nombre fijo
 // del registro; para uno de "almacén" hay que verificar el nombre introducido
 // contra la lista de personas autorizadas (misma lógica que /confirmar).
@@ -251,7 +265,8 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
   const { rows } = await tursoExec(
     env,
     `SELECT id, cliente, motivo, fecha_emision, Persona_de_Contacto, fecha_recepcion,
-            Numero_Documento_Cliente, Email_de_Contacto, recepcionado_por, Resultado_Expediente
+            Numero_Documento_Cliente, Email_de_Contacto, recepcionado_por, Resultado_Expediente,
+            fecha_autorizacion, fecha_proceso, fecha_gestion
      FROM rma_maestro WHERE codigo_rma = ?`,
     [codigoRma]
   );
@@ -268,8 +283,8 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
     };
   }
 
-  const [id, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado] = rows[0];
-  const rma = { id, codigoRma, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado };
+  const [id, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion] = rows[0];
+  const rma = { id, codigoRma, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion };
 
   if (requireRecepcionado && !fechaRecepcion) {
     return {
@@ -607,10 +622,18 @@ async function manejarConfirmar(request, env) {
   const ahoraIso = new Date().toISOString();
   const fechaSolo = ahoraIso.slice(0, 10);
 
+  const estadoNuevo = determinarEstadoRma({
+    fechaGestion: rma.fechaGestion,
+    fechaProceso: rma.fechaProceso,
+    fechaRecepcion: fechaSolo,
+    fechaAutorizacion: rma.fechaAutorizacion,
+    fechaEmision: rma.fechaEmision,
+  });
+
   await tursoExec(
     env,
-    "UPDATE rma_maestro SET fecha_recepcion = ?, metodo_recepcion = 'QR', recepcionado_por = ? WHERE id = ?",
-    [fechaSolo, nombreFinal, rma.id]
+    "UPDATE rma_maestro SET fecha_recepcion = ?, metodo_recepcion = 'QR', recepcionado_por = ?, estado = ? WHERE id = ?",
+    [fechaSolo, nombreFinal, estadoNuevo, rma.id]
   );
 
   const descripcion = comentario

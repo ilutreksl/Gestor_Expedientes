@@ -1,4 +1,11 @@
-Cambio V.1.2.01 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.02  - ✨ Últimas mejoras implementadas:
+
+- Corregido: al confirmar una recepción por QR, ahora se actualiza también el estado del expediente a "Recibido" (antes solo se guardaba la fecha de recepción, y el estado se quedaba desactualizado en la ventana principal y en las estadísticas).
+- Corregido: al guardar cambios en la ficha de un expediente, la lista y el panel de estadísticas de la ventana principal se refrescan al momento, sin tener que cerrar la ficha.
+- Corregido: el botón de Aplicar Filtros (F5) ahora también refresca el panel de estadísticas, no solo la lista.
+
+
+Cambio V.1.2.01
 
 - Ampliado el sistema de recepción de paquetes por QR: una vez el expediente ya está recepcionado, volver a escanear el mismo QR abre un menú con tres opciones nuevas: añadir un comentario al historial, revisar los datos del expediente en modo solo lectura, y añadir fotos.
 - Las fotos se pueden hacer con la cámara del móvil o elegir de la galería, recortar y marcar (lápiz, flecha, rectángulo, texto) directamente ahí, y se suben ya comprimidas al expediente sin pasar por el ordenador.

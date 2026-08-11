@@ -757,15 +757,16 @@ class RmaListadoMixin:
         self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
 
     def aplicar_filtros_rma(self):
-        """Lee los valores de los filtros y recarga la lista."""
+        """Lee los valores de los filtros y recarga la lista (usado también por F5)."""
         texto_busqueda = self.entry_busqueda.get()
         estado_filtro = self.filtro_estado.get()
         año_filtro = self.filtro_año.get()
-        
+
         # Resetear a la primera página cuando se aplican nuevos filtros
         self.pagina_actual_lista = 0
-        
+
         self.cargar_lista_rma(texto_busqueda, estado_filtro, año_filtro)
+        self.actualizar_dashboard()
 
     def mostrar_menu_contextual_expediente(self, event, rma_id, codigo_rma):
         """
