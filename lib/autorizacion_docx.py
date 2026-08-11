@@ -40,7 +40,9 @@ def generar_autorizacion_docx(
     fecha_autorizacion=None,
     usar_cuno=False,
     cuno_path=None,
-    ruta_firma=None
+    ruta_firma=None,
+    doc_cliente=None,
+    numero_albaran=None
 ):
     """
     Genera un documento de autorización en formato DOCX usando python-docx.
@@ -59,6 +61,8 @@ def generar_autorizacion_docx(
         usar_cuno: Si se debe incluir el cuño
         cuno_path: Ruta al archivo del cuño
         ruta_firma: Ruta al archivo de la firma
+        doc_cliente: Número de documento del cliente
+        numero_albaran: Número de albarán
     
     Returns:
         bool: True si se generó correctamente, False en caso contrario
@@ -108,7 +112,9 @@ def generar_autorizacion_docx(
             '[[FECHA_EMISION]]': formato_fecha(fecha_emision),
             '[[MOTIVO]]': str(motivo or ''),
             '[[OBSERVACIONES]]': str(observaciones or ''),
-            '[[FECHA_AUTORIZACION]]': formato_fecha(fecha_autorizacion or datetime.now().strftime('%Y-%m-%d'))
+            '[[FECHA_AUTORIZACION]]': formato_fecha(fecha_autorizacion or datetime.now().strftime('%Y-%m-%d')),
+            '[[DOC_CLIENTE]]': str(doc_cliente or ''),
+            '[[NUMERO_ALBARAN]]': str(numero_albaran or '')
         }
         
         logger.info(f"Campos a rellenar: {len(mapeo)}")

@@ -4461,18 +4461,19 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         conn, cursor = self.master.conectar_db()
         try:
             cursor.execute("""
-                SELECT cliente, Persona_de_Contacto, Email_de_Contacto, 
-                       fecha_emision, motivo, fecha_autorizacion, autorizado_por
+                SELECT cliente, Persona_de_Contacto, Email_de_Contacto,
+                       fecha_emision, motivo, fecha_autorizacion, autorizado_por,
+                       numero_documento_cliente, numero_albaran
                 FROM rma_maestro
                 WHERE id = ?
             """, (rma_id,))
-            
+
             resultado = cursor.fetchone()
             if not resultado:
                 messagebox.showerror("Error", "No se encontraron los datos del expediente.")
                 return
-            
-            cliente, persona_de_contacto, email_de_contacto, fecha_emision, motivo, fecha_autorizacion, autorizado_por = resultado
+
+            cliente, persona_de_contacto, email_de_contacto, fecha_emision, motivo, fecha_autorizacion, autorizado_por, doc_cliente, numero_albaran = resultado
             
             # Verificar si el expediente ya está autorizado
             if fecha_autorizacion and self.rol != "admin":
@@ -4738,7 +4739,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     fecha_autorizacion=fecha_autorizacion_str,
                     usar_cuno=usar_cuno,
                     cuno_path=cuno_path,
-                    ruta_firma=ruta_firma
+                    ruta_firma=ruta_firma,
+                    doc_cliente=doc_cliente,
+                    numero_albaran=numero_albaran
                 )
                 
                 # Limpiar archivo temporal de firma si se creó
