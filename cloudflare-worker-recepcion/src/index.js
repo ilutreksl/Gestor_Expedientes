@@ -1164,6 +1164,25 @@ async function manejarSubirFotoPost(request, env) {
     [rma.id, ahoraIso, `QR - ${nombreFinal}`, `Foto añadida por escaneo de QR: ${nombreArchivo}`]
   );
 
+  // Añadir fotos implica que el expediente ha entrado en trámite: si aún no
+  // tenía fecha de proceso, se registra ahora (una sola vez, igual que la
+  // recepción — no se sobrescribe si ya se procesó antes desde el escritorio).
+  if (!rma.fechaProceso) {
+    const fechaProcesoSolo = ahoraIso.slice(0, 10);
+    const estadoNuevo = determinarEstadoRma({
+      fechaGestion: rma.fechaGestion,
+      fechaProceso: fechaProcesoSolo,
+      fechaRecepcion: rma.fechaRecepcion,
+      fechaAutorizacion: rma.fechaAutorizacion,
+      fechaEmision: rma.fechaEmision,
+    });
+    await tursoExec(
+      env,
+      "UPDATE rma_maestro SET Fecha_Proceso = ?, Procesado_Por = ?, estado = ? WHERE id = ?",
+      [fechaProcesoSolo, nombreFinal, estadoNuevo, rma.id]
+    );
+  }
+
   await registrarAuditoria(env, codigoRma, "foto_subida", dispositivo.id, nombreArchivo);
 
   return respuestaJson({ ok: true, nombre_archivo: nombreArchivo });

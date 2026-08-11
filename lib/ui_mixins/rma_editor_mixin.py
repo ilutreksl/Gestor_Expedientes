@@ -4177,10 +4177,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             except Exception:
                 pass
 
-            # Refrescar la lista y el panel de estadísticas de la ventana principal
-            # sin esperar a que se cierre la ficha (antes solo se refrescaba al cerrarla).
-            self.after(100, self.mostrar_lista_rma)
-
     def mostrar_historial(self, parent_frame):
         """Muestra la lista de registros de cambios para el RMA actual con filtros de búsqueda."""
         from lib.historial_filtros import obtener_historial_filtrado, obtener_usuarios_historial, validar_formato_fecha

@@ -1,3 +1,9 @@
+Cambio V.1.2.03
+
+- Al subir una foto por QR, si el expediente aún no tenía Fecha de Proceso, ahora se rellena junto con "Procesado Por" (la persona del móvil) y se actualiza el estado a "En Trámite". Solo ocurre la primera vez; si ya se había procesado antes desde el escritorio, no se toca.
+- Revertido: guardar en la ficha de un expediente ya no refresca sola la ventana principal — vuelve a hacer falta pulsar F5, como antes de la v1.2.02.
+
+
 Cambio V.1.2.02  - ✨ Últimas mejoras implementadas:
 
 - Corregido: al confirmar una recepción por QR, ahora se actualiza también el estado del expediente a "Recibido" (antes solo se guardaba la fecha de recepción, y el estado se quedaba desactualizado en la ventana principal y en las estadísticas).
