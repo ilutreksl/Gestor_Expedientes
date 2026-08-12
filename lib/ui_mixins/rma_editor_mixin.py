@@ -285,6 +285,7 @@ class RmaEditorMixin:
         left_column = ctk.CTkFrame(main_layout_frame, fg_color="transparent")
         left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         left_column.grid_rowconfigure(0, weight=1)  # Las pestañas se expanden
+        left_column.grid_columnconfigure(0, weight=1)  # Las pestañas ocupan todo el ancho disponible
         
         # Guardar si es modo edición para usar en el guardado
         self.es_modo_edicion = es_edicion 
