@@ -1,4 +1,4 @@
-// Worker de recepción de paquetes por QR + menú post-recepción.
+// Worker de recepción de paquetes por QR + ficha del expediente en el móvil.
 // Rutas:
 //   GET  /r?c=<codigo_rma>&s=<firma>   -> pantalla de verificación + confirmación,
 //                                          o menú de opciones si ya está recepcionado
@@ -6,7 +6,13 @@
 //   POST /registro                     -> valida PIN, registra dispositivo, fija cookie
 //   POST /confirmar                    -> revalida todo server-side y registra la recepción
 //   GET/POST /comentario?c=&s=         -> añade un comentario al historial del expediente
-//   GET  /datos?c=&s=                  -> muestra datos de solo lectura del expediente
+//   GET  /datos?c=&s=                  -> pestaña Datos (solo lectura, o formulario si puede_editar)
+//   GET/POST /datos/editar?c=&s=       -> edita los campos permitidos (solo dispositivos con puede_editar)
+//   GET  /historial?c=&s=              -> pestaña Historial (solo lectura, nunca editable)
+//   GET  /adjuntos?c=&s=               -> pestaña Adjuntos (lista + descarga si están en B2)
+//   GET  /adjuntos/descargar?c=&s=&id= -> descarga un adjunto (proxy de B2)
+//   GET  /articulos?c=&s=              -> pestaña Artículos
+//   GET/POST /articulos/editar?...&id= -> edita cantidad entregada/estado de una línea (solo puede_editar)
 //   GET  /fotos?c=&s=                  -> captura/edición de fotos (cámara o galería)
 //   POST /subir-foto                   -> sube una foto editada a B2 y la adjunta al expediente
 
@@ -14,6 +20,22 @@ const DEVICE_COOKIE = "device_token";
 const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 5; // 5 años
 const B2_ROOT_FOLDER = "Adjuntos_RMA"; // mismo prefijo que usa la app de escritorio
 const B2_AUTH_URL = "https://api.backblazeb2.com/b2api/v3/b2_authorize_account";
+
+// Campos de rma_maestro editables desde el móvil (solo dispositivos con
+// puede_editar=1). Única fuente de verdad para el formulario de /datos/editar
+// y para la validación del POST — nunca se construye SQL desde nombres de
+// campo que vengan del formulario.
+const CAMPOS_DATOS_EDITABLES = {
+  fecha_recepcion:           { rmaProp: "fechaRecepcion",          etiqueta: "Fecha de Recepción",          tipo: "fecha", afectaEstado: true },
+  Fecha_Proceso:             { rmaProp: "fechaProceso",            etiqueta: "Fecha de Proceso",            tipo: "fecha", afectaEstado: true },
+  numero_albaran_reposicion: { rmaProp: "numeroAlbaranReposicion", etiqueta: "Nº Albarán Reposición",       tipo: "texto" },
+  fecha_albaran_reposicion:  { rmaProp: "fechaAlbaranReposicion",  etiqueta: "Fecha Albarán Reposición",    tipo: "fecha" },
+  numero_factura_abono:      { rmaProp: "numeroFacturaAbono",      etiqueta: "Nº Factura Abono",            tipo: "texto" },
+  fecha_factura_abono:       { rmaProp: "fechaFacturaAbono",       etiqueta: "Fecha Factura Abono",         tipo: "fecha" },
+  Persona_de_Contacto:       { rmaProp: "personaContacto",         etiqueta: "Persona de Contacto",         tipo: "texto" },
+  Email_de_Contacto:         { rmaProp: "emailContacto",           etiqueta: "Email de Contacto",           tipo: "texto" },
+  Numero_Documento_Cliente:  { rmaProp: "numeroDocCliente",        etiqueta: "Nº Documento Cliente",        tipo: "texto" },
+};
 
 // ---------- Turso (misma API HTTP v2/pipeline que usa la app de escritorio) ----------
 
@@ -181,23 +203,30 @@ async function registrarAuditoria(env, codigoRma, resultado, dispositivoId, deta
 async function obtenerConfig(env) {
   const { rows } = await tursoExec(
     env,
-    "SELECT personas_recepcion, mensaje_incidencias, pin_max_intentos, pin_caducidad_minutos FROM config_recepcion_qr WHERE id = 1"
+    "SELECT personas_recepcion, mensaje_incidencias, pin_max_intentos, pin_caducidad_minutos, estados_articulo FROM config_recepcion_qr WHERE id = 1"
   );
   if (!rows.length) {
-    return { personas_recepcion: [], mensaje_incidencias: "", pin_max_intentos: 5, pin_caducidad_minutos: 15 };
+    return { personas_recepcion: [], mensaje_incidencias: "", pin_max_intentos: 5, pin_caducidad_minutos: 15, estados_articulo: [] };
   }
-  const [personasJson, mensaje, maxIntentos, caducidad] = rows[0];
+  const [personasJson, mensaje, maxIntentos, caducidad, estadosJson] = rows[0];
   let personas = [];
   try {
     personas = JSON.parse(personasJson || "[]");
   } catch (e) {
     personas = [];
   }
+  let estadosArticulo = [];
+  try {
+    estadosArticulo = JSON.parse(estadosJson || "[]");
+  } catch (e) {
+    estadosArticulo = [];
+  }
   return {
     personas_recepcion: personas,
     mensaje_incidencias: mensaje || "",
     pin_max_intentos: maxIntentos || 5,
     pin_caducidad_minutos: caducidad || 15,
+    estados_articulo: estadosArticulo,
   };
 }
 
@@ -248,11 +277,11 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
   if (token) {
     const { rows } = await tursoExec(
       env,
-      "SELECT id, tipo, nombre_persona, revocado FROM dispositivos_qr WHERE token = ?",
+      "SELECT id, tipo, nombre_persona, revocado, puede_editar FROM dispositivos_qr WHERE token = ?",
       [token]
     );
     if (rows.length && rows[0][3] === 0) {
-      dispositivo = { id: rows[0][0], tipo: rows[0][1], nombre_persona: rows[0][2] };
+      dispositivo = { id: rows[0][0], tipo: rows[0][1], nombre_persona: rows[0][2], puede_editar: rows[0][4] === 1 };
     }
   }
 
@@ -266,7 +295,9 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
     env,
     `SELECT id, cliente, motivo, fecha_emision, Persona_de_Contacto, fecha_recepcion,
             Numero_Documento_Cliente, Email_de_Contacto, recepcionado_por, Resultado_Expediente,
-            fecha_autorizacion, fecha_proceso, fecha_gestion
+            fecha_autorizacion, fecha_proceso, fecha_gestion,
+            numero_albaran_reposicion, fecha_albaran_reposicion, numero_factura_abono, fecha_factura_abono,
+            aviso_recepcion_mensaje, aviso_recepcion_sonido
      FROM rma_maestro WHERE codigo_rma = ?`,
     [codigoRma]
   );
@@ -283,8 +314,18 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
     };
   }
 
-  const [id, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion] = rows[0];
-  const rma = { id, codigoRma, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto, recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion };
+  const [
+    id, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto,
+    recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion,
+    numeroAlbaranReposicion, fechaAlbaranReposicion, numeroFacturaAbono, fechaFacturaAbono,
+    avisoRecepcionMensaje, avisoRecepcionSonido,
+  ] = rows[0];
+  const rma = {
+    id, codigoRma, cliente, motivo, fechaEmision, personaContacto, fechaRecepcion, numeroDocCliente, emailContacto,
+    recepcionadoPor, resultado, fechaAutorizacion, fechaProceso, fechaGestion,
+    numeroAlbaranReposicion, fechaAlbaranReposicion, numeroFacturaAbono, fechaFacturaAbono,
+    avisoRecepcionMensaje, avisoRecepcionSonido,
+  };
 
   if (requireRecepcionado && !fechaRecepcion) {
     return {
@@ -302,6 +343,11 @@ async function validarContextoQr(env, request, codigoRma, firma, { requireRecepc
 
 // ---------- Plantilla HTML base ----------
 
+// Icono_Ilutrek.png redimensionado a 56x56 y comprimido — el original (420x420,
+// ~60KB) sería demasiado para incluirlo en base64 en cada página.
+const LOGO_BASE64_PNG =
+  "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";
+
 function paginaHtml(titulo, cuerpoHtml) {
   return `<!doctype html>
 <html lang="es">
@@ -314,14 +360,16 @@ function paginaHtml(titulo, cuerpoHtml) {
   h1 { font-size: 1.3rem; margin-bottom: 8px; }
   .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-top: 16px; }
   label { display: block; font-weight: 600; margin-top: 16px; margin-bottom: 6px; font-size: 0.9rem; }
-  input[type=text], input[type=password], textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+  input[type=text], input[type=password], input[type=date], input[type=number], textarea, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; box-sizing: border-box; font-family: inherit; }
   textarea { min-height: 80px; resize: vertical; }
   button { width: 100%; padding: 12px; margin-top: 20px; background: #d35400; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
   button:active { opacity: 0.85; }
-  .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.95rem; }
+  .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.95rem; gap: 12px; }
   .info-row span:first-child { color: #666; }
+  .info-row span:last-child { text-align: right; }
   .error { color: #c0392b; background: #fdecea; padding: 12px; border-radius: 8px; margin-top: 12px; }
   .ok { color: #196f3d; background: #eafaf1; padding: 12px; border-radius: 8px; margin-top: 12px; }
+  .aviso-card { background: #fff8e1; border: 1px solid #ffe082; color: #6d4c00; padding: 14px 16px; border-radius: 10px; margin-top: 14px; font-weight: 600; }
   .radio-group label { font-weight: 400; display: flex; align-items: center; gap: 8px; }
   .hidden { display: none !important; }
   .menu-btn { display: block; text-align: center; text-decoration: none; width: 100%; padding: 14px; margin-top: 14px; background: #d35400; color: #fff; border-radius: 8px; font-size: 1rem; font-weight: 600; box-sizing: border-box; border: none; cursor: pointer; }
@@ -333,9 +381,20 @@ function paginaHtml(titulo, cuerpoHtml) {
   .tool-btn.active { background: #d35400; color: #fff; border-color: #d35400; }
   canvas { display: block; max-width: 100%; touch-action: none; background: #eee; }
   #panelSubiendo p { text-align: center; }
+  .logo-header { display: block; height: 28px; margin: 0 auto 12px; }
+  .tabs { display: flex; gap: 6px; overflow-x: auto; margin-top: 14px; }
+  .tab-btn { flex: 1 0 auto; text-align: center; text-decoration: none; padding: 8px 6px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: #666; background: #fff; border: 1px solid #ddd; }
+  .tab-btn.active { background: #d35400; color: #fff; border-color: #d35400; }
+  .fila-lista { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee; }
+  .fila-lista:last-child { border-bottom: none; }
+  .fila-lista-texto { font-size: 0.92rem; }
+  .fila-lista-sub { color: #666; font-size: 0.8rem; margin-top: 2px; }
+  .btn-mini { display: inline-block; width: auto; padding: 6px 12px; margin-top: 0; font-size: 0.82rem; border-radius: 6px; background: #d35400; color: #fff; text-decoration: none; white-space: nowrap; }
+  .btn-mini.secondary { background: #fff; color: #d35400; border: 1px solid #d35400; }
 </style>
 </head>
 <body>
+<img class="logo-header" src="data:image/png;base64,${LOGO_BASE64_PNG}" alt="Ilutrek">
 ${cuerpoHtml}
 </body>
 </html>`;
@@ -369,6 +428,21 @@ function campoNombreHtml(dispositivo, etiquetaPregunta, etiquetaInfo) {
        <input type="text" id="nombre" name="nombre" required autocomplete="off">`;
 }
 
+// Barra de pestañas de la ficha del expediente (Datos / Historial / Adjuntos / Artículos).
+function pestañasHtml(activo, qs) {
+  const tabs = [
+    { id: "datos", label: "📄 Datos", href: `/datos?${qs}` },
+    { id: "historial", label: "🕓 Historial", href: `/historial?${qs}` },
+    { id: "adjuntos", label: "📎 Adjuntos", href: `/adjuntos?${qs}` },
+    { id: "articulos", label: "📦 Artículos", href: `/articulos?${qs}` },
+  ];
+  return (
+    `<div class="tabs">` +
+    tabs.map((t) => `<a class="tab-btn${t.id === activo ? " active" : ""}" href="${t.href}">${t.label}</a>`).join("") +
+    `</div>`
+  );
+}
+
 // ---------- Subida a Backblaze B2 (API REST — el SDK Python no corre en el Worker) ----------
 
 async function b2Autorizar(env) {
@@ -377,13 +451,14 @@ async function b2Autorizar(env) {
   if (!res.ok) throw new Error(`b2_authorize_account: ${res.status} - ${await res.text()}`);
   const data = await res.json();
   const apiUrl = data.apiInfo && data.apiInfo.storageApi && data.apiInfo.storageApi.apiUrl;
+  const downloadUrl = data.apiInfo && data.apiInfo.storageApi && data.apiInfo.storageApi.downloadUrl;
   const bucketId =
     (data.apiInfo && data.apiInfo.storageApi && data.apiInfo.storageApi.bucketId) ||
     (data.allowed && data.allowed.bucketId);
   if (!apiUrl || !bucketId) {
     throw new Error("Respuesta inesperada de B2 al autorizar: falta apiUrl o bucketId (¿la clave está restringida a un bucket?).");
   }
-  return { apiUrl, authToken: data.authorizationToken, bucketId };
+  return { apiUrl, downloadUrl, authToken: data.authorizationToken, bucketId };
 }
 
 async function b2ObtenerUrlSubida(apiUrl, authToken, bucketId) {
@@ -417,6 +492,19 @@ async function b2SubirArchivo(env, key, bytes, contentType) {
 
   if (!res.ok) throw new Error(`b2_upload_file: ${res.status} - ${await res.text()}`);
   return await res.json();
+}
+
+// Descarga un adjunto de B2 y devuelve la Response cruda (para reenviar sus
+// bytes tal cual, en streaming, sin gastar CPU copiándolos). Requiere que la
+// clave B2 del Worker tenga capacidad readFiles (además de writeFiles).
+async function b2DescargarArchivo(env, rutaRelativa) {
+  const { downloadUrl, authToken } = await b2Autorizar(env);
+  const nombreCodificado = `${B2_ROOT_FOLDER}/${rutaRelativa}`.split("/").map(encodeURIComponent).join("/");
+  const res = await fetch(`${downloadUrl}/file/${env.B2_BUCKET_NAME}/${nombreCodificado}`, {
+    headers: { Authorization: authToken },
+  });
+  if (!res.ok) throw new Error(`b2_download_file_by_name: ${res.status}`);
+  return res;
 }
 
 // Nombre de archivo generado en el servidor (evita colisiones sin consultas extra):
@@ -648,9 +736,46 @@ async function manejarConfirmar(request, env) {
 
   await registrarAuditoria(env, codigoRma, "exito", dispositivo.id, comentario || null);
 
+  const mensajeAviso = (rma.avisoRecepcionMensaje || "").trim();
+  const avisoHtml = mensajeAviso
+    ? `<div class="aviso-card">🔔 ${escapeHtml(mensajeAviso)}</div>`
+    : "";
+  // Doble pitido generado con Web Audio (sin fichero de audio) — solo si el
+  // aviso de este expediente tiene el sonido activado. La navegación a esta
+  // página viene de un envío de formulario (gesto del usuario), así que los
+  // navegadores no bloquean el audio por política de autoplay.
+  const scriptPitido =
+    mensajeAviso && rma.avisoRecepcionSonido
+      ? `<script>
+(function () {
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    function pitido(inicio, frecuencia) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.frequency.value = frecuencia;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.0001, inicio);
+      gain.gain.exponentialRampToValueAtTime(0.3, inicio + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(inicio);
+      osc.stop(inicio + 0.4);
+    }
+    var ahora = ctx.currentTime;
+    pitido(ahora, 880);
+    pitido(ahora + 0.45, 880);
+  } catch (e) {}
+})();
+     </script>`
+      : "";
+
   return respuestaHtml(
     "Recepción confirmada",
-    `<h1>✅ Recepción confirmada</h1><div class="card"><p>Se ha registrado la recepción del expediente <strong>${escapeHtml(codigoRma)}</strong>.</p></div>`
+    `<h1>✅ Recepción confirmada</h1><div class="card"><p>Se ha registrado la recepción del expediente <strong>${escapeHtml(codigoRma)}</strong>.</p></div>
+     ${avisoHtml}
+     ${scriptPitido}`
   );
 }
 
@@ -666,7 +791,7 @@ function paginaMenuHtml(codigoRma, firma, rma) {
        <div class="info-row"><span>Recepcionado</span><span>${escapeHtml(rma.fechaRecepcion || "")}</span></div>
      </div>
      <a class="menu-btn" href="/comentario?${qs}">💬 Añadir un comentario</a>
-     <a class="menu-btn" href="/datos?${qs}">📄 Revisar datos del expediente</a>
+     <a class="menu-btn" href="/datos?${qs}">📋 Ver expediente</a>
      <a class="menu-btn" href="/fotos?${qs}">📷 Añadir fotos</a>`
   );
 }
@@ -745,14 +870,18 @@ async function manejarDatosGet(request, env, url) {
 
   const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
   if (!contexto.ok) return contexto.response;
-  const { rma } = contexto;
+  const { dispositivo, rma } = contexto;
 
   const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+  const botonEditar = dispositivo.puede_editar
+    ? `<a class="menu-btn" href="/datos/editar?${qs}">✏️ Editar datos</a>`
+    : "";
+
   return respuestaHtml(
     "Datos del expediente",
-    `<h1>📄 Datos del expediente</h1>
+    `<h1>📋 Expediente ${escapeHtml(codigoRma)}</h1>
+     ${pestañasHtml("datos", qs)}
      <div class="card">
-       <div class="info-row"><span>Nº RMA</span><span>${escapeHtml(codigoRma)}</span></div>
        <div class="info-row"><span>Cliente</span><span>${escapeHtml(rma.cliente || "")}</span></div>
        <div class="info-row"><span>Nº documento cliente</span><span>${escapeHtml(rma.numeroDocCliente || "")}</span></div>
        <div class="info-row"><span>Motivo</span><span>${escapeHtml(rma.motivo || "")}</span></div>
@@ -761,9 +890,448 @@ async function manejarDatosGet(request, env, url) {
        <div class="info-row"><span>Fecha emisión</span><span>${escapeHtml(rma.fechaEmision || "")}</span></div>
        <div class="info-row"><span>Fecha recepción</span><span>${escapeHtml(rma.fechaRecepcion || "")}</span></div>
        <div class="info-row"><span>Recepcionado por</span><span>${escapeHtml(rma.recepcionadoPor || "")}</span></div>
+       <div class="info-row"><span>Fecha de proceso</span><span>${escapeHtml(rma.fechaProceso || "")}</span></div>
+       <div class="info-row"><span>Nº albarán reposición</span><span>${escapeHtml(rma.numeroAlbaranReposicion || "")}</span></div>
+       <div class="info-row"><span>Fecha albarán reposición</span><span>${escapeHtml(rma.fechaAlbaranReposicion || "")}</span></div>
+       <div class="info-row"><span>Nº factura abono</span><span>${escapeHtml(rma.numeroFacturaAbono || "")}</span></div>
+       <div class="info-row"><span>Fecha factura abono</span><span>${escapeHtml(rma.fechaFacturaAbono || "")}</span></div>
        <div class="info-row"><span>Resultado</span><span>${escapeHtml(rma.resultado || "—")}</span></div>
      </div>
+     ${botonEditar}
      <a class="volver" href="/r?${qs}">← Volver al menú</a>`
+  );
+}
+
+// ---------- GET/POST /datos/editar ----------
+
+async function manejarDatosEditarGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  if (!dispositivo.puede_editar) {
+    return respuestaHtml("Sin permiso", `<h1>⚠️ Sin permiso</h1><div class="card"><p>Este dispositivo no tiene permiso para editar datos. Pídeselo a un administrador.</p></div>`, 403);
+  }
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+  const campos = Object.entries(CAMPOS_DATOS_EDITABLES)
+    .map(([col, def]) => {
+      const valorActual = escapeHtml(rma[def.rmaProp] || "");
+      if (def.tipo === "fecha") {
+        return `<label for="campo_${col}">${escapeHtml(def.etiqueta)}</label>
+                <input type="date" id="campo_${col}" name="${col}" value="${valorActual}">`;
+      }
+      return `<label for="campo_${col}">${escapeHtml(def.etiqueta)}</label>
+              <input type="text" id="campo_${col}" name="${col}" value="${valorActual}">`;
+    })
+    .join("\n");
+
+  return respuestaHtml(
+    "Editar datos",
+    `<h1>✏️ Editar datos</h1>
+     ${pestañasHtml("datos", qs)}
+     <form method="POST" action="/datos/editar" class="card">
+       <input type="hidden" name="c" value="${escapeHtml(codigoRma)}">
+       <input type="hidden" name="s" value="${escapeHtml(firma)}">
+       ${campoNombreHtml(dispositivo, "¿Quién hace el cambio?", "Editado por")}
+       ${campos}
+       <button type="submit">Guardar cambios</button>
+     </form>
+     <a class="volver" href="/datos?${qs}">← Cancelar y volver</a>`
+  );
+}
+
+async function manejarDatosEditarPost(request, env) {
+  const form = await request.formData();
+  const codigoRma = (form.get("c") || "").toString();
+  const firma = (form.get("s") || "").toString();
+  const nombre = (form.get("nombre") || "").toString().trim();
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  if (!dispositivo.puede_editar) {
+    return respuestaHtml("Sin permiso", `<h1>⚠️ Sin permiso</h1><div class="card"><p>Este dispositivo no tiene permiso para editar datos. Pídeselo a un administrador.</p></div>`, 403);
+  }
+
+  const config = await obtenerConfig(env);
+  const nombreFinal = await resolverNombrePersona(env, dispositivo, nombre);
+  if (!nombreFinal) {
+    await registrarAuditoria(env, codigoRma, "nombre_no_coincide", dispositivo.id, nombre);
+    return respuestaHtml(
+      "No coincide",
+      `<h1>⚠️ No se pudo verificar</h1><div class="card"><div class="error">${escapeHtml(config.mensaje_incidencias)}</div></div>`
+    );
+  }
+
+  const cambios = []; // { col, etiqueta, antiguo, nuevo, afectaEstado }
+  for (const [col, def] of Object.entries(CAMPOS_DATOS_EDITABLES)) {
+    const valorForm = (form.get(col) || "").toString().trim();
+    const valorNuevo = valorForm === "" ? null : valorForm;
+    const valorActual = rma[def.rmaProp] || null;
+    if ((valorActual || "") !== (valorNuevo || "")) {
+      cambios.push({ col, etiqueta: def.etiqueta, antiguo: valorActual, nuevo: valorNuevo, afectaEstado: !!def.afectaEstado });
+    }
+  }
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+
+  if (!cambios.length) {
+    return respuestaHtml(
+      "Sin cambios",
+      `<h1>ℹ️ Sin cambios</h1><div class="card"><p>No has modificado ningún campo.</p></div>
+       <a class="menu-btn" href="/datos?${qs}">Volver a Datos</a>`
+    );
+  }
+
+  const setSql = cambios.map((c) => `${c.col} = ?`);
+  const setValores = cambios.map((c) => c.nuevo);
+
+  if (cambios.some((c) => c.afectaEstado)) {
+    const fechaRecepcionNueva = cambios.find((c) => c.col === "fecha_recepcion")
+      ? cambios.find((c) => c.col === "fecha_recepcion").nuevo
+      : rma.fechaRecepcion;
+    const fechaProcesoNueva = cambios.find((c) => c.col === "Fecha_Proceso")
+      ? cambios.find((c) => c.col === "Fecha_Proceso").nuevo
+      : rma.fechaProceso;
+    const estadoNuevo = determinarEstadoRma({
+      fechaGestion: rma.fechaGestion,
+      fechaProceso: fechaProcesoNueva,
+      fechaRecepcion: fechaRecepcionNueva,
+      fechaAutorizacion: rma.fechaAutorizacion,
+      fechaEmision: rma.fechaEmision,
+    });
+    setSql.push("estado = ?");
+    setValores.push(estadoNuevo);
+  }
+
+  setValores.push(rma.id);
+  await tursoExec(env, `UPDATE rma_maestro SET ${setSql.join(", ")} WHERE id = ?`, setValores);
+
+  const ahoraIso = new Date().toISOString();
+  for (const c of cambios) {
+    await tursoExec(
+      env,
+      "INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio) VALUES (?, ?, ?, ?)",
+      [rma.id, ahoraIso, `QR - ${nombreFinal}`, `Campo '${c.etiqueta}' modificado: '${c.antiguo || ""}' -> '${c.nuevo || ""}'`]
+    );
+  }
+
+  await registrarAuditoria(env, codigoRma, "datos_editados", dispositivo.id, cambios.map((c) => c.col).join(", "));
+
+  return respuestaHtml(
+    "Datos actualizados",
+    `<h1>✅ Datos actualizados</h1><div class="card"><p>Se ${cambios.length === 1 ? "ha actualizado 1 campo" : `han actualizado ${cambios.length} campos`} del expediente <strong>${escapeHtml(codigoRma)}</strong>.</p></div>
+     <a class="menu-btn" href="/datos?${qs}">Volver a Datos</a>`
+  );
+}
+
+// ---------- GET /historial — solo lectura ----------
+
+async function manejarHistorialGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { rma } = contexto;
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+
+  const { rows } = await tursoExec(
+    env,
+    "SELECT fecha_cambio, usuario, descripcion_cambio FROM rma_historial WHERE rma_id = ? ORDER BY id DESC LIMIT 50",
+    [rma.id]
+  );
+
+  const filas = rows.length
+    ? rows
+        .map(([fecha, usuario, descripcion]) => {
+          const fechaCorta = (fecha || "").toString().replace("T", " ").slice(0, 16);
+          return `<div class="fila-lista">
+                    <div class="fila-lista-texto">
+                      ${escapeHtml(descripcion || "")}
+                      <div class="fila-lista-sub">${escapeHtml(fechaCorta)} · ${escapeHtml(usuario || "")}</div>
+                    </div>
+                  </div>`;
+        })
+        .join("\n")
+    : `<p style="color:#666;">Sin movimientos en el historial todavía.</p>`;
+
+  return respuestaHtml(
+    "Historial",
+    `<h1>📋 Expediente ${escapeHtml(codigoRma)}</h1>
+     ${pestañasHtml("historial", qs)}
+     <div class="card">${filas}</div>
+     <a class="volver" href="/r?${qs}">← Volver al menú</a>`
+  );
+}
+
+// ---------- GET /adjuntos ----------
+
+async function manejarAdjuntosGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { rma } = contexto;
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+
+  const { rows } = await tursoExec(
+    env,
+    "SELECT id, nombre_archivo, fecha_subida, usuario_subida, tipo_almacenamiento FROM rma_adjuntos WHERE rma_id = ? ORDER BY id DESC",
+    [rma.id]
+  );
+
+  const filas = rows.length
+    ? rows
+        .map(([id, nombre, fecha, usuario, tipoAlmacenamiento]) => {
+          const fechaCorta = (fecha || "").toString().replace("T", " ").slice(0, 16);
+          const accion =
+            tipoAlmacenamiento === "backblaze"
+              ? `<a class="btn-mini" href="/adjuntos/descargar?${qs}&id=${id}">⬇️ Descargar</a>`
+              : `<span class="fila-lista-sub">No disponible desde el móvil</span>`;
+          return `<div class="fila-lista">
+                    <div class="fila-lista-texto">
+                      ${escapeHtml(nombre || "")}
+                      <div class="fila-lista-sub">${escapeHtml(fechaCorta)} · ${escapeHtml(usuario || "")}</div>
+                    </div>
+                    ${accion}
+                  </div>`;
+        })
+        .join("\n")
+    : `<p style="color:#666;">Sin adjuntos todavía.</p>`;
+
+  return respuestaHtml(
+    "Adjuntos",
+    `<h1>📋 Expediente ${escapeHtml(codigoRma)}</h1>
+     ${pestañasHtml("adjuntos", qs)}
+     <div class="card">${filas}</div>
+     <a class="volver" href="/r?${qs}">← Volver al menú</a>`
+  );
+}
+
+// ---------- GET /adjuntos/descargar ----------
+
+async function manejarAdjuntosDescargarGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+  const adjuntoId = url.searchParams.get("id");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  const { rows } = await tursoExec(
+    env,
+    "SELECT nombre_archivo, ruta_relativa, tipo_almacenamiento FROM rma_adjuntos WHERE id = ? AND rma_id = ?",
+    [adjuntoId, rma.id]
+  );
+
+  if (!rows.length) {
+    return respuestaHtml("Adjunto no encontrado", `<h1>⚠️ Adjunto no encontrado</h1>`, 404);
+  }
+
+  const [nombreArchivo, rutaRelativa, tipoAlmacenamiento] = rows[0];
+
+  if (tipoAlmacenamiento !== "backblaze") {
+    return respuestaHtml(
+      "No disponible",
+      `<h1>⚠️ No disponible desde el móvil</h1><div class="card"><p>Este adjunto está guardado localmente en el ordenador, no en la nube.</p></div>`,
+      400
+    );
+  }
+
+  try {
+    const b2Response = await b2DescargarArchivo(env, rutaRelativa);
+    await registrarAuditoria(env, codigoRma, "adjunto_descargado", dispositivo.id, nombreArchivo);
+    return new Response(b2Response.body, {
+      status: 200,
+      headers: {
+        "content-type": b2Response.headers.get("content-type") || "application/octet-stream",
+        "content-disposition": `attachment; filename="${nombreArchivo.replace(/"/g, "")}"`,
+      },
+    });
+  } catch (e) {
+    console.error("Error descargando de B2:", e);
+    return respuestaHtml("Error", `<h1>⚠️ No se pudo descargar</h1><div class="card"><p>Inténtalo de nuevo o contacta con administración.</p></div>`, 500);
+  }
+}
+
+// ---------- GET /articulos ----------
+
+async function manejarArticulosGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+
+  const { rows } = await tursoExec(
+    env,
+    `SELECT id, referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto
+     FROM rma_detalles WHERE rma_id = ? ORDER BY id ASC`,
+    [rma.id]
+  );
+
+  const filas = rows.length
+    ? rows
+        .map(([id, referencia, cantDoc, cantEnt, estado]) => {
+          const accion = dispositivo.puede_editar
+            ? `<a class="btn-mini secondary" href="/articulos/editar?${qs}&id=${id}">✏️ Editar</a>`
+            : "";
+          return `<div class="fila-lista">
+                    <div class="fila-lista-texto">
+                      ${escapeHtml(referencia || "(sin referencia)")}
+                      <div class="fila-lista-sub">Cant. documento: ${escapeHtml(String(cantDoc ?? ""))} · Entregada: ${escapeHtml(String(cantEnt ?? ""))}</div>
+                      <div class="fila-lista-sub">${escapeHtml(estado || "")}</div>
+                    </div>
+                    ${accion}
+                  </div>`;
+        })
+        .join("\n")
+    : `<p style="color:#666;">Sin artículos todavía.</p>`;
+
+  return respuestaHtml(
+    "Artículos",
+    `<h1>📋 Expediente ${escapeHtml(codigoRma)}</h1>
+     ${pestañasHtml("articulos", qs)}
+     <div class="card">${filas}</div>
+     <a class="volver" href="/r?${qs}">← Volver al menú</a>`
+  );
+}
+
+// ---------- GET/POST /articulos/editar ----------
+
+async function manejarArticuloEditarGet(request, env, url) {
+  const codigoRma = url.searchParams.get("c");
+  const firma = url.searchParams.get("s");
+  const detalleId = url.searchParams.get("id");
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  if (!dispositivo.puede_editar) {
+    return respuestaHtml("Sin permiso", `<h1>⚠️ Sin permiso</h1><div class="card"><p>Este dispositivo no tiene permiso para editar artículos. Pídeselo a un administrador.</p></div>`, 403);
+  }
+
+  const { rows } = await tursoExec(
+    env,
+    "SELECT referencia_articulo, cantidad_segun_documento, cantidad_entregada, estado_producto FROM rma_detalles WHERE id = ? AND rma_id = ?",
+    [detalleId, rma.id]
+  );
+
+  if (!rows.length) {
+    return respuestaHtml("Artículo no encontrado", `<h1>⚠️ Artículo no encontrado</h1>`, 404);
+  }
+
+  const [referencia, cantDoc, cantEnt, estadoActual] = rows[0];
+  const config = await obtenerConfig(env);
+  const opcionesEstado = (config.estados_articulo.length ? config.estados_articulo : [""])
+    .map((e) => `<option value="${escapeHtml(e)}"${e === estadoActual ? " selected" : ""}>${escapeHtml(e || "(vacío)")}</option>`)
+    .join("");
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+  return respuestaHtml(
+    "Editar artículo",
+    `<h1>✏️ Editar artículo</h1>
+     ${pestañasHtml("articulos", qs)}
+     <form method="POST" action="/articulos/editar" class="card">
+       <input type="hidden" name="c" value="${escapeHtml(codigoRma)}">
+       <input type="hidden" name="s" value="${escapeHtml(firma)}">
+       <input type="hidden" name="id" value="${escapeHtml(detalleId)}">
+       ${campoNombreHtml(dispositivo, "¿Quién hace el cambio?", "Editado por")}
+       <div class="info-row"><span>Referencia</span><span>${escapeHtml(referencia || "")}</span></div>
+       <div class="info-row"><span>Cant. según documento</span><span>${escapeHtml(String(cantDoc ?? ""))}</span></div>
+       <label for="cantidad_entregada">Cantidad entregada</label>
+       <input type="number" id="cantidad_entregada" name="cantidad_entregada" min="0" step="1" value="${escapeHtml(String(cantEnt ?? ""))}">
+       <label for="estado_producto">Estado</label>
+       <select id="estado_producto" name="estado_producto">${opcionesEstado}</select>
+       <button type="submit">Guardar cambios</button>
+     </form>
+     <a class="volver" href="/articulos?${qs}">← Cancelar y volver</a>`
+  );
+}
+
+async function manejarArticuloEditarPost(request, env) {
+  const form = await request.formData();
+  const codigoRma = (form.get("c") || "").toString();
+  const firma = (form.get("s") || "").toString();
+  const detalleId = (form.get("id") || "").toString();
+  const nombre = (form.get("nombre") || "").toString().trim();
+  const cantidadForm = (form.get("cantidad_entregada") || "").toString().trim();
+  const estadoForm = (form.get("estado_producto") || "").toString();
+
+  const contexto = await validarContextoQr(env, request, codigoRma, firma, { requireRecepcionado: true });
+  if (!contexto.ok) return contexto.response;
+  const { dispositivo, rma } = contexto;
+
+  if (!dispositivo.puede_editar) {
+    return respuestaHtml("Sin permiso", `<h1>⚠️ Sin permiso</h1><div class="card"><p>Este dispositivo no tiene permiso para editar artículos. Pídeselo a un administrador.</p></div>`, 403);
+  }
+
+  const { rows } = await tursoExec(
+    env,
+    "SELECT referencia_articulo, cantidad_entregada, estado_producto FROM rma_detalles WHERE id = ? AND rma_id = ?",
+    [detalleId, rma.id]
+  );
+  if (!rows.length) {
+    return respuestaHtml("Artículo no encontrado", `<h1>⚠️ Artículo no encontrado</h1>`, 404);
+  }
+  const [referencia, cantEntActual, estadoActual] = rows[0];
+
+  const config = await obtenerConfig(env);
+  const nombreFinal = await resolverNombrePersona(env, dispositivo, nombre);
+  if (!nombreFinal) {
+    await registrarAuditoria(env, codigoRma, "nombre_no_coincide", dispositivo.id, nombre);
+    return respuestaHtml(
+      "No coincide",
+      `<h1>⚠️ No se pudo verificar</h1><div class="card"><div class="error">${escapeHtml(config.mensaje_incidencias)}</div></div>`
+    );
+  }
+
+  const cantidadParseada = parseInt(cantidadForm, 10);
+  const cantidadNueva = cantidadForm === "" || Number.isNaN(cantidadParseada) ? null : cantidadParseada;
+
+  await tursoExec(
+    env,
+    "UPDATE rma_detalles SET cantidad_entregada = ?, estado_producto = ? WHERE id = ? AND rma_id = ?",
+    [cantidadNueva, estadoForm, detalleId, rma.id]
+  );
+
+  const ahoraIso = new Date().toISOString();
+  const cambios = [];
+  if ((cantEntActual ?? "").toString() !== (cantidadNueva ?? "").toString()) {
+    cambios.push(`Campo 'Cantidad Entregada (${referencia})' modificado: '${cantEntActual ?? ""}' -> '${cantidadNueva ?? ""}'`);
+  }
+  if ((estadoActual || "") !== (estadoForm || "")) {
+    cambios.push(`Campo 'Estado Producto (${referencia})' modificado: '${estadoActual || ""}' -> '${estadoForm || ""}'`);
+  }
+  for (const descripcion of cambios) {
+    await tursoExec(
+      env,
+      "INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio) VALUES (?, ?, ?, ?)",
+      [rma.id, ahoraIso, `QR - ${nombreFinal}`, descripcion]
+    );
+  }
+
+  await registrarAuditoria(env, codigoRma, "articulo_editado", dispositivo.id, detalleId);
+
+  const qs = `c=${encodeURIComponent(codigoRma)}&s=${encodeURIComponent(firma)}`;
+  return respuestaHtml(
+    "Artículo actualizado",
+    `<h1>✅ Artículo actualizado</h1><div class="card"><p>Se ha actualizado <strong>${escapeHtml(referencia || "")}</strong>.</p></div>
+     <a class="menu-btn" href="/articulos?${qs}">Volver a Artículos</a>`
   );
 }
 
@@ -1215,6 +1783,30 @@ export default {
       }
       if (request.method === "GET" && url.pathname === "/datos") {
         return await manejarDatosGet(request, env, url);
+      }
+      if (request.method === "GET" && url.pathname === "/datos/editar") {
+        return await manejarDatosEditarGet(request, env, url);
+      }
+      if (request.method === "POST" && url.pathname === "/datos/editar") {
+        return await manejarDatosEditarPost(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/historial") {
+        return await manejarHistorialGet(request, env, url);
+      }
+      if (request.method === "GET" && url.pathname === "/adjuntos") {
+        return await manejarAdjuntosGet(request, env, url);
+      }
+      if (request.method === "GET" && url.pathname === "/adjuntos/descargar") {
+        return await manejarAdjuntosDescargarGet(request, env, url);
+      }
+      if (request.method === "GET" && url.pathname === "/articulos") {
+        return await manejarArticulosGet(request, env, url);
+      }
+      if (request.method === "GET" && url.pathname === "/articulos/editar") {
+        return await manejarArticuloEditarGet(request, env, url);
+      }
+      if (request.method === "POST" && url.pathname === "/articulos/editar") {
+        return await manejarArticuloEditarPost(request, env);
       }
       if (request.method === "GET" && url.pathname === "/fotos") {
         return await manejarFotosGet(request, env, url);

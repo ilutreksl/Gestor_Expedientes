@@ -1,13 +1,15 @@
 """
 Script de configuración inicial para la recepción de paquetes por QR.
 Crea en Turso las tablas necesarias (dispositivos_qr, pins_qr,
-config_recepcion_qr, auditoria_qr) y añade la columna metodo_recepcion
-a rma_maestro. Es idempotente: se puede ejecutar varias veces sin
-duplicar nada.
+config_recepcion_qr, auditoria_qr), añade la columna metodo_recepcion
+a rma_maestro, la columna puede_editar a dispositivos_qr, y la columna
+estados_articulo a config_recepcion_qr. Es idempotente: se puede
+ejecutar varias veces sin duplicar nada.
 
-Si existe Diccionarios/personas_recepcion.json, su contenido se usa
-para sembrar la fila inicial de config_recepcion_qr (no se pierde la
-lista de personas de recepción ya configurada).
+Si existen Diccionarios/personas_recepcion.json y
+Diccionarios/estados_articulo.json, su contenido se usa para sembrar
+la fila inicial de config_recepcion_qr (no se pierde lo ya configurado
+localmente).
 
 USO:
     python scripts/setup_qr_recepcion.py
@@ -105,6 +107,79 @@ def anadir_columna_metodo_recepcion(cursor, conn):
             raise
 
 
+def anadir_columna_puede_editar(cursor, conn):
+    try:
+        cursor.execute("PRAGMA table_info('dispositivos_qr')")
+        columnas = [row[1] for row in cursor.fetchall()]
+    except Exception:
+        columnas = []
+
+    if 'puede_editar' in columnas:
+        print("OK columna 'puede_editar' ya existe en dispositivos_qr")
+        return
+
+    try:
+        cursor.execute("ALTER TABLE dispositivos_qr ADD COLUMN puede_editar INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+        print("OK columna 'puede_editar' añadida a dispositivos_qr")
+    except Exception as e:
+        err = str(e).lower()
+        if "duplicate" in err or "already exists" in err:
+            print("OK columna 'puede_editar' ya existe en dispositivos_qr (detectado por error)")
+        else:
+            raise
+
+
+def anadir_columna_estados_articulo(cursor, conn):
+    try:
+        cursor.execute("PRAGMA table_info('config_recepcion_qr')")
+        columnas = [row[1] for row in cursor.fetchall()]
+    except Exception:
+        columnas = []
+
+    if 'estados_articulo' in columnas:
+        print("OK columna 'estados_articulo' ya existe en config_recepcion_qr")
+        return
+
+    try:
+        cursor.execute("ALTER TABLE config_recepcion_qr ADD COLUMN estados_articulo TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+        print("OK columna 'estados_articulo' añadida a config_recepcion_qr")
+    except Exception as e:
+        err = str(e).lower()
+        if "duplicate" in err or "already exists" in err:
+            print("OK columna 'estados_articulo' ya existe en config_recepcion_qr (detectado por error)")
+        else:
+            raise
+
+
+def cargar_estados_articulo_json():
+    ruta = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "Diccionarios", "estados_articulo.json"
+    )
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("estados", [])
+    except Exception:
+        return []
+
+
+def sembrar_estados_articulo(cursor, conn):
+    cursor.execute("SELECT estados_articulo FROM config_recepcion_qr WHERE id = 1")
+    row = cursor.fetchone()
+    if row and row[0] and row[0] != '[]':
+        print("OK 'estados_articulo' ya tiene datos, no se resiembra")
+        return
+
+    estados = cargar_estados_articulo_json()
+    estados_json = json.dumps(estados, ensure_ascii=False)
+    cursor.execute("UPDATE config_recepcion_qr SET estados_articulo = ? WHERE id = 1", (estados_json,))
+    conn.commit()
+    print(f"OK estados_articulo sembrado desde JSON local ({len(estados)} estados)")
+
+
 def cargar_personas_recepcion_json():
     ruta = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -116,6 +191,42 @@ def cargar_personas_recepcion_json():
             return data.get("personas_recepcion", [])
     except Exception:
         return []
+
+
+def anadir_columnas_aviso_recepcion(cursor, conn):
+    try:
+        cursor.execute("PRAGMA table_info('rma_maestro')")
+        columnas = [row[1] for row in cursor.fetchall()]
+    except Exception:
+        columnas = []
+
+    if 'aviso_recepcion_mensaje' not in columnas:
+        try:
+            cursor.execute("ALTER TABLE rma_maestro ADD COLUMN aviso_recepcion_mensaje TEXT")
+            conn.commit()
+            print("OK columna 'aviso_recepcion_mensaje' añadida a rma_maestro")
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate" in err or "already exists" in err:
+                print("OK columna 'aviso_recepcion_mensaje' ya existe en rma_maestro (detectado por error)")
+            else:
+                raise
+    else:
+        print("OK columna 'aviso_recepcion_mensaje' ya existe en rma_maestro")
+
+    if 'aviso_recepcion_sonido' not in columnas:
+        try:
+            cursor.execute("ALTER TABLE rma_maestro ADD COLUMN aviso_recepcion_sonido INTEGER NOT NULL DEFAULT 1")
+            conn.commit()
+            print("OK columna 'aviso_recepcion_sonido' añadida a rma_maestro")
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate" in err or "already exists" in err:
+                print("OK columna 'aviso_recepcion_sonido' ya existe en rma_maestro (detectado por error)")
+            else:
+                raise
+    else:
+        print("OK columna 'aviso_recepcion_sonido' ya existe en rma_maestro")
 
 
 def inicializar_config_por_defecto(cursor, conn):
@@ -150,7 +261,11 @@ def main():
 
     crear_tablas(cursor, conn)
     anadir_columna_metodo_recepcion(cursor, conn)
+    anadir_columna_puede_editar(cursor, conn)
+    anadir_columna_estados_articulo(cursor, conn)
+    anadir_columnas_aviso_recepcion(cursor, conn)
     inicializar_config_por_defecto(cursor, conn)
+    sembrar_estados_articulo(cursor, conn)
 
     conn.close()
     print("\nEsquema de recepción por QR listo en Turso.")

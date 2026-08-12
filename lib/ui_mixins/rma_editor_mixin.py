@@ -346,19 +346,17 @@ class RmaEditorMixin:
             self._mostrar_widget_tiempos(tiempos_container, rma_id)
         # -----------------------------------------------------------
         general_tab = self.tabview.add("📝 General")
-        estados_fechas_tab = self.tabview.add("⏱️ Estados y Fechas")
+        estados_fechas_tab = self.tabview.add("⏱️ Fechas")
         articulos_tab = self.tabview.add("📦 Artículos")
         contabilidad_tab = self.tabview.add("💰 Contabilidad")
         # Nueva pestaña para información técnica — por si en el futuro añadimos más campos técnicos
-        info_tecnica_tab = self.tabview.add("🔧 Información Técnica")
-        # Determinar título de la pestaña según el modo de almacenamiento
-        if usar_b2():
-            adjuntos_tab = self.tabview.add("📎 Adjuntos (Backblaze B2)")
-        else:
-            adjuntos_tab = self.tabview.add("📎 Adjuntos (Local)")
-        historial_tab = self.tabview.add("📜 Historial de Cambios")
-        # Pestaña de Tareas por RMA (creación/edición desde la ficha del expediente)
-        tareas_tab = self.tabview.add("🗒️ Tareas")
+        info_tecnica_tab = self.tabview.add("🔧 Técnica")
+        # El modo de almacenamiento (B2/local) ya no se distingue en el título de la pestaña,
+        # para no alargarlo — sigue siendo visible dentro del propio contenido de Adjuntos.
+        adjuntos_tab = self.tabview.add("📎 Adjuntos")
+        historial_tab = self.tabview.add("📜 Historial")
+        # Pestaña de Tareas y Avisos por RMA (creación/edición desde la ficha del expediente)
+        tareas_tab = self.tabview.add("🗒️ Tareas y Avisos")
         # Pestaña de Asociaciones (solo en modo edición)
         if es_edicion:
             asociaciones_tab = self.tabview.add("🔗 Asociados")
@@ -545,6 +543,36 @@ class RmaEditorMixin:
         # Mostrar el botón de crear solo en modo edición
         if es_edicion:
             ctk.CTkButton(tareas_frame, text="➕ Crear Tarea", command=crear_tarea_en_rma).grid(row=1, column=0, sticky="w", padx=5, pady=(5,15))
+
+        # Sección de Aviso de recepción por QR — separada visualmente de las tareas,
+        # mismo patrón de frame resaltado que "Resolución Provisional" (fg_color propio).
+        aviso_recepcion_frame = ctk.CTkFrame(tareas_frame, fg_color="#fff8e1", corner_radius=6)
+        aviso_recepcion_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(5, 15))
+        aviso_recepcion_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            aviso_recepcion_frame, text="🔔 Aviso de recepción (QR)",
+            font=("Arial", 13, "bold"), text_color="#6d4c00"
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
+
+        if es_edicion:
+            ctk.CTkLabel(
+                aviso_recepcion_frame,
+                text="Se mostrará este mensaje (con pitido opcional) cuando este expediente\nse reciba por QR. Déjalo vacío para no recibir aviso.",
+                justify="left", text_color="#6d4c00", font=("Arial", 11)
+            ).grid(row=1, column=0, sticky="w", padx=10, pady=(2, 8))
+
+            self.entry_Aviso_Recepcion_Mensaje = ctk.CTkTextbox(aviso_recepcion_frame, height=60)
+            self.entry_Aviso_Recepcion_Mensaje.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
+
+            self.entry_Aviso_Recepcion_Sonido = ctk.CTkCheckBox(aviso_recepcion_frame, text="🔊 Reproducir sonido")
+            self.entry_Aviso_Recepcion_Sonido.select()
+            self.entry_Aviso_Recepcion_Sonido.grid(row=3, column=0, sticky="w", padx=10, pady=(0, 10))
+        else:
+            ctk.CTkLabel(
+                aviso_recepcion_frame, text="Guarde el expediente para configurar el aviso de recepción.",
+                text_color="#6d4c00"
+            ).grid(row=1, column=0, sticky="w", padx=10, pady=(2, 10))
 
         def editar_tarea_dialog(task):
                 # task is a dict with task fields
@@ -2990,7 +3018,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
             'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
             'Resolucion_Provisional', 'Obs_Res_Provisional',
-            'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
+            'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono',
+            'Aviso_Recepcion_Mensaje', 'Aviso_Recepcion_Sonido'
         ]
 
         for campo in campos_a_recuperar:
@@ -3592,7 +3621,19 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     else:
                         # No hay valor guardado, establecer "Seleccionar..."
                         widget_fecha.set("Seleccionar...")
-            
+
+            # --- TRATAMIENTO ESPECIAL PARA AVISO_RECEPCION_SONIDO ---
+            # CTkCheckBox no lo trata el mapeo genérico de más abajo (no tiene 'set').
+            if hasattr(self, 'entry_Aviso_Recepcion_Sonido'):
+                try:
+                    valor_sonido = datos_maestro.get('aviso_recepcion_sonido', 1)
+                    if str(valor_sonido) in ('1', 'True', 'true'):
+                        self.entry_Aviso_Recepcion_Sonido.select()
+                    else:
+                        self.entry_Aviso_Recepcion_Sonido.deselect()
+                except Exception:
+                    pass
+
             # --- Mapeo de Columna DB a Variable de Formulario ---
             for columna, valor in datos_maestro.items():
                 

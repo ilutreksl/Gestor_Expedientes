@@ -1,10 +1,18 @@
+Cambio V.1.2.10 - ✨ Últimas mejoras implementadas:
+
+- La pestaña "Datos" del expediente en el móvil (QR) se ha convertido en 4 pestañas: Datos, Historial, Adjuntos y Artículos. Datos incluye ahora también el nº y fecha de albarán de reposición y de factura de abono. Adjuntos permite descargar los archivos que estén en la nube. Artículos muestra las líneas del expediente.
+- Nuevo permiso "puede editar" por dispositivo móvil, concedido desde el panel de administración (📱 Dispositivos QR Recepción). Solo los dispositivos con permiso ven los botones de editar en Datos (fechas, albarán/factura, contacto) y en Artículos (cantidad entregada y estado del producto). El historial nunca es editable. Cada cambio queda registrado en el historial del expediente igual que si se hiciera desde el ordenador.
+- Añadido el logo de la empresa a todas las páginas del móvil.
+- Nuevo "Aviso de recepción por QR": en la ficha del expediente, pestaña "Tareas y Avisos" (antes solo "Tareas"), se puede configurar un mensaje y activar un pitido. Si se ha configurado, al confirmar la recepción desde el móvil aparece ese mensaje en pantalla y suena el pitido en el propio móvil — no hace falta tener el ordenador encendido. Si no se configura nada, no cambia nada.
+
+
 Cambio V.1.2.03
 
 - Al subir una foto por QR, si el expediente aún no tenía Fecha de Proceso, ahora se rellena junto con "Procesado Por" (la persona del móvil) y se actualiza el estado a "En Trámite". Solo ocurre la primera vez; si ya se había procesado antes desde el escritorio, no se toca.
 - Revertido: guardar en la ficha de un expediente ya no refresca sola la ventana principal — vuelve a hacer falta pulsar F5, como antes de la v1.2.02.
 
 
-Cambio V.1.2.02  - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.02
 
 - Corregido: al confirmar una recepción por QR, ahora se actualiza también el estado del expediente a "Recibido" (antes solo se guardaba la fecha de recepción, y el estado se quedaba desactualizado en la ventana principal y en las estadísticas).
 - Corregido: al guardar cambios en la ficha de un expediente, la lista y el panel de estadísticas de la ventana principal se refrescan al momento, sin tener que cerrar la ficha.

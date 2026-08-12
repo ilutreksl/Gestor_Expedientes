@@ -457,7 +457,7 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             self.programar_chequeo_tareas()
         except Exception:
             pass
-        
+
         # Inicializar gestor de avisos
         try:
             root_path = os.path.dirname(os.path.abspath(__file__))

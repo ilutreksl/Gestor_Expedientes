@@ -108,6 +108,8 @@ class DispositivosQRMixin:
                     tipo_texto = "Compartido de almacén"
 
                 texto = f"{tipo_texto}  ·  registrado {d['fecha_registro'][:16].replace('T', ' ')}"
+                if d.get("puede_editar"):
+                    texto += "  ·  puede editar"
                 ctk.CTkLabel(fila, text=texto, anchor="w").pack(side="left", padx=10, fill="x", expand=True)
 
                 btn_revocar = ctk.CTkButton(
@@ -115,6 +117,15 @@ class DispositivosQRMixin:
                     command=lambda did=d["id"]: revocar_dispositivo(did)
                 )
                 btn_revocar.pack(side="right", padx=5)
+
+                texto_permiso = "🔒 Quitar edición" if d.get("puede_editar") else "🔓 Permitir editar"
+                btn_permiso = ctk.CTkButton(
+                    fila, text=texto_permiso, width=140,
+                    fg_color="gray40" if d.get("puede_editar") else "#2e7d32",
+                    hover_color="gray30" if d.get("puede_editar") else "#1b5e20",
+                    command=lambda did=d["id"], actual=d.get("puede_editar"): alternar_puede_editar(did, actual)
+                )
+                btn_permiso.pack(side="right", padx=5)
 
         def generar_pin():
             pin, error = mgr.generar_pin(self.username)
@@ -147,6 +158,21 @@ class DispositivosQRMixin:
                 parent=ventana
             ):
                 success, msg = mgr.revocar_dispositivo(dispositivo_id)
+                if success:
+                    refrescar_dispositivos()
+                else:
+                    messagebox.showerror("Error", msg)
+
+        def alternar_puede_editar(dispositivo_id, actual):
+            conceder = not actual
+            pregunta = (
+                "¿Permitir que este dispositivo edite datos del expediente desde el móvil\n"
+                "(fechas, albarán/factura, contacto, cantidades y estado de artículos)?"
+                if conceder else
+                "¿Quitar a este dispositivo el permiso de editar datos del expediente desde el móvil?"
+            )
+            if messagebox.askyesno("Confirmar", pregunta, parent=ventana):
+                success, msg = mgr.set_puede_editar(dispositivo_id, conceder)
                 if success:
                     refrescar_dispositivos()
                 else:

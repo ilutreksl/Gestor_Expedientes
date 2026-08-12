@@ -1,6 +1,6 @@
 # Manual de Usuario - Gestor de Expedientes RMA
 
-**Versión de la aplicación:** v1.2.00  
+**Versión de la aplicación:** v1.2.10  
 **Fecha:** Agosto 2026  
 **Destinado a:** Usuarios finales
 
@@ -19,6 +19,7 @@
 8. [Gestión de Artículos](#gestión-de-artículos)
 9. [Adjuntar Archivos](#adjuntar-archivos)
 10. [Tareas y Recordatorios](#tareas-y-recordatorios)
+    - [Aviso de recepción por QR](#aviso-de-recepción-por-qr)
 11. [Estadísticas e Informes](#estadísticas-e-informes)
 12. [Ventas y Compras (a3ERP)](#ventas-y-compras-a3erp)
     - [Importar un Excel de a3ERP](#importar-un-excel-de-a3erp)
@@ -42,6 +43,7 @@
     - [Registrar un móvil nuevo](#registrar-un-móvil-nuevo)
     - [Escanear y confirmar una recepción](#escanear-y-confirmar-una-recepción)
     - [Después de recepcionar: comentarios, datos y fotos](#después-de-recepcionar-comentarios-datos-y-fotos)
+    - [Ficha del expediente en el móvil](#ficha-del-expediente-en-el-móvil)
     - [Gestión de Dispositivos y PINs (Administradores)](#gestión-de-dispositivos-y-pins-administradores)
 16. [Preguntas Frecuentes](#preguntas-frecuentes)
 17. [Consejos y Mejores Prácticas](#consejos-y-mejores-prácticas)
@@ -232,7 +234,7 @@ En la pestaña **"Datos del Expediente"** encontrarás:
 4. Modifica lo que necesites
 5. Haz clic en **"Actualizar RMA"**
 
-⚠️ **Importante**: Todos los cambios quedan registrados en el historial (pestaña "Historial de Cambios")
+⚠️ **Importante**: Todos los cambios quedan registrados en el historial (pestaña "Historial")
 
 ### Ver Lista de Expedientes
 
@@ -433,12 +435,12 @@ A veces varios expedientes están relacionados entre sí (ej: devolución múlti
 
 ### Ver y Filtrar el Historial de Cambios
 
-Cada expediente tiene un **historial completo** de todos los cambios realizados. La pestaña **"📜 Historial de Cambios"** te permite ver estos registros y filtrarlos para encontrar información específica.
+Cada expediente tiene un **historial completo** de todos los cambios realizados. La pestaña **"📜 Historial"** te permite ver estos registros y filtrarlos para encontrar información específica.
 
 #### Acceder al historial
 
 1. Abre un expediente (botón ✏️ Editar o haciendo doble clic)
-2. Ve a la pestaña **"📜 Historial de Cambios"**
+2. Ve a la pestaña **"📜 Historial"**
 3. Verás un panel de filtros en la parte superior
 
 #### Panel de filtros de búsqueda
@@ -999,7 +1001,7 @@ El contador se actualiza automáticamente cada 5 minutos y muestra solo las tare
 
 **Desde la ficha de un expediente:**
 1. Abre cualquier expediente RMA
-2. Ve a la pestaña **"Tareas"**
+2. Ve a la pestaña **"🗒️ Tareas y Avisos"**
 3. Haz clic en **"Añadir Tarea"**
 4. Completa descripción, fecha, asignado y prioridad
 5. Guarda
@@ -1081,6 +1083,20 @@ Las tareas se identifican visualmente por su prioridad:
 ✅ **Asigna prioridades** correctamente para organizar el trabajo  
 ✅ **Usa descripciones claras** que expliquen exactamente qué hacer  
 ✅ **Actualiza el estado** en cuanto completes una tarea
+
+### Aviso de recepción por QR
+
+La pestaña **"🗒️ Tareas y Avisos"** de la ficha de un expediente, además de las tareas, tiene una sección separada (fondo amarillo) para configurar un aviso que salta cuando ese expediente se recepciona por QR — pensado para casos concretos que necesiten atención especial nada más llegar, no para todos los expedientes.
+
+**Cómo configurarlo:**
+1. Abre el expediente (tiene que estar ya guardado) y ve a la pestaña **"🗒️ Tareas y Avisos"**.
+2. En el bloque **"🔔 Aviso de recepción (QR)"**, escribe el mensaje que quieres que aparezca.
+3. Deja marcada **"🔊 Reproducir sonido"** si además quieres que suene un pitido, o desmárcala si solo quieres el mensaje en pantalla.
+4. Pulsa **Guardar** (el botón general de la ficha) como con cualquier otro cambio.
+
+Si dejas el mensaje vacío, ese expediente no muestra ningún aviso al recepcionarse — es la situación por defecto.
+
+**Cómo se muestra:** no hace falta tener el ordenador encendido ni la aplicación abierta. En el momento en que alguien confirma la recepción escaneando el QR desde el móvil, la propia pantalla de confirmación del móvil muestra el mensaje configurado y reproduce el pitido (si está activado) — todo ocurre en ese mismo móvil, al instante.
 
 ---
 
@@ -1838,7 +1854,7 @@ Si el nombre introducido no coincide con nadie de la lista de personas de recepc
 Una vez un expediente ya tiene la recepción confirmada, volver a escanear el mismo QR ya no pide confirmarla de nuevo — se abre un menú con tres opciones:
 
 - **💬 Añadir un comentario**: escribe un texto y queda en el historial del expediente, igual que un comentario añadido desde el ordenador.
-- **📄 Revisar datos del expediente**: muestra en el móvil los datos del expediente (cliente, motivo, fechas, contacto, resultado) en modo solo lectura.
+- **📋 Ver expediente**: abre la ficha del expediente en el móvil, organizada en 4 pestañas — ver [Ficha del expediente en el móvil](#ficha-del-expediente-en-el-móvil) más abajo.
 - **📷 Añadir fotos**: hacer una foto o elegir una de la galería, recortarla y marcarla directamente en el móvil, y subirla al expediente ya comprimida — sin pasar por el ordenador ni por Paint.
 
 **Añadir fotos, paso a paso:**
@@ -1853,6 +1869,21 @@ Una vez un expediente ya tiene la recepción confirmada, volver a escanear el mi
 
 Como con la recepción, solo los móviles ya registrados pueden usar estas tres opciones (ver [Registrar un móvil nuevo](#registrar-un-móvil-nuevo)).
 
+### Ficha del expediente en el móvil
+
+Al tocar **📋 Ver expediente** se abre la ficha con 4 pestañas, con el logo de la empresa arriba:
+
+- **📄 Datos**: cliente, motivo, fechas, contacto, y también el nº y fecha de albarán de reposición y de factura de abono.
+- **🕓 Historial**: los últimos movimientos del expediente (comentarios, recepción, fotos añadidas...), en modo solo lectura — el historial nunca se puede editar desde el móvil, igual que tampoco se edita desde el ordenador.
+- **📎 Adjuntos**: lista de archivos adjuntos al expediente, con botón de descarga para los que están guardados en la nube. Los que están guardados solo en el ordenador (almacenamiento local) se muestran como "No disponible desde el móvil".
+- **📦 Artículos**: las líneas de artículos del expediente (referencia, cantidades, estado).
+
+**Edición desde el móvil (solo dispositivos con permiso):** por defecto ningún móvil puede editar nada desde estas pestañas, solo verlo. Un administrador puede conceder permiso de edición a un móvil concreto (ver más abajo). Los dispositivos con permiso ven un botón **"✏️ Editar"**:
+- En **Datos**: se pueden editar fecha de recepción, fecha de proceso, nº/fecha de albarán de reposición, nº/fecha de factura de abono, persona y email de contacto, y nº de documento del cliente. El cliente y el resultado del expediente no se pueden editar desde el móvil.
+- En **Artículos**: se puede editar la cantidad entregada y el estado del producto de cada línea, tocando el botón "✏️" de esa línea. Precios, depreciación y contabilización solo se editan desde el ordenador.
+
+Cualquier cambio hecho desde el móvil queda registrado en el historial del expediente exactamente igual que si se hiciera desde el ordenador.
+
 ### Gestión de Dispositivos y PINs (Administradores)
 
 Disponible en el menú de administración: **📱 Dispositivos QR Recepción**.
@@ -1861,6 +1892,7 @@ Disponible en el menú de administración: **📱 Dispositivos QR Recepción**.
 - **Generar PIN nuevo**: crea un PIN de un solo uso para que un trabajador registre su móvil. Muestra el PIN y cuánto tarda en caducar — pásaselo directamente.
 - **PINs pendientes**: PINs generados que aún no se han usado. Se pueden cancelar antes de que alguien los use.
 - **Dispositivos registrados**: lista de móviles ya autorizados (tipo, nombre si es personal, fecha de registro). Cada uno se puede **revocar** — el móvil dejará de poder confirmar recepciones hasta que se registre de nuevo con un PIN nuevo. Revoca un dispositivo si se pierde, se cambia de móvil, o un trabajador deja la empresa.
+- **🔓 Permitir editar / 🔒 Quitar edición**: concede o retira a ese móvil el permiso para editar datos y artículos desde la ficha del expediente en el móvil (ver [Ficha del expediente en el móvil](#ficha-del-expediente-en-el-móvil)). Por defecto ningún dispositivo lo tiene — hay que concederlo expresamente a los móviles que lo necesiten.
 
 **Pestaña "Configuración":**
 - **Mensaje de Incidencias**: texto que se muestra cuando el nombre introducido no coincide con nadie autorizado. Edítalo para incluir el contacto real del Departamento de Incidencias.
@@ -1894,6 +1926,15 @@ La lista de **personas de recepción** (los nombres válidos contra los que se c
 
 **Problema**: El botón de "Hacer foto" no abre la cámara, o el de "Elegir de galería" no deja elegir de la galería
 - **Solución**: Depende del navegador del móvil y puede variar entre modelos. Si uno de los dos botones no funciona como se espera, prueba con el otro (por ejemplo, elegir la foto de galería después de haberla hecho con la cámara del propio móvil).
+
+**Problema**: No aparece el botón "✏️ Editar" en Datos o Artículos desde el móvil
+- **Solución**: Ese móvil no tiene permiso de edición. Un administrador debe concedérselo desde **📱 Dispositivos QR Recepción** → **🔓 Permitir editar** (ver [Gestión de Dispositivos y PINs](#gestión-de-dispositivos-y-pins-administradores)).
+
+**Problema**: En Adjuntos, un archivo aparece como "No disponible desde el móvil"
+- **Solución**: Ese archivo está guardado solo en el ordenador (almacenamiento local), no en la nube — es normal, no es un fallo. Solo se pueden descargar desde el móvil los adjuntos guardados en la nube.
+
+**Problema**: Al recepcionar por QR no suena el pitido del aviso ni aparece el mensaje
+- **Solución**: Comprueba en la ficha del expediente, pestaña **"🗒️ Tareas y Avisos"**, que el mensaje del aviso no está vacío y que se guardó (botón Guardar de la ficha). Si el mensaje está vacío, no se muestra nada — es el comportamiento esperado.
 
 ## Gestor de Copias de Seguridad (Backups)
 
@@ -2186,7 +2227,7 @@ Si necesitas más permisos, contacta con el administrador.
 
 Sí, cada expediente tiene un **Historial de Cambios**:
 1. Abre el expediente
-2. Ve a la pestaña **"Historial de Cambios"**
+2. Ve a la pestaña **"Historial"**
 3. Verás una lista cronológica de todas las modificaciones:
    - Qué campo se cambió
    - Valor antiguo y nuevo

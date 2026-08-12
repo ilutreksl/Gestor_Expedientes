@@ -101,7 +101,7 @@ class DispositivosQRManager:
             conn = connect_db()
             cursor = conn.cursor()
             sql = (
-                "SELECT id, tipo, nombre_persona, fecha_registro, revocado, fecha_revocado "
+                "SELECT id, tipo, nombre_persona, fecha_registro, revocado, fecha_revocado, puede_editar "
                 "FROM dispositivos_qr"
             )
             if not incluir_revocados:
@@ -110,7 +110,7 @@ class DispositivosQRManager:
             cursor.execute(sql)
             filas = cursor.fetchall()
             conn.close()
-            columnas = ["id", "tipo", "nombre_persona", "fecha_registro", "revocado", "fecha_revocado"]
+            columnas = ["id", "tipo", "nombre_persona", "fecha_registro", "revocado", "fecha_revocado", "puede_editar"]
             return [dict(zip(columnas, fila)) for fila in filas]
         except Exception as e:
             logger.error(f"Error al listar dispositivos: {e}")
@@ -132,6 +132,24 @@ class DispositivosQRManager:
             return True, "Dispositivo revocado"
         except Exception as e:
             logger.error(f"Error al revocar dispositivo id={dispositivo_id}: {e}")
+            return False, str(e)
+
+    def set_puede_editar(self, dispositivo_id, valor):
+        """Concede o retira permiso de edición desde el móvil a un dispositivo"""
+        from lib.app_core import connect_db
+        try:
+            conn = connect_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE dispositivos_qr SET puede_editar = ? WHERE id = ?",
+                (1 if valor else 0, dispositivo_id)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Dispositivo id={dispositivo_id} puede_editar={'sí' if valor else 'no'}")
+            return True, "Permiso actualizado"
+        except Exception as e:
+            logger.error(f"Error al actualizar permiso de edición del dispositivo id={dispositivo_id}: {e}")
             return False, str(e)
 
     def obtener_config(self):
