@@ -1,4 +1,10 @@
-Cambio V.1.2.21 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.22 - ✨ Últimas mejoras implementadas:
+
+- Corregido: en la ventana "➕ Añadir Trazabilidad", si el texto de ayuda configurado por el admin era largo o se añadían varios archivos, los botones "Guardar" y "Cancelar" quedaban fuera de la vista y solo se veían redimensionando la ventana a mano. Ahora los botones quedan siempre fijos y visibles en la parte inferior, y el resto del contenido se desplaza dentro de su propio hueco si no cabe.
+- Corregido: la ventana "➕ Añadir Trazabilidad" bloqueaba el resto de la aplicación mientras estaba abierta (no dejaba minimizar ni usar otras ventanas), lo que impedía ir a buscar y arrastrar un archivo desde el Explorador o Outlook. Ahora se puede seguir usando el resto de ventanas con ella abierta.
+
+
+Cambio V.1.2.21
 
 - Corregido: en la ventana "➕ Añadir Trazabilidad", si se soltaba algo en la zona de arrastre que no era un archivo real (típicamente un correo arrastrado directamente desde la bandeja de Outlook, que Windows no entrega como archivo hasta guardarlo), no pasaba nada visible. Ahora se muestra un aviso explicando que hay que guardar el correo primero como `.eml`/`.msg` y luego arrastrarlo o seleccionarlo.
 - Corregida la guía de usuario: el consejo de "arrastra el correo directamente desde tu gestor de correo" prometía algo que con Outlook normalmente no funciona; ahora explica que hay que guardarlo primero y por qué.

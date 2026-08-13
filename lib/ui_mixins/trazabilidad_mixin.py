@@ -37,8 +37,17 @@ class TrazabilidadMixin:
         ventana = SafeCTkToplevel(self)
         ventana.title("➕ Añadir Trazabilidad")
         ventana.geometry("560x640")
-        ventana.transient(self)
-        ventana.grab_set()
+        ventana.minsize(480, 420)
+        ventana.resizable(True, True)
+        # Sin transient()/grab_set(): esta ventana necesita que se pueda seguir
+        # interactuando con el resto de ventanas (Explorer, Outlook...) para poder
+        # arrastrar archivos hasta aquí, y transient() en Windows quita los botones
+        # de minimizar/maximizar (mismo motivo que en lib/rma_editor_window.py).
+        ventana.attributes('-topmost', True)
+        ventana.lift()
+        ventana.focus_force()
+        ventana.bind('<FocusIn>', lambda e: ventana.lift())
+        ventana.attributes('-topmost', False)
 
         ventana.update_idletasks()
         x = (ventana.winfo_screenwidth() // 2) - (560 // 2)
@@ -48,20 +57,54 @@ class TrazabilidadMixin:
         main_frame = ctk.CTkFrame(ventana)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
-        texto_ayuda = TrazabilidadManager().cargar_texto_ayuda()
-        ctk.CTkLabel(main_frame, text=texto_ayuda, font=ctk.CTkFont(size=12),
-                     text_color="gray", wraplength=500, justify="left").pack(anchor="w", pady=(0, 10))
-
         archivos_pendientes = []
 
-        zona_drop = ctk.CTkFrame(main_frame, height=70, fg_color=("gray85", "gray20"), corner_radius=8)
+        # Los botones de acción se empaquetan primero, anclados al fondo de la
+        # ventana (side="bottom"): así se reserva su hueco antes que el resto del
+        # contenido, que puede crecer sin límite (texto de ayuda largo, muchos
+        # archivos...) sin llegar a taparlos. El contenido que puede crecer va
+        # dentro de un frame scrollable en vez de desbordar la ventana.
+        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        botones_frame.pack(side="bottom", fill="x", pady=(10, 0))
+
+        def guardar():
+            comentario = textbox_comentario.get("1.0", "end-1c").strip()
+            if not archivos_pendientes and not comentario:
+                messagebox.showwarning("Nada que guardar",
+                                        "Selecciona al menos un archivo o escribe un comentario.")
+                return
+
+            btn_guardar.configure(state="disabled", text="Guardando...")
+            btn_cancelar.configure(state="disabled")
+            ventana.update()
+
+            self._guardar_trazabilidad(rma_id, list(archivos_pendientes), comentario, ventana)
+
+        btn_guardar = ctk.CTkButton(botones_frame, text="✅ Guardar", command=guardar, height=38,
+                                     font=ctk.CTkFont(weight="bold"))
+        btn_guardar.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", width=100,
+                                      fg_color="gray40", hover_color="gray30", command=ventana.destroy)
+        btn_cancelar.pack(side="right")
+
+        contenido_scroll = ctk.CTkScrollableFrame(main_frame, fg_color="transparent")
+        contenido_scroll.pack(side="top", fill="both", expand=True)
+
+        texto_ayuda = TrazabilidadManager().cargar_texto_ayuda()
+        ctk.CTkLabel(contenido_scroll, text=texto_ayuda, font=ctk.CTkFont(size=12),
+                     text_color="gray", wraplength=480, justify="left").pack(anchor="w", pady=(0, 10))
+
+        zona_drop = ctk.CTkFrame(contenido_scroll, height=70, fg_color=("gray85", "gray20"), corner_radius=8)
         zona_drop.pack(fill="x", pady=(0, 8))
         zona_drop.pack_propagate(False)
         lbl_zona_drop = ctk.CTkLabel(zona_drop, text="Arrastra archivos aquí", text_color="gray")
         lbl_zona_drop.pack(expand=True)
 
-        lista_frame = ctk.CTkScrollableFrame(main_frame, label_text="Archivos a adjuntar", height=140)
-        lista_frame.pack(fill="both", pady=(0, 8))
+        ctk.CTkLabel(contenido_scroll, text="Archivos a adjuntar:",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(4, 2))
+        lista_frame = ctk.CTkFrame(contenido_scroll)
+        lista_frame.pack(fill="x", pady=(0, 8))
 
         def refrescar_lista_archivos():
             for widget in lista_frame.winfo_children():
@@ -118,7 +161,7 @@ class TrazabilidadMixin:
             if filepaths:
                 anadir_archivos(filepaths)
 
-        ctk.CTkButton(main_frame, text="📁 Seleccionar archivos",
+        ctk.CTkButton(contenido_scroll, text="📁 Seleccionar archivos",
                       command=seleccionar_archivos).pack(fill="x", pady=(0, 10))
 
         # --- Intento de drag & drop, aislado y con degradación elegante ---
@@ -153,34 +196,10 @@ class TrazabilidadMixin:
 
         refrescar_lista_archivos()
 
-        ctk.CTkLabel(main_frame, text="Comentario (opcional):",
+        ctk.CTkLabel(contenido_scroll, text="Comentario (opcional):",
                      font=ctk.CTkFont(weight="bold")).pack(anchor="w")
-        textbox_comentario = ctk.CTkTextbox(main_frame, height=100, wrap="word")
+        textbox_comentario = ctk.CTkTextbox(contenido_scroll, height=100, wrap="word")
         textbox_comentario.pack(fill="x", pady=(0, 10))
-
-        botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        botones_frame.pack(fill="x")
-
-        def guardar():
-            comentario = textbox_comentario.get("1.0", "end-1c").strip()
-            if not archivos_pendientes and not comentario:
-                messagebox.showwarning("Nada que guardar",
-                                        "Selecciona al menos un archivo o escribe un comentario.")
-                return
-
-            btn_guardar.configure(state="disabled", text="Guardando...")
-            btn_cancelar.configure(state="disabled")
-            ventana.update()
-
-            self._guardar_trazabilidad(rma_id, list(archivos_pendientes), comentario, ventana)
-
-        btn_guardar = ctk.CTkButton(botones_frame, text="✅ Guardar", command=guardar, height=38,
-                                     font=ctk.CTkFont(weight="bold"))
-        btn_guardar.pack(side="left", fill="x", expand=True, padx=(0, 5))
-
-        btn_cancelar = ctk.CTkButton(botones_frame, text="❌ Cancelar", width=100,
-                                      fg_color="gray40", hover_color="gray30", command=ventana.destroy)
-        btn_cancelar.pack(side="right")
 
     def _guardar_trazabilidad(self, rma_id, archivos, comentario, ventana):
         """Enruta cada archivo por extensión (.eml/.msg -> correos asociados, resto ->

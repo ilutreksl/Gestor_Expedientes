@@ -1,6 +1,6 @@
 # Manual de Usuario - Gestor de Expedientes RMA
 
-**Versión de la aplicación:** v1.2.21  
+**Versión de la aplicación:** v1.2.22  
 **Fecha:** Agosto 2026  
 **Destinado a:** Usuarios finales
 
