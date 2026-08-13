@@ -1,4 +1,10 @@
-Cambio V.1.2.10 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.20 - ✨ Últimas mejoras implementadas:
+
+- Nuevo botón "➕ Añadir Trazabilidad" en la pestaña "General" de la ficha del expediente. Abre una ventana única donde adjuntar cualquier correo, foto o documento y dejar un comentario, sin tener que ir por separado a Adjuntos o a Asociados. El sistema clasifica cada archivo automáticamente: los correos (.eml/.msg) se asocian en la pestaña "Asociados" y el resto en "Adjuntos"; el comentario, si lo hay, queda registrado en el Historial. Se puede tanto seleccionar archivos con el botón de siempre como arrastrarlos directamente a la ventana. El botón solo aparece una vez el expediente se ha guardado por primera vez; antes se muestra un aviso indicándolo.
+- El texto de ayuda que se muestra en esa ventana es configurable por el usuario admin desde el panel de administración ("📎 Texto de Ayuda - Trazabilidad").
+
+
+Cambio V.1.2.10
 
 - La pestaña "Datos" del expediente en el móvil (QR) se ha convertido en 4 pestañas: Datos, Historial, Adjuntos y Artículos. Datos incluye ahora también el nº y fecha de albarán de reposición y de factura de abono. Adjuntos permite descargar los archivos que estén en la nube. Artículos muestra las líneas del expediente.
 - Nuevo permiso "puede editar" por dispositivo móvil, concedido desde el panel de administración (📱 Dispositivos QR Recepción). Solo los dispositivos con permiso ven los botones de editar en Datos (fechas, albarán/factura, contacto) y en Artículos (cantidad entregada y estado del producto). El historial nunca es editable. Cada cambio queda registrado en el historial del expediente igual que si se hiciera desde el ordenador.

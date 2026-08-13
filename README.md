@@ -78,6 +78,10 @@ pip install pdfrw
 
 # Para generar PDFs con mejor formato
 pip install reportlab
+
+# Arrastrar y soltar archivos en la ventana "Añadir Trazabilidad" del expediente.
+# Si no está instalada, esa ventana funciona igual pero solo con el selector de archivos.
+pip install tkinterdnd2
 ```
 
 ---

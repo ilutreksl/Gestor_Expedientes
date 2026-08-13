@@ -371,6 +371,18 @@ class RmaEditorMixin:
         general_frame.pack(fill="x", padx=10, pady=10)
         general_frame.grid_columnconfigure(1, weight=1)
 
+        # Punto único para adjuntar correos/fotos/documentos y dejar un comentario,
+        # enrutado automáticamente al sitio correcto (correos asociados, adjuntos
+        # o historial). Solo disponible una vez el expediente tiene ID (guardado).
+        if es_edicion:
+            ctk.CTkButton(general_scroll, text="➕ Añadir Trazabilidad",
+                          command=lambda: self.abrir_ventana_trazabilidad(self.current_rma_id)
+                          ).pack(fill="x", padx=10, pady=(0, 10))
+        else:
+            ctk.CTkLabel(general_scroll,
+                        text="Guarda el expediente una primera vez para poder añadir trazabilidad.",
+                        text_color="gray").pack(padx=10, pady=(0, 10))
+
         estados_fechas_scroll = ctk.CTkScrollableFrame(estados_fechas_tab, label_text="Trazabilidad y Proceso")
         estados_fechas_scroll.pack(fill="both", expand=True, padx=10, pady=10)
         estados_fechas_frame = ctk.CTkFrame(estados_fechas_scroll, fg_color="transparent")

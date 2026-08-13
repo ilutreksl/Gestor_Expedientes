@@ -46,6 +46,7 @@ class AdminMixin:
             ("📋 Gestionar Estados Artículos", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_estados()]),
             ("👥 Gestionar Personas", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas()]),
             ("👤 Gestionar Personas Recepción", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_personas_recepcion()]),
+            ("📎 Texto de Ayuda - Trazabilidad", None, None, lambda: [menu_window.destroy(), self.mostrar_editor_texto_trazabilidad()]),
             ("📱 Dispositivos QR Recepción", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_dispositivos_qr()]),
             ("📊 Gestionar Resultado Expediente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_resultado_expediente()]),
             ("🏢 Gestionar Tipos de Cliente", None, None, lambda: [menu_window.destroy(), self.mostrar_gestor_tipos_cliente()]),
@@ -642,6 +643,65 @@ class AdminMixin:
             messagebox.showerror("Error", f"No se pudo abrir el gestor de personas de recepción:\\n{e}")
             import traceback
             traceback.print_exc()
+
+    def mostrar_editor_texto_trazabilidad(self):
+        """
+        Abre una ventana para editar el texto de ayuda que se muestra en la
+        ventana "Añadir Trazabilidad" de la ficha de expediente.
+        """
+        from lib.safe_toplevel import SafeCTkToplevel
+        from lib.trazabilidad_manager import TrazabilidadManager
+
+        if str(self.rol).strip().lower() not in ("admin", "administrador"):
+            messagebox.showerror("Acceso Denegado", "Solo los administradores pueden editar este texto.")
+            return
+
+        try:
+            manager = TrazabilidadManager()
+
+            ventana = SafeCTkToplevel(self)
+            ventana.title("Texto de Ayuda - Trazabilidad")
+            ventana.geometry("560x420")
+            ventana.transient(self)
+            ventana.grab_set()
+
+            main_frame = ctk.CTkFrame(ventana)
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+            ctk.CTkLabel(main_frame, text="📎 Texto de Ayuda - Añadir Trazabilidad",
+                        font=("Arial", 16, "bold")).pack(pady=(0, 5))
+            ctk.CTkLabel(main_frame,
+                        text="Este texto se muestra a todos los usuarios en la parte superior de la\n"
+                             "ventana \"Añadir Trazabilidad\" de la ficha de cada expediente.",
+                        text_color="gray", justify="left").pack(pady=(0, 15))
+
+            textbox_texto = ctk.CTkTextbox(main_frame, height=200, wrap="word")
+            textbox_texto.pack(fill="both", expand=True, pady=(0, 15))
+            textbox_texto.insert("1.0", manager.cargar_texto_ayuda())
+
+            def guardar_texto():
+                texto = textbox_texto.get("1.0", "end-1c").strip()
+                if not texto:
+                    messagebox.showwarning("Texto vacío", "El texto de ayuda no puede quedar vacío.")
+                    return
+                exito, mensaje = manager.guardar_texto_ayuda(texto)
+                if exito:
+                    messagebox.showinfo("Guardado", mensaje)
+                    ventana.destroy()
+                else:
+                    messagebox.showerror("Error", mensaje)
+
+            botones_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+            botones_frame.pack(fill="x")
+
+            ctk.CTkButton(botones_frame, text="✅ Guardar", command=guardar_texto,
+                         height=38, font=ctk.CTkFont(weight="bold")).pack(side="left", fill="x", expand=True, padx=(0, 5))
+            ctk.CTkButton(botones_frame, text="❌ Cancelar", width=100, fg_color="gray40",
+                         hover_color="gray30", command=ventana.destroy).pack(side="right")
+
+        except Exception as e:
+            logger.error(f"Error al abrir el editor de texto de trazabilidad: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir el editor de texto:\n{e}")
 
     def mostrar_gestor_resultado_expediente(self):
         """

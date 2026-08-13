@@ -74,7 +74,20 @@ TABLAS = {
             detalle TEXT
         )
     """,
+    "config_trazabilidad": """
+        CREATE TABLE IF NOT EXISTS config_trazabilidad (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            texto_ayuda TEXT NOT NULL DEFAULT ''
+        )
+    """,
 }
+
+_TEXTO_AYUDA_TRAZABILIDAD_DEFECTO = (
+    "Adjunta el correo, foto o documento relacionado con esta incidencia y "
+    "añade un comentario si lo necesitas. El sistema lo clasificará "
+    "automáticamente: los correos (.eml/.msg) se asocian en la pestaña "
+    "Asociados y el resto de archivos en Adjuntos."
+)
 
 
 def crear_tablas(cursor, conn):
@@ -251,6 +264,20 @@ def inicializar_config_por_defecto(cursor, conn):
     print(f"OK fila de configuración inicial creada en config_recepcion_qr (personas migradas: {len(personas)})")
 
 
+def inicializar_config_trazabilidad(cursor, conn):
+    cursor.execute("SELECT id FROM config_trazabilidad WHERE id = 1")
+    if cursor.fetchone():
+        print("OK fila de configuración ya existe en config_trazabilidad")
+        return
+
+    cursor.execute(
+        "INSERT INTO config_trazabilidad (id, texto_ayuda) VALUES (1, ?)",
+        (_TEXTO_AYUDA_TRAZABILIDAD_DEFECTO,)
+    )
+    conn.commit()
+    print("OK fila de configuración inicial creada en config_trazabilidad")
+
+
 def main():
     if not (os.getenv("TURSO_DATABASE_URL") and os.getenv("TURSO_AUTH_TOKEN")):
         print("ERROR: TURSO_DATABASE_URL / TURSO_AUTH_TOKEN no configurados en el entorno (.env)")
@@ -266,6 +293,7 @@ def main():
     anadir_columnas_aviso_recepcion(cursor, conn)
     inicializar_config_por_defecto(cursor, conn)
     sembrar_estados_articulo(cursor, conn)
+    inicializar_config_trazabilidad(cursor, conn)
 
     conn.close()
     print("\nEsquema de recepción por QR listo en Turso.")

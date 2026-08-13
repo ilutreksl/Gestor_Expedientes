@@ -1,6 +1,6 @@
 # Manual de Usuario - Gestor de Expedientes RMA
 
-**Versión de la aplicación:** v1.2.10  
+**Versión de la aplicación:** v1.2.20  
 **Fecha:** Agosto 2026  
 **Destinado a:** Usuarios finales
 
@@ -12,6 +12,7 @@
 2. [Inicio de Sesión](#inicio-de-sesión)
 3. [Pantalla Principal (Dashboard)](#pantalla-principal-dashboard)
 4. [Trabajar con Expedientes RMA](#trabajar-con-expedientes-rma)
+   - [Añadir Trazabilidad (correos, fotos y documentos en un solo paso)](#añadir-trazabilidad-correos-fotos-y-documentos-en-un-solo-paso)
    - [Menú Contextual (Clic Derecho)](#menú-contextual-clic-derecho)
 5. [Gestión de Clientes](#gestión-de-clientes)
 6. [Gestión de Proveedores RMP](#gestión-de-proveedores-rmp)
@@ -235,6 +236,27 @@ En la pestaña **"Datos del Expediente"** encontrarás:
 5. Haz clic en **"Actualizar RMA"**
 
 ⚠️ **Importante**: Todos los cambios quedan registrados en el historial (pestaña "Historial")
+
+### Añadir Trazabilidad (correos, fotos y documentos en un solo paso)
+
+Cuando llega un aviso de incidencia por email, llamada o WhatsApp, y luego hay que consultar un albarán en a3ERP, cada cosa vive en una aplicación distinta. El botón **➕ Añadir Trazabilidad** reúne todo eso en un solo paso, dentro de la propia ficha del expediente.
+
+1. Abre el expediente (debe estar ya guardado al menos una vez; si es nuevo, verás un aviso pidiendo que lo guardes primero)
+2. En la pestaña **"General"**, haz clic en **➕ Añadir Trazabilidad**
+3. En la ventana que se abre:
+   - **Selecciona archivos** con el botón **📁 Seleccionar archivos**, o **arrástralos** directamente a la zona de arrastre (si tu equipo lo soporta; si no, simplemente usa el botón)
+   - Escribe un **comentario** si quieres dejar constancia de algo (por ejemplo, lo que ha dicho el cliente por teléfono)
+4. Haz clic en **✅ Guardar**
+
+El sistema clasifica cada archivo automáticamente, sin que tengas que elegir dónde va:
+
+- 📧 **Correos (.eml/.msg)** → se asocian en la pestaña **"Asociados"**, igual que si los hubieras importado desde ahí
+- 📎 **Cualquier otro archivo** (foto, PDF, captura de WhatsApp...) → se sube a la pestaña **"Adjuntos"**
+- 💬 **El comentario**, si lo escribiste → queda registrado en la pestaña **"Historial"**
+
+💡 **Consejo**: No hace falta guardar el correo aparte antes de adjuntarlo — puedes arrastrarlo directamente desde tu gestor de correo si tu equipo tiene activado el arrastrar y soltar. Así queda registrado el remitente y la fecha exactos, en vez de solo copiar y pegar el texto.
+
+⚠️ **Nota sobre .msg**: la importación de correos `.msg` de Outlook solo está disponible para ciertos roles. Si adjuntas uno sin tener permiso, se guardará el resto de lo que hayas seleccionado y se te avisará de que ese archivo en concreto se ha omitido.
 
 ### Ver Lista de Expedientes
 
