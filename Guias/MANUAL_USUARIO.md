@@ -1,6 +1,6 @@
 # Manual de Usuario - Gestor de Expedientes RMA
 
-**Versión de la aplicación:** v1.2.20  
+**Versión de la aplicación:** v1.2.21  
 **Fecha:** Agosto 2026  
 **Destinado a:** Usuarios finales
 
@@ -254,7 +254,9 @@ El sistema clasifica cada archivo automáticamente, sin que tengas que elegir d�
 - 📎 **Cualquier otro archivo** (foto, PDF, captura de WhatsApp...) → se sube a la pestaña **"Adjuntos"**
 - 💬 **El comentario**, si lo escribiste → queda registrado en la pestaña **"Historial"**
 
-💡 **Consejo**: No hace falta guardar el correo aparte antes de adjuntarlo — puedes arrastrarlo directamente desde tu gestor de correo si tu equipo tiene activado el arrastrar y soltar. Así queda registrado el remitente y la fecha exactos, en vez de solo copiar y pegar el texto.
+💡 **Consejo**: Si ya tienes el correo guardado como archivo (`.eml`/`.msg`) o el documento en una carpeta, puedes arrastrarlo directamente a la zona de arrastre en vez de usar el selector — es más rápido.
+
+⚠️ **Sobre arrastrar un correo directamente desde Outlook**: normalmente **no funciona** arrastrar un email directamente desde la bandeja de Outlook a esta ventana, porque Outlook no lo entrega como un archivo real hasta que se guarda. Si lo intentas y no se añade nada, guarda antes el correo como archivo (en Outlook: **Archivo > Guardar como**, eligiendo `.eml` o `.msg`, o arrástralo primero a una carpeta del explorador de Windows) y después arrastra o selecciona ese archivo ya guardado — así además queda registrado el remitente y la fecha exactos, en vez de solo el texto.
 
 ⚠️ **Nota sobre .msg**: la importación de correos `.msg` de Outlook solo está disponible para ciertos roles. Si adjuntas uno sin tener permiso, se guardará el resto de lo que hayas seleccionado y se te avisará de que ese archivo en concreto se ha omitido.
 

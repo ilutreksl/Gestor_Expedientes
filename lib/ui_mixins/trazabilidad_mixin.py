@@ -79,10 +79,31 @@ class TrazabilidadMixin:
                               command=lambda f=filepath: quitar_archivo(f)).pack(side="right")
 
         def anadir_archivos(filepaths):
+            anadidos = 0
+            invalidos = 0
             for f in filepaths:
-                if f and os.path.isfile(f) and f not in archivos_pendientes:
-                    archivos_pendientes.append(f)
+                if not f:
+                    continue
+                if os.path.isfile(f):
+                    if f not in archivos_pendientes:
+                        archivos_pendientes.append(f)
+                        anadidos += 1
+                else:
+                    invalidos += 1
             refrescar_lista_archivos()
+            if invalidos and anadidos == 0:
+                # Caso típico: se ha soltado un correo arrastrado directamente desde
+                # Outlook. Outlook lo ofrece como "archivo virtual" (OLE), un formato
+                # que tkinterdnd2 no sabe materializar en una ruta real, así que no
+                # llega ningún archivo válido y sin este aviso no pasaría nada visible.
+                messagebox.showwarning(
+                    "No se ha podido añadir",
+                    "No se ha reconocido ningún archivo válido en lo soltado.\n\n"
+                    "Si intentabas arrastrar un correo directamente desde Outlook, "
+                    "guárdalo antes como archivo (Archivo > Guardar como > .eml o .msg, "
+                    "o arrástralo a una carpeta del explorador) y luego arrastra o "
+                    "selecciona ese archivo ya guardado."
+                )
 
         def quitar_archivo(filepath):
             if filepath in archivos_pendientes:

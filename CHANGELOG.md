@@ -1,4 +1,10 @@
-Cambio V.1.2.20 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.21 - ✨ Últimas mejoras implementadas:
+
+- Corregido: en la ventana "➕ Añadir Trazabilidad", si se soltaba algo en la zona de arrastre que no era un archivo real (típicamente un correo arrastrado directamente desde la bandeja de Outlook, que Windows no entrega como archivo hasta guardarlo), no pasaba nada visible. Ahora se muestra un aviso explicando que hay que guardar el correo primero como `.eml`/`.msg` y luego arrastrarlo o seleccionarlo.
+- Corregida la guía de usuario: el consejo de "arrastra el correo directamente desde tu gestor de correo" prometía algo que con Outlook normalmente no funciona; ahora explica que hay que guardarlo primero y por qué.
+
+
+Cambio V.1.2.20
 
 - Nuevo botón "➕ Añadir Trazabilidad" en la pestaña "General" de la ficha del expediente. Abre una ventana única donde adjuntar cualquier correo, foto o documento y dejar un comentario, sin tener que ir por separado a Adjuntos o a Asociados. El sistema clasifica cada archivo automáticamente: los correos (.eml/.msg) se asocian en la pestaña "Asociados" y el resto en "Adjuntos"; el comentario, si lo hay, queda registrado en el Historial. Se puede tanto seleccionar archivos con el botón de siempre como arrastrarlos directamente a la ventana. El botón solo aparece una vez el expediente se ha guardado por primera vez; antes se muestra un aviso indicándolo.
 - El texto de ayuda que se muestra en esa ventana es configurable por el usuario admin desde el panel de administración ("📎 Texto de Ayuda - Trazabilidad").
