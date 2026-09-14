@@ -34,7 +34,18 @@ class TrazabilidadMixin:
             messagebox.showwarning("Guardar primero", "Guarda el expediente antes de añadir trazabilidad.")
             return
 
-        ventana = SafeCTkToplevel(self)
+        # La ficha del expediente puede estar mostrándose dentro de la ventana
+        # principal o dentro de una RmaEditorWindow independiente (ver
+        # lib/rma_editor_window.py). self._content_frame_ficha_actual siempre
+        # apunta al frame donde se ha renderizado la ficha actual, así que su
+        # winfo_toplevel() es la ventana que el usuario tiene realmente delante.
+        # Si se crea como hija de "self" (siempre VentanaPrincipal, aunque la
+        # ficha se esté viendo en una RmaEditorWindow encima) puede quedar
+        # detrás de esa ventana en vez de encima.
+        contenedor_ficha = getattr(self, '_content_frame_ficha_actual', None)
+        ventana_padre = contenedor_ficha.winfo_toplevel() if contenedor_ficha is not None else self
+
+        ventana = SafeCTkToplevel(ventana_padre)
         ventana.title("➕ Añadir Trazabilidad")
         ventana.geometry("560x640")
         ventana.minsize(480, 420)
@@ -47,6 +58,7 @@ class TrazabilidadMixin:
         ventana.lift()
         ventana.focus_force()
         ventana.bind('<FocusIn>', lambda e: ventana.lift())
+        ventana.bind('<Visibility>', lambda e: ventana.lift())
         ventana.attributes('-topmost', False)
 
         ventana.update_idletasks()
@@ -200,6 +212,12 @@ class TrazabilidadMixin:
                      font=ctk.CTkFont(weight="bold")).pack(anchor="w")
         textbox_comentario = ctk.CTkTextbox(contenido_scroll, height=100, wrap="word")
         textbox_comentario.pack(fill="x", pady=(0, 10))
+
+        # Reafirmar que quede encima una vez ya está toda la ventana construida
+        # (por si la consulta del texto de ayuda u otro paso intermedio hizo que
+        # el foco volviera a la ficha de fondo mientras se montaba la ventana).
+        ventana.lift()
+        ventana.focus_force()
 
     def _guardar_trazabilidad(self, rma_id, archivos, comentario, ventana):
         """Enruta cada archivo por extensión (.eml/.msg -> correos asociados, resto ->
