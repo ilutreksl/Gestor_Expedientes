@@ -241,7 +241,10 @@ class TrazabilidadMixin:
 
                 if extension in ('.eml', '.msg'):
                     if extension == '.msg' and not self._puede_importar_msg():
-                        avisos.append(f"Omitido (sin permiso para .msg): {nombre_original}")
+                        avisos.append(
+                            f"Omitido (falta la librería 'extract-msg' en este equipo "
+                            f"para leer .msg): {nombre_original}"
+                        )
                         continue
                     try:
                         datos_correo = correo_parser.parsear_correo_archivo(filepath)

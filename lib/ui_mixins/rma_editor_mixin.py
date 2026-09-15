@@ -129,72 +129,147 @@ class RmaEditorMixin:
             
             # Frame para el widget de tiempos - DISEÑO VERTICAL COMPACTO
             tiempos_frame = ctk.CTkFrame(parent_frame, fg_color="#f0f0f0", corner_radius=8)
-            tiempos_frame.pack(fill="x", pady=(0, 10))
-            
+            tiempos_frame.pack(fill="x", pady=(0, 6))
+
             # Título del widget
-            ctk.CTkLabel(tiempos_frame, text="📊 TIEMPOS DE TRAMITACIÓN", 
+            ctk.CTkLabel(tiempos_frame, text="📊 TIEMPOS DE TRAMITACIÓN",
                         font=ctk.CTkFont(size=12, weight="bold"),
-                        text_color="#2c3e50").pack(anchor="w", padx=10, pady=(8, 5))
-            
+                        text_color="#2c3e50").pack(anchor="w", padx=10, pady=(6, 4))
+
             # Días totales
             dias_total = tiempos['dias_total']
             color_total = obtener_color_tiempo(dias_total)
             estado_texto = " (Cerrado)" if tiempos['cerrado'] else " (En curso)"
-            
+
             total_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
-            total_frame.pack(fill="x", padx=10, pady=(0, 5))
-            
-            ctk.CTkLabel(total_frame, text="Total:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
-            ctk.CTkLabel(total_frame, text=f"{dias_total} días{estado_texto}", 
-                        font=ctk.CTkFont(size=13, weight="bold"),
-                        text_color=color_total).pack(anchor="w", padx=8, pady=(0, 4))
-            
+            total_frame.pack(fill="x", padx=10, pady=(0, 3))
+
+            ctk.CTkLabel(total_frame, text="Total:", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(2, 0))
+            ctk.CTkLabel(total_frame, text=f"{dias_total} días{estado_texto}",
+                        font=ctk.CTkFont(size=12, weight="bold"),
+                        text_color=color_total).pack(anchor="w", padx=8, pady=(0, 2))
+
             # Promedio del cliente (si está disponible)
             if promedio_cliente is not None:
                 promedio_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
-                promedio_frame.pack(fill="x", padx=10, pady=(0, 5))
-                
+                promedio_frame.pack(fill="x", padx=10, pady=(0, 3))
+
                 dias_prom = int(promedio_cliente)
                 color_prom = obtener_color_tiempo(dias_prom)
-                
-                ctk.CTkLabel(promedio_frame, text=f"Promedio {cliente}:", 
-                           font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(4, 0))
-                ctk.CTkLabel(promedio_frame, text=f"{dias_prom} días", 
-                           font=ctk.CTkFont(size=13, weight="bold"),
-                           text_color=color_prom).pack(anchor="w", padx=8, pady=(0, 4))
-            
+
+                ctk.CTkLabel(promedio_frame, text=f"Promedio {cliente}:",
+                           font=ctk.CTkFont(size=10)).pack(anchor="w", padx=8, pady=(2, 0))
+                ctk.CTkLabel(promedio_frame, text=f"{dias_prom} días",
+                           font=ctk.CTkFont(size=12, weight="bold"),
+                           text_color=color_prom).pack(anchor="w", padx=8, pady=(0, 2))
+
             # Tiempos entre fases - DISEÑO VERTICAL
             fases_frame = ctk.CTkFrame(tiempos_frame, fg_color="white", corner_radius=6)
-            fases_frame.pack(fill="x", padx=10, pady=(0, 8))
-            
-            ctk.CTkLabel(fases_frame, text="Fases:", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=8, pady=(4, 2))
-            
+            fases_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+            ctk.CTkLabel(fases_frame, text="Fases:", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=8, pady=(2, 1))
+
             fases = [
                 ('Emisión → Autorización', tiempos['dias_e_a']),
                 ('Autorización → Recepción', tiempos['dias_a_r']),
                 ('Recepción → Proceso', tiempos['dias_r_p']),
                 ('Proceso → Cierre', tiempos['dias_p_c'])
             ]
-            
+
             for nombre, dias in fases:
                 if dias is not None:
                     color = obtener_color_tiempo(dias)
                     fase_item = ctk.CTkFrame(fases_frame, fg_color="transparent")
-                    fase_item.pack(fill="x", padx=8, pady=1)
-                    
-                    ctk.CTkLabel(fase_item, text=f"{nombre}:", 
-                               font=ctk.CTkFont(size=10),
+                    fase_item.pack(fill="x", padx=8, pady=0)
+
+                    ctk.CTkLabel(fase_item, text=f"{nombre}:",
+                               font=ctk.CTkFont(size=9),
                                anchor="w").pack(side="left")
-                    ctk.CTkLabel(fase_item, text=f"{dias} días", 
-                               font=ctk.CTkFont(size=10, weight="bold"),
+                    ctk.CTkLabel(fase_item, text=f"{dias} días",
+                               font=ctk.CTkFont(size=9, weight="bold"),
                                text_color=color,
                                anchor="e").pack(side="right", padx=(5, 0))
-            
-            # Espacio final
-            ctk.CTkLabel(fases_frame, text="").pack(pady=2)
-            
+
+            # Pequeño margen inferior dentro del recuadro de fases (sin label de relleno)
+            ctk.CTkFrame(fases_frame, fg_color="transparent", height=2).pack()
+
         except Exception as e:
             print(f"Error al mostrar widget de tiempos: {e}")
+
+    def _mostrar_widget_qr(self, parent_frame, codigo_rma):
+        """Muestra el QR de recepción del expediente en la ficha, justo debajo del
+        widget de Tiempos/Fases. Es el mismo QR (misma URL firmada) que se incluye
+        en el documento de Autorización: se calcula siempre a partir del código de
+        RMA, así que ambos coinciden sin necesidad de guardarlo en ningún sitio."""
+        from lib.qr_recepcion import generar_imagen_qr, qrcode_disponible
+        from PIL import Image as PILImage
+
+        qr_frame = ctk.CTkFrame(parent_frame, fg_color="#f0f0f0", corner_radius=8)
+        qr_frame.pack(fill="x", pady=(0, 6))
+
+        ctk.CTkLabel(qr_frame, text="🔳 QR DE RECEPCIÓN",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color="#2c3e50").pack(anchor="w", padx=10, pady=(6, 4))
+
+        if not qrcode_disponible():
+            ctk.CTkLabel(
+                qr_frame,
+                text="No disponible en este equipo (falta la librería 'qrcode').",
+                font=ctk.CTkFont(size=10), text_color="gray",
+                wraplength=380, justify="left"
+            ).pack(anchor="w", padx=10, pady=(0, 6))
+            return
+
+        ruta_qr_temp = None
+        img_ctk = None
+        try:
+            ruta_qr_temp = generar_imagen_qr(str(codigo_rma))
+            with PILImage.open(ruta_qr_temp) as img:
+                img_ctk = ctk.CTkImage(light_image=img.copy(), dark_image=img.copy(), size=(130, 130))
+        except Exception as e:
+            logger.warning(f"No se pudo generar el QR de recepción para la ficha ({codigo_rma}): {e}")
+            ctk.CTkLabel(
+                qr_frame,
+                text="No se pudo generar el QR (revise la configuración del sistema).",
+                font=ctk.CTkFont(size=10), text_color="gray",
+                wraplength=380, justify="left"
+            ).pack(anchor="w", padx=10, pady=(0, 6))
+            return
+        finally:
+            if ruta_qr_temp and os.path.exists(ruta_qr_temp):
+                try:
+                    os.remove(ruta_qr_temp)
+                except Exception:
+                    pass
+
+        # Imagen a la izquierda y, a su lado, el botón (solo icono) para guardarla.
+        content_row = ctk.CTkFrame(qr_frame, fg_color="transparent")
+        content_row.pack(fill="x", padx=10, pady=(0, 8))
+
+        img_label = ctk.CTkLabel(content_row, image=img_ctk, text="")
+        img_label.image = img_ctk  # evitar que el garbage collector lo elimine
+        img_label.pack(side="left")
+
+        def guardar_qr_como():
+            import tkinter.filedialog as filedialog
+            destino = filedialog.asksaveasfilename(
+                title="Guardar QR de recepción",
+                defaultextension=".png",
+                initialfile=f"{codigo_rma}_QR.png",
+                filetypes=[("Imagen PNG", "*.png")]
+            )
+            if not destino:
+                return
+            try:
+                generar_imagen_qr(str(codigo_rma), ruta_destino=destino)
+                messagebox.showinfo("QR guardado", f"QR guardado en:\n{destino}")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo guardar el QR:\n{e}")
+
+        ctk.CTkButton(
+            content_row, text="💾", command=guardar_qr_como,
+            width=32, height=32, font=ctk.CTkFont(size=14)
+        ).pack(side="left", padx=(10, 0))
 
     def mostrar_nuevo_rma(self, rma_id=None):
         """Muestra el formulario para crear (rma_id=None) o editar (rma_id=ID) un RMA."""
@@ -300,51 +375,53 @@ class RmaEditorMixin:
         right_column.grid_propagate(False)  # Mantener ancho fijo
         
         # B) CAJA DE COMENTARIOS (Columna derecha, arriba)
-        comentarios_frame = ctk.CTkFrame(right_column) 
-        comentarios_frame.pack(fill="x", pady=(0, 10))
+        comentarios_frame = ctk.CTkFrame(right_column)
+        comentarios_frame.pack(fill="x", pady=(0, 6))
 
         # Etiqueta
-        ctk.CTkLabel(comentarios_frame, text="Comentarios (Guarde al momento con el botón ➕):", 
+        ctk.CTkLabel(comentarios_frame, text="Comentarios (Guarde al momento con el botón ➕):",
                      text_color="black",
-                     font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, pady=(5, 0), sticky="nw")
-        
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, pady=(4, 0), sticky="nw")
+
         comentario_input_frame = ctk.CTkFrame(comentarios_frame, fg_color="transparent")
-        comentario_input_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(5, 5))
-        
+        comentario_input_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(4, 4))
+
         # Textbox para comentarios
-        self.textbox_comentarios = ctk.CTkTextbox(comentario_input_frame, 
-                                                  height=100,
+        self.textbox_comentarios = ctk.CTkTextbox(comentario_input_frame,
+                                                  height=70,
                                                   wrap="word")
         self.textbox_comentarios.grid(row=0, column=0, sticky="ew")
 
         # Botón de Guardar Comentario
-        ctk.CTkButton(comentario_input_frame, 
-                      text="➕", 
-                      width=40, 
+        ctk.CTkButton(comentario_input_frame,
+                      text="➕",
+                      width=40,
                       command=self.guardar_comentario_historial
                       ).grid(row=0, column=1, padx=(5, 0), sticky="e")
-        
+
         # PRECIO TOTAL EXPEDIENTE (visible siempre) - EN COLUMNA DERECHA
         precio_total_frame = ctk.CTkFrame(comentarios_frame, fg_color="#e8f5e9", corner_radius=8)
-        precio_total_frame.grid(row=2, column=0, padx=5, pady=(10, 5), sticky="ew")
-        
+        precio_total_frame.grid(row=2, column=0, padx=5, pady=(6, 4), sticky="ew")
+
         precio_content = ctk.CTkFrame(precio_total_frame, fg_color="transparent")
-        precio_content.pack(fill="x", padx=10, pady=8)
-        
-        ctk.CTkLabel(precio_content, text="💰 PRECIO TOTAL EXPEDIENTE:", 
+        precio_content.pack(fill="x", padx=10, pady=6)
+
+        ctk.CTkLabel(precio_content, text="💰 PRECIO TOTAL EXPEDIENTE:",
                      font=ctk.CTkFont(size=11, weight="bold"),
                      text_color="#2e7d32").pack(anchor="w")
-        
-        self.lbl_precio_total = ctk.CTkLabel(precio_content, text="0.00 €", 
-                                             font=ctk.CTkFont(size=16, weight="bold"), 
+
+        self.lbl_precio_total = ctk.CTkLabel(precio_content, text="0.00 €",
+                                             font=ctk.CTkFont(size=16, weight="bold"),
                                              text_color="#1b5e20")
         self.lbl_precio_total.pack(anchor="w", pady=(2, 0))
-        
-        # Widget de tiempos de tramitación (solo en modo edición) - EN COLUMNA DERECHA
+
+        # Widget de tiempos de tramitación y QR de recepción (solo en modo edición) -
+        # EN COLUMNA DERECHA. Se pasan directamente sobre right_column (sin frame
+        # contenedor intermedio) para no duplicar márgenes verticales, ya que el
+        # espacio disponible en esta columna es limitado y no debe requerir scroll.
         if es_edicion:
-            tiempos_container = ctk.CTkFrame(right_column)
-            tiempos_container.pack(fill="x", pady=(0, 10))
-            self._mostrar_widget_tiempos(tiempos_container, rma_id)
+            self._mostrar_widget_tiempos(right_column, rma_id)
+            self._mostrar_widget_qr(right_column, codigo_rma_mostrar)
         # -----------------------------------------------------------
         general_tab = self.tabview.add("📝 General")
         estados_fechas_tab = self.tabview.add("⏱️ Fechas")

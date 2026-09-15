@@ -1490,15 +1490,17 @@ class ClientesMixin:
             widget.bind("<Double-Button-1>", lambda e, c=correo: self.ver_correo_asociado_completo(c))
 
     def _puede_importar_msg(self):
-        """Indica si el rol del usuario actual puede importar correos .msg (Outlook).
+        """Indica si se puede importar correos .msg (Outlook) en este equipo.
 
-        La importación .msg depende de la librería 'extract-msg', que aún no está
-        instalada en todos los puestos. Se restringe a Dpto. Técnico hasta que se
-        vaya desplegando al resto de usuarios. La importación .eml no depende de
-        ninguna librería externa y está disponible para todos los roles.
+        La importación .msg depende de la librería 'extract-msg'. Si está instalada,
+        cualquier usuario puede importar .msg; si no, se ofrece solo .eml (que no
+        depende de ninguna librería externa).
         """
-        rol_norm = str(getattr(self, 'rol', '')).strip().lower()
-        return rol_norm in ("admin", "administrador", "dpto. tecnico", "dpto tecnico", "dpto técnico")
+        try:
+            import extract_msg  # noqa: F401
+            return True
+        except ImportError:
+            return False
 
     def importar_correo_asociado(self, rma_id):
         """Abre un archivo .eml/.msg, extrae sus datos y los muestra para revisión antes de guardarlos."""

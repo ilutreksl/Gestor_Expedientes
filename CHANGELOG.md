@@ -1,4 +1,10 @@
-Cambio V.1.2.22 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.23 - ✨ Últimas mejoras implementadas:
+
+- Nuevo widget "🔳 QR de Recepción" en la ficha del expediente (columna derecha, justo debajo de "📊 Tiempos de Tramitación"), visible automáticamente desde que se crea el expediente, sin necesidad de generar antes el documento de autorización. Incluye un botón para guardar la imagen del QR. Es el mismo QR que ya se incluía en el documento de Autorización.
+- Ajustado el espaciado y tamaño de los widgets de la columna derecha de la ficha (Tiempos de Tramitación y QR de Recepción) para que quepan siempre sin necesidad de scroll, incluso en expedientes con varias fases registradas.
+
+
+Cambio V.1.2.22
 
 - Corregido: en la ventana "➕ Añadir Trazabilidad", si el texto de ayuda configurado por el admin era largo o se añadían varios archivos, los botones "Guardar" y "Cancelar" quedaban fuera de la vista y solo se veían redimensionando la ventana a mano. Ahora los botones quedan siempre fijos y visibles en la parte inferior, y el resto del contenido se desplaza dentro de su propio hueco si no cabe.
 - Corregido: la ventana "➕ Añadir Trazabilidad" bloqueaba el resto de la aplicación mientras estaba abierta (no dejaba minimizar ni usar otras ventanas), lo que impedía ir a buscar y arrastrar un archivo desde el Explorador o Outlook. Ahora se puede seguir usando el resto de ventanas con ella abierta.
