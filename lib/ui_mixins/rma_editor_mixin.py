@@ -207,7 +207,7 @@ class RmaEditorMixin:
         qr_frame = ctk.CTkFrame(parent_frame, fg_color="#f0f0f0", corner_radius=8)
         qr_frame.pack(fill="x", pady=(0, 6))
 
-        ctk.CTkLabel(qr_frame, text="🔳 QR DE RECEPCIÓN",
+        ctk.CTkLabel(qr_frame, text="🔳 QR EXPEDIENTE",
                      font=ctk.CTkFont(size=12, weight="bold"),
                      text_color="#2c3e50").pack(anchor="w", padx=10, pady=(6, 4))
 
