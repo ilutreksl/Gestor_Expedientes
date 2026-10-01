@@ -234,92 +234,141 @@ class TrazabilidadMixin:
             messagebox.showerror("Error de conexión", "No se pudo conectar con la base de datos.")
             return
 
+        # Ventana de progreso: sin ella, subir un correo con adjuntos pesados
+        # dentro (el .eml/.msg completo, adjuntos incluidos, es lo que se sube
+        # como un único archivo) puede tardar y la ventana de Trazabilidad se
+        # queda sin repintarse mientras tanto, dando la sensación de que se ha
+        # quedado bloqueada o ha fallado. Se actualiza antes de cada archivo.
+        total = len(archivos)
+        ventana_progreso = None
+        label_progreso = None
+        barra_progreso = None
+        if total:
+            ventana_progreso = ctk.CTkToplevel(ventana)
+            ventana_progreso.title("Guardando trazabilidad")
+            ventana_progreso.geometry("420x120")
+            ventana_progreso.attributes('-topmost', True)
+            ventana_progreso.update_idletasks()
+            x = (ventana_progreso.winfo_screenwidth() // 2) - (420 // 2)
+            y = (ventana_progreso.winfo_screenheight() // 2) - (120 // 2)
+            ventana_progreso.geometry(f"420x120+{x}+{y}")
+            label_progreso = ctk.CTkLabel(ventana_progreso, text="Preparando...", wraplength=390)
+            label_progreso.pack(pady=(20, 10))
+            barra_progreso = ctk.CTkProgressBar(ventana_progreso, width=360)
+            barra_progreso.pack(pady=10)
+            barra_progreso.set(0)
+            ventana_progreso.update()
+
         try:
-            for filepath in archivos:
+            for idx, filepath in enumerate(archivos, 1):
                 nombre_original = os.path.basename(filepath)
                 extension = os.path.splitext(filepath)[1].lower()
 
-                if extension in ('.eml', '.msg'):
-                    if extension == '.msg' and not self._puede_importar_msg():
-                        avisos.append(
-                            f"Omitido (falta la librería 'extract-msg' en este equipo "
-                            f"para leer .msg): {nombre_original}"
-                        )
-                        continue
-                    try:
-                        datos_correo = correo_parser.parsear_correo_archivo(filepath)
-                    except Exception as e:
-                        avisos.append(f"No se pudo leer el correo '{nombre_original}': {e}")
-                        continue
+                if ventana_progreso:
+                    label_progreso.configure(text=f"Procesando {idx}/{total}: {nombre_original}")
+                    barra_progreso.set((idx - 1) / total)
+                    ventana_progreso.update()
 
-                    marca_tiempo = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                    nombre_archivo = f"{codigo_rma}_CORREO_{marca_tiempo}{extension}"
-                    if usar_b2():
-                        exito, ruta_relativa = self._subir_archivo_b2(filepath, codigo_rma, nombre_archivo, None)
-                        tipo_almacenamiento = 'backblaze'
-                    else:
-                        exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
-                        tipo_almacenamiento = 'local'
-                    if not exito:
-                        avisos.append(f"No se pudo subir el correo '{nombre_original}'")
-                        continue
-
-                    datos = {
-                        'asunto': datos_correo.get('asunto', ''),
-                        'remitente': datos_correo.get('remitente', ''),
-                        'fecha_correo': datos_correo.get('fecha', ''),
-                        'cuerpo': datos_correo.get('cuerpo_sin_firma') or datos_correo.get('cuerpo_completo', ''),
-                        'nombre_archivo_original': nombre_original,
-                        'ruta_relativa_adjunto': ruta_relativa,
-                        'tipo_almacenamiento': tipo_almacenamiento,
-                        'fecha_importacion': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        'usuario_importacion': self.username,
-                    }
-                    exito_bd, mensaje = rma_correos_asociados.insertar_correo_asociado(rma_id, datos, conn)
-                    if not exito_bd:
-                        self._limpiar_archivo_subido(ruta_relativa)
-                        avisos.append(f"No se pudo asociar el correo '{nombre_original}': {mensaje}")
-                        continue
-                    archivos_ok += 1
-
-                else:
-                    nombre_archivo = f"{codigo_rma}_{nombre_original}"
-                    if usar_b2():
-                        exito, ruta_relativa = self._subir_archivo_b2(filepath, codigo_rma, nombre_archivo, None)
-                        tipo_almacenamiento = 'backblaze'
-                    else:
-                        exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
-                        tipo_almacenamiento = 'local'
-                    if not exito:
-                        avisos.append(f"No se pudo subir el archivo '{nombre_original}'")
-                        continue
-
-                    self.crear_tabla_rma_orders()
-                    self.crear_tabla_adjuntos()
-                    try:
-                        if getattr(self, '_usar_tipo_almacenamiento', False):
-                            cursor.execute(
-                                """INSERT INTO rma_adjuntos
-                                   (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento)
-                                   VALUES (?, ?, ?, ?, ?, ?)""",
-                                (rma_id, os.path.basename(ruta_relativa), ruta_relativa,
-                                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                 self.username, tipo_almacenamiento)
+                # Cada archivo se procesa de forma aislada: si uno falla por lo
+                # que sea (correo corrupto, adjunto interno problemático, fallo
+                # de red...), se anota el aviso y se sigue con el resto en vez
+                # de perder todo el lote o dejar la ventana colgada.
+                try:
+                    if extension in ('.eml', '.msg'):
+                        if extension == '.msg' and not self._puede_importar_msg():
+                            avisos.append(
+                                f"Omitido (falta la librería 'extract-msg' en este equipo "
+                                f"para leer .msg): {nombre_original}"
                             )
+                            continue
+                        try:
+                            datos_correo = correo_parser.parsear_correo_archivo(filepath)
+                        except Exception as e:
+                            avisos.append(f"No se pudo leer el correo '{nombre_original}': {e}")
+                            continue
+
+                        marca_tiempo = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                        nombre_archivo = f"{codigo_rma}_CORREO_{marca_tiempo}{extension}"
+                        if usar_b2():
+                            exito, ruta_relativa = self._subir_archivo_b2(
+                                filepath, codigo_rma, nombre_archivo, ventana_progreso)
+                            tipo_almacenamiento = 'backblaze'
                         else:
-                            cursor.execute(
-                                """INSERT INTO rma_adjuntos
-                                   (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
-                                   VALUES (?, ?, ?, ?, ?)""",
-                                (rma_id, os.path.basename(ruta_relativa), ruta_relativa,
-                                 datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                 self.username)
-                            )
-                    except Exception as e:
-                        self._limpiar_archivo_subido(ruta_relativa)
-                        avisos.append(f"No se pudo registrar el adjunto '{nombre_original}': {e}")
-                        continue
-                    archivos_ok += 1
+                            exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
+                            tipo_almacenamiento = 'local'
+                        if not exito:
+                            avisos.append(f"No se pudo subir el correo '{nombre_original}' "
+                                          f"(puede que tenga adjuntos muy pesados)")
+                            continue
+
+                        datos = {
+                            'asunto': datos_correo.get('asunto', ''),
+                            'remitente': datos_correo.get('remitente', ''),
+                            'fecha_correo': datos_correo.get('fecha', ''),
+                            'cuerpo': datos_correo.get('cuerpo_sin_firma') or datos_correo.get('cuerpo_completo', ''),
+                            'nombre_archivo_original': nombre_original,
+                            'ruta_relativa_adjunto': ruta_relativa,
+                            'tipo_almacenamiento': tipo_almacenamiento,
+                            'fecha_importacion': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'usuario_importacion': self.username,
+                        }
+                        exito_bd, mensaje = rma_correos_asociados.insertar_correo_asociado(rma_id, datos, conn)
+                        if not exito_bd:
+                            self._limpiar_archivo_subido(ruta_relativa)
+                            avisos.append(f"No se pudo asociar el correo '{nombre_original}': {mensaje}")
+                            continue
+                        archivos_ok += 1
+
+                    else:
+                        nombre_archivo = f"{codigo_rma}_{nombre_original}"
+                        if usar_b2():
+                            exito, ruta_relativa = self._subir_archivo_b2(
+                                filepath, codigo_rma, nombre_archivo, ventana_progreso)
+                            tipo_almacenamiento = 'backblaze'
+                        else:
+                            exito, ruta_relativa = self._subir_archivo_local(filepath, codigo_rma, nombre_archivo)
+                            tipo_almacenamiento = 'local'
+                        if not exito:
+                            avisos.append(f"No se pudo subir el archivo '{nombre_original}'")
+                            continue
+
+                        self.crear_tabla_rma_orders()
+                        self.crear_tabla_adjuntos()
+                        try:
+                            if getattr(self, '_usar_tipo_almacenamiento', False):
+                                cursor.execute(
+                                    """INSERT INTO rma_adjuntos
+                                       (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida, tipo_almacenamiento)
+                                       VALUES (?, ?, ?, ?, ?, ?)""",
+                                    (rma_id, os.path.basename(ruta_relativa), ruta_relativa,
+                                     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     self.username, tipo_almacenamiento)
+                                )
+                            else:
+                                cursor.execute(
+                                    """INSERT INTO rma_adjuntos
+                                       (rma_id, nombre_archivo, ruta_relativa, fecha_subida, usuario_subida)
+                                       VALUES (?, ?, ?, ?, ?)""",
+                                    (rma_id, os.path.basename(ruta_relativa), ruta_relativa,
+                                     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     self.username)
+                                )
+                        except Exception as e:
+                            self._limpiar_archivo_subido(ruta_relativa)
+                            avisos.append(f"No se pudo registrar el adjunto '{nombre_original}': {e}")
+                            continue
+                        archivos_ok += 1
+
+                except Exception as e:
+                    logger.error(f"Error inesperado procesando '{nombre_original}' "
+                                 f"en trazabilidad del expediente {rma_id}: {e}", exc_info=True)
+                    avisos.append(f"Error inesperado con '{nombre_original}': {e}")
+                    continue
+
+            if ventana_progreso:
+                barra_progreso.set(1.0)
+                label_progreso.configure(text="Guardando en la base de datos...")
+                ventana_progreso.update()
 
             if comentario:
                 cursor.execute(
@@ -333,12 +382,16 @@ class TrazabilidadMixin:
         except Exception as e:
             conn.rollback()
             logger.error(f"Error al guardar trazabilidad del expediente {rma_id}: {e}", exc_info=True)
-            conn.close()
             ventana.destroy()
             messagebox.showerror("Error", f"No se pudo completar el guardado: {e}")
             return
         finally:
             conn.close()
+            if ventana_progreso:
+                try:
+                    ventana_progreso.destroy()
+                except Exception:
+                    pass
 
         ventana.destroy()
 

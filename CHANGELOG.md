@@ -1,4 +1,11 @@
-Cambio V.1.2.23 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.24 - ✨ Últimas mejoras implementadas:
+
+- Corregido: al guardar en la ventana "➕ Añadir Trazabilidad" un correo con adjuntos pesados dentro, la ventana podía quedarse sin repintarse varios segundos y dar la sensación de haberse bloqueado o incluso de haber crasheado. Ahora se muestra una ventana de progreso ("Procesando X/N: nombre") igual que al subir varios adjuntos normales.
+- Corregido: si uno de los archivos seleccionados fallaba al guardarse (correo dañado, fallo de red, etc.), se perdía todo el lote completo. Ahora cada archivo se procesa de forma independiente: si uno falla, se avisa y se guarda igualmente el resto.
+- Corregido: la ventana "➕ Añadir Trazabilidad" podía abrirse detrás de la ficha del expediente cuando esta se estaba viendo en una ventana aparte (al abrir un expediente desde la lista), dando la falsa impresión de que no se había abierto.
+
+
+Cambio V.1.2.23
 
 - Nuevo widget "🔳 QR de Recepción" en la ficha del expediente (columna derecha, justo debajo de "📊 Tiempos de Tramitación"), visible automáticamente desde que se crea el expediente, sin necesidad de generar antes el documento de autorización. Incluye un botón para guardar la imagen del QR. Es el mismo QR que ya se incluía en el documento de Autorización.
 - Ajustado el espaciado y tamaño de los widgets de la columna derecha de la ficha (Tiempos de Tramitación y QR de Recepción) para que quepan siempre sin necesidad de scroll, incluso en expedientes con varias fases registradas.
