@@ -96,16 +96,36 @@ class InformesMixin:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT referencia_articulo, cantidad_entregada 
-                FROM rma_detalles 
+                SELECT referencia_articulo, cantidad_entregada
+                FROM rma_detalles
                 WHERE rma_id = ?
                 ORDER BY id
             """, (self.current_rma_id,))
             articulos_data = cursor.fetchall()
+            cursor.execute("""
+                SELECT COUNT(*) FROM rma_adjuntos
+                WHERE rma_id = ? AND instr(nombre_archivo, '_Informe_') > 0
+            """, (self.current_rma_id,))
+            informes_existentes = cursor.fetchone()[0] or 0
             conn.close()
         except Exception as e:
             conn.close()
             messagebox.showerror("Error", f"Error al obtener datos de artículos: {e}")
+            return
+
+        # 1.6. Confirmar antes de generar: un clic accidental en el botón creaba
+        # informes vacíos (y varios seguidos si se pulsaba repetidamente)
+        aviso_existentes = (
+            f"\n\n⚠️ Este expediente ya tiene {informes_existentes} informe(s) generado(s)."
+            if informes_existentes else ""
+        )
+        if not messagebox.askyesno(
+            "Generar Informe",
+            f"¿Desea generar un nuevo documento de Informe (Word) para el expediente {codigo_rma}?"
+            f"{aviso_existentes}",
+            icon="warning" if informes_existentes else "question",
+            parent=self.content_frame.winfo_toplevel()
+        ):
             return
 
         # 2. Rutas - Plantilla sigue siendo local

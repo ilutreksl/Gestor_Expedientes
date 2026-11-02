@@ -1387,7 +1387,30 @@ class RmaEditorMixin:
         self.btn_ver_articulo.pack(side="right", padx=(5, 0))
         Tooltip(self.btn_ver_articulo, "Ver ficha de artículo")
         
-        # 1. Botón de Generar Informe (Solo en modo edición)
+        # 1. Botón de Guardar. Va siempre el primero por la izquierda, tanto en modo
+        # nuevo como en edición: al crear un expediente la ficha se reconstruye en modo
+        # edición, y si este botón cambiara de sitio, quien volviera a pulsar en el mismo
+        # punto (p. ej. por creer que no se había guardado) pulsaría otro botón distinto
+        # (antes caía sobre "📄 Informe (Word)" y se generaban informes vacíos sin querer).
+        if es_edicion:
+            guardar_texto = "💾 ACTUALIZAR"
+            color_boton = None  # Color por defecto
+        else:
+            guardar_texto = "💾 GUARDAR Y ASIGNAR NÚMERO"
+            color_boton = "orange"  # Color naranja para destacar que asignará el número final
+
+        self.btn_guardar_rma = ctk.CTkButton(
+            btn_action_frame,
+            text=guardar_texto,
+            fg_color=color_boton,        # Color especial para nuevos expedientes
+            #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
+            #text_color="black",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.guardar_rma_placeholder
+        )
+        self.btn_guardar_rma.pack(side="left", padx=(0, 15))
+
+        # 2. Botón de Generar Informe (Solo en modo edición)
         if es_edicion:
             self.btn_generar_informe = ctk.CTkButton(
                 btn_action_frame, 
@@ -1430,25 +1453,6 @@ class RmaEditorMixin:
                 )
                 self.btn_autorizacion.pack(side="left", padx=(5, 15))
                 Tooltip(self.btn_autorizacion, "Generar PDF de autorización de devolución")
-
-        # 2. Botón de Guardar
-        if es_edicion:
-            guardar_texto = "💾 ACTUALIZAR"
-            color_boton = None  # Color por defecto
-        else:
-            guardar_texto = "💾 GUARDAR Y ASIGNAR NÚMERO"
-            color_boton = "orange"  # Color naranja para destacar que asignará el número final
-        
-        self.btn_guardar_rma = ctk.CTkButton(
-            btn_action_frame, 
-            text=guardar_texto, 
-            fg_color=color_boton,        # Color especial para nuevos expedientes
-            #hover_color="gray70",     # Efecto hover: Ligeramente más oscuro
-            #text_color="black",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.guardar_rma_placeholder
-        )
-        self.btn_guardar_rma.pack(side="left", padx=(0, 5))
 
         # ── Botón Reabrir (solo en modo edición; visibilidad gestionada dinámicamente) ──
         if es_edicion:

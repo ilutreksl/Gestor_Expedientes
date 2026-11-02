@@ -13,7 +13,7 @@ Sistema completo para la gestión de expedientes de devolución de mercancías (
 Copia y ejecuta este comando en tu terminal para instalar todas las librerías necesarias:
 
 ```bash
-pip install customtkinter Pillow CTkDatePicker bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab docx2pdf extract-msg pyspellchecker qrcode
+pip install customtkinter Pillow bcrypt python-dotenv python-docx requests pandas pypdf win10toast pdfrw reportlab docx2pdf extract-msg pyspellchecker qrcode
 ```
 
 ### **📋 LIBRERÍAS OBLIGATORIAS**
@@ -29,9 +29,6 @@ pip install customtkinter
 
 # Manejo de imágenes 
 pip install Pillow
-
-# Selector de fechas personalizado
-pip install CTkDatePicker
 
 # Seguridad y encriptación
 pip install bcrypt
@@ -69,6 +66,8 @@ pip install pyspellchecker
 # Generación de QR de recepción en el documento de Autorización
 pip install qrcode[pil]
 ```
+
+`CTkDatePicker` está incluido en la carpeta `CTkDatePicker/` del proyecto; no es necesario instalarlo con `pip`.
 
 ### **📋 LIBRERÍAS OPCIONALES (Mejoran funcionalidad)**
 

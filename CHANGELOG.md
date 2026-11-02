@@ -1,4 +1,11 @@
-Cambio V.1.2.24 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.25 - ✨ Últimas mejoras implementadas:
+
+- Corregido: al crear un expediente nuevo con "💾 GUARDAR Y ASIGNAR NÚMERO", la ficha pasaba a modo edición y en el mismo sitio donde estaba ese botón aparecía "📄 Informe (Word)". Si se volvía a pulsar ahí (por ejemplo para guardar de nuevo), se generaban sin querer documentos de Informe vacíos, a veces varios seguidos en el mismo expediente. Ahora el botón de guardar ("GUARDAR Y ASIGNAR NÚMERO" / "ACTUALIZAR") está siempre el primero por la izquierda y no cambia de sitio.
+- El botón "📄 Informe (Word)" pide ahora confirmación antes de generar el documento, y avisa si el expediente ya tiene informes generados.
+- Eliminados los documentos de Informe vacíos que se habían generado por error por este motivo; en el historial de cada expediente afectado queda constancia de la eliminación.
+
+
+Cambio V.1.2.24
 
 - Corregido: al guardar en la ventana "➕ Añadir Trazabilidad" un correo con adjuntos pesados dentro, la ventana podía quedarse sin repintarse varios segundos y dar la sensación de haberse bloqueado o incluso de haber crasheado. Ahora se muestra una ventana de progreso ("Procesando X/N: nombre") igual que al subir varios adjuntos normales.
 - Corregido: si uno de los archivos seleccionados fallaba al guardarse (correo dañado, fallo de red, etc.), se perdía todo el lote completo. Ahora cada archivo se procesa de forma independiente: si uno falla, se avisa y se guarda igualmente el resto.
