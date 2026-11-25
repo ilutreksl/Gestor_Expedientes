@@ -1,4 +1,12 @@
-Cambio V.1.2.25 - ✨ Últimas mejoras implementadas:
+Cambio V.1.2.26 - ✨ Últimas mejoras implementadas:
+
+- Nuevas secciones del informe en la pestaña "Técnica" de la ficha del expediente: "📋 Análisis de la Situación", "💡 Recomendaciones" y "✅ Conclusiones". Se eligen con una fila de botones encima del editor, junto a "🔧 Obs. Técnicas", y cada una tiene el mismo editor enriquecido (fuente, tamaño, colores, negrita, imágenes, editor expandido...). Se guardan con el expediente y se cargan al volver a abrirlo.
+- Los botones de las secciones que ya tienen contenido muestran un "●", para saber qué está escrito sin tener que abrirlas.
+- Al pulsar "📄 Informe (Word)", cada sección se copia en su apartado del informe con el mismo formato que en el editor. Las secciones que se dejen vacías (incluida "Análisis Técnico" si no hay Observaciones Técnicas) ya no aparecen en el informe, ni siquiera su título.
+- La plantilla del informe ya no trae el texto de ejemplo fijo en "Análisis de la Situación", "Recomendaciones" y "Conclusiones".
+
+
+Cambio V.1.2.25
 
 - Corregido: al crear un expediente nuevo con "💾 GUARDAR Y ASIGNAR NÚMERO", la ficha pasaba a modo edición y en el mismo sitio donde estaba ese botón aparecía "📄 Informe (Word)". Si se volvía a pulsar ahí (por ejemplo para guardar de nuevo), se generaban sin querer documentos de Informe vacíos, a veces varios seguidos en el mismo expediente. Ahora el botón de guardar ("GUARDAR Y ASIGNAR NÚMERO" / "ACTUALIZAR") está siempre el primero por la izquierda y no cambia de sitio.
 - El botón "📄 Informe (Word)" pide ahora confirmación antes de generar el documento, y avisa si el expediente ya tiene informes generados.

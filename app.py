@@ -378,6 +378,12 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         except Exception as e:
             logger.error(f"Error en migración columnas resolución provisional: {e}")
 
+        # Migrar columnas de secciones del informe (Turso-safe)
+        try:
+            self._migrar_columnas_secciones_informe()
+        except Exception as e:
+            logger.error(f"Error en migración columnas secciones informe: {e}")
+
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
             app_core.USER_SETTINGS = self.user_settings
@@ -638,6 +644,50 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             conn.close()
         except Exception as e:
             logger.error(f"Error en migración columnas resolución provisional rma_maestro: {e}")
+
+    def _migrar_columnas_secciones_informe(self):
+        """Añade a rma_maestro las columnas de las secciones del informe editables desde
+        la pestaña Técnica (analisis_situacion, recomendaciones, conclusiones).
+        Guardan el mismo JSON del editor enriquecido que obs_tecnica.
+        Funciona tanto en SQLite local como en Turso (ALTER TABLE ADD COLUMN es seguro en ambos)."""
+        try:
+            result = self.master.conectar_db()
+            if isinstance(result, tuple):
+                conn, cursor = result
+            else:
+                conn = result
+                cursor = conn.cursor() if conn else None
+
+            if not conn or not cursor:
+                return
+
+            columnas_necesarias = {
+                'analisis_situacion': "TEXT DEFAULT ''",
+                'recomendaciones': "TEXT DEFAULT ''",
+                'conclusiones': "TEXT DEFAULT ''",
+            }
+
+            try:
+                cursor.execute("PRAGMA table_info('rma_maestro')")
+                cols_actuales = [row[1] for row in cursor.fetchall()]
+            except Exception:
+                # Turso no soporta PRAGMA — intentar ADD COLUMN directamente
+                cols_actuales = []
+
+            for col_name, col_def in columnas_necesarias.items():
+                if col_name not in cols_actuales:
+                    try:
+                        cursor.execute(f"ALTER TABLE rma_maestro ADD COLUMN {col_name} {col_def}")
+                        conn.commit()
+                        logger.info(f"Columna '{col_name}' añadida a rma_maestro")
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if "duplicate" not in err_str and "already exists" not in err_str:
+                            logger.warning(f"Info al añadir '{col_name}' en rma_maestro: {e}")
+
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error en migración columnas secciones informe rma_maestro: {e}")
 
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""

@@ -187,13 +187,15 @@ class InformesMixin:
             # 4. Reemplazar marcadores preservando el formato de la plantilla
             reemplazar_texto_preservando_formato = self._reemplazar_marcadores_preservando_formato
 
-            # 4.2. Función auxiliar para insertar Obs_Tecnica enriquecida (texto + imágenes)
-            def insertar_obs_tecnica_enriquecida(document, marcador='[[OBS_TECNICA]]'):
+            # 4.2. Función auxiliar para insertar una sección enriquecida (texto + imágenes)
+            def insertar_seccion_enriquecida(document, marcador, clave_editor):
                 """
-                Localiza el párrafo que contiene el marcador [[OBS_TECNICA]], lo elimina
-                e inserta en su lugar el contenido del editor enriquecido (texto con formato
-                e imágenes) leyendo directamente del widget self.entry_Obs_Tecnica.
-                Si el editor no existe o está vacío, elimina el marcador sin dejar rastro.
+                Localiza el párrafo que contiene el marcador (p.ej. [[OBS_TECNICA]]), lo
+                elimina e inserta en su lugar el contenido del editor enriquecido
+                self.entry_<clave_editor> (texto con formato e imágenes).
+                Si el editor no existe o está vacío, elimina el marcador, el título de la
+                sección (párrafo anterior) y la línea en blanco que lo precede: si no se
+                ha escrito nada, la sección no aparece en el informe.
                 """
                 import json as _json
                 import base64 as _base64
@@ -206,13 +208,9 @@ class InformesMixin:
 
                 # Obtener JSON del editor
                 obs_json = ""
-                if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
-                    obs_json = self.entry_Obs_Tecnica.get_content() or ""
-                import json as _jd
-                try:
-                    for _s in _jd.loads(obs_json).get("segments",[]):
-                        print(f"[DBG] type={_s.get('type')} bold={_s.get('bold')} size={_s.get('size')} family={_s.get('family')} color={_s.get('color')} nombre={_s.get('nombre')} content={str(_s.get('content',''))[:40]}")
-                except: pass
+                _editor = getattr(self, f'entry_{clave_editor}', None)
+                if _editor is not None and hasattr(_editor, 'get_content'):
+                    obs_json = _editor.get_content() or ""
 
                 # Localizar el párrafo con el marcador
                 parrafo_marcador = None
@@ -226,9 +224,32 @@ class InformesMixin:
                 if parrafo_marcador is None:
                     return  # Marcador no encontrado en la plantilla, no hacer nada
 
-                # Si no hay contenido en el editor, eliminar el párrafo marcador y salir
-                if not obs_json:
-                    parrafo_marcador._element.getparent().remove(parrafo_marcador._element)
+                def _eliminar_seccion_completa():
+                    """Quita el marcador, el título de la sección y la línea en blanco previa."""
+                    from docx.oxml.ns import qn as _qn_del
+                    elem = parrafo_marcador._element
+                    padre = elem.getparent()
+
+                    def _es_parrafo(e):
+                        return e is not None and e.tag == _qn_del('w:p')
+
+                    def _texto(e):
+                        return "".join(t.text or "" for t in e.iter(_qn_del('w:t'))).strip()
+
+                    def _tiene_dibujo(e):
+                        return any(True for _ in e.iter(_qn_del('w:drawing')))
+
+                    titulo = elem.getprevious()
+                    padre.remove(elem)
+                    if _es_parrafo(titulo) and _texto(titulo) and not _tiene_dibujo(titulo):
+                        hueco = titulo.getprevious()
+                        padre.remove(titulo)
+                        if _es_parrafo(hueco) and not _texto(hueco) and not _tiene_dibujo(hueco):
+                            padre.remove(hueco)
+
+                # Si no hay contenido en el editor, eliminar la sección entera y salir
+                if not obs_json or not (_editor.tiene_contenido() if hasattr(_editor, 'tiene_contenido') else True):
+                    _eliminar_seccion_completa()
                     return
 
                 # Intentar parsear el JSON
@@ -242,7 +263,7 @@ class InformesMixin:
                                   "underline": False, "size": 11, "color": None}]
 
                 if not segmentos:
-                    parrafo_marcador._element.getparent().remove(parrafo_marcador._element)
+                    _eliminar_seccion_completa()
                     return
 
                 # Referencia al elemento padre XML y posición del marcador
@@ -484,8 +505,15 @@ class InformesMixin:
             # 4.1. Aplicar reemplazos de texto plano preservando formato
             reemplazar_texto_preservando_formato(document, mapeo)
 
-            # 4.3. Insertar contenido enriquecido de Obs_Tecnica en su marcador
-            insertar_obs_tecnica_enriquecida(document)
+            # 4.3. Insertar el contenido enriquecido de cada sección de la pestaña Técnica
+            #      en su marcador (las secciones vacías se quitan con su título)
+            for _marcador, _clave in (
+                ('[[ANALISIS_SITUACION]]', 'Analisis_Situacion'),
+                ('[[OBS_TECNICA]]',        'Obs_Tecnica'),
+                ('[[RECOMENDACIONES]]',    'Recomendaciones'),
+                ('[[CONCLUSIONES]]',       'Conclusiones'),
+            ):
+                insertar_seccion_enriquecida(document, _marcador, _clave)
 
             # 5. Guardar temporalmente para subirlo a Backblaze B2
             temp_dir = tempfile.mkdtemp(prefix="informe_rma_")

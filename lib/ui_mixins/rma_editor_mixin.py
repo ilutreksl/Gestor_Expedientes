@@ -9,6 +9,53 @@ from lib.app_core import *  # noqa: F401,F403 - helpers/constantes/imports compa
 from lib.app_core import _get_cached_query, invalidate_cache  # nombres "privados" que el wildcard import no trae
 
 class RmaEditorMixin:
+    # Editores enriquecidos de la pestaña Técnica: (sufijo de entry_*, texto del botón).
+    # La columna de rma_maestro es el sufijo en minúsculas (obs_tecnica, analisis_situacion...).
+    SECCIONES_TECNICA = (
+        ('Obs_Tecnica',        "🔧 Obs. Técnicas"),
+        ('Analisis_Situacion', "📋 Análisis de la Situación"),
+        ('Recomendaciones',    "💡 Recomendaciones"),
+        ('Conclusiones',       "✅ Conclusiones"),
+    )
+
+    def _mostrar_seccion_tecnica(self, clave):
+        """Muestra el editor de la sección indicada en la pestaña Técnica y oculta el resto."""
+        secciones = getattr(self, '_secciones_tecnica', None)
+        if not secciones or clave not in secciones:
+            return
+        for c, info in secciones.items():
+            if c != clave:
+                info['editor'].pack_forget()
+        secciones[clave]['editor'].pack(fill="both", expand=True)
+        self._seccion_tecnica_activa = clave
+        for c in secciones:
+            self._actualizar_boton_seccion_tecnica(c)
+
+    def _actualizar_boton_seccion_tecnica(self, clave):
+        """Resalta el botón de la sección activa y marca con ● las que tienen contenido."""
+        secciones = getattr(self, '_secciones_tecnica', None)
+        if not secciones or clave not in secciones:
+            return
+        info = secciones[clave]
+        try:
+            if not info['boton'].winfo_exists():
+                return
+            texto = info['etiqueta'] + ("  ●" if info['editor'].tiene_contenido() else "")
+            if clave == getattr(self, '_seccion_tecnica_activa', None):
+                info['boton'].configure(
+                    text=texto,
+                    fg_color=ctk.ThemeManager.theme["CTkButton"]["fg_color"],
+                    text_color=ctk.ThemeManager.theme["CTkButton"]["text_color"],
+                )
+            else:
+                info['boton'].configure(
+                    text=texto,
+                    fg_color=("gray78", "gray28"),
+                    text_color=("gray10", "gray90"),
+                )
+        except Exception:
+            pass
+
     def _prompt_select_autorizado_por(self, opciones):
         """Muestra un diálogo modal simple para seleccionar quien autoriza.
         Devuelve la opción seleccionada o None si se cancela.
@@ -1137,25 +1184,52 @@ class RmaEditorMixin:
         self.crear_campo(info_tecnica_frame, 3, "Ref. Proveedor:", "Ref_Proveedor")
         # Fila 4: Número de Orden/Partida
         self.crear_campo(info_tecnica_frame, 4, "Nº ORDER:", "Num_Order")
-        # Fila 5: Observaciones Técnicas — Editor enriquecido
-        ctk.CTkLabel(info_tecnica_frame, text="Observaciones Técnicas:").grid(
+        # Fila 5: Observaciones Técnicas + secciones del informe — Editores enriquecidos
+        # Un selector de botones alterna qué editor se muestra en el mismo hueco.
+        # Cada sección tiene su propio RichTextEditor (cada uno conserva sus
+        # imágenes y formato) y se guarda en su propia columna de rma_maestro.
+        ctk.CTkLabel(info_tecnica_frame, text="Observaciones / Informe:").grid(
             row=5, column=0, padx=10, pady=5, sticky="nw"
         )
         info_tecnica_frame.grid_rowconfigure(5, weight=1)
 
-        obs_container = tk.Frame(info_tecnica_frame)
-        obs_container.grid(row=5, column=1, padx=10, pady=5, sticky="nsew")
+        secciones_frame = ctk.CTkFrame(info_tecnica_frame, fg_color="transparent")
+        secciones_frame.grid(row=5, column=1, padx=10, pady=5, sticky="nsew")
+        secciones_frame.grid_columnconfigure(0, weight=1)
+        secciones_frame.grid_rowconfigure(1, weight=1)
 
-        self.entry_Obs_Tecnica = RichTextEditor(
-            obs_container,
-            get_adjuntos_fn       = self._get_adjuntos_imagenes,
-            get_b2_client_fn      = get_b2_client,
-            b2_root_folder        = B2_ROOT_FOLDER,
-            normalizar_ruta_b2_fn = normalizar_ruta_b2,
-            usar_b2_fn            = usar_b2,
-            height                = 16,
-        )
-        self.entry_Obs_Tecnica.pack(fill="both", expand=True)
+        selector_frame = ctk.CTkFrame(secciones_frame, fg_color="transparent")
+        selector_frame.grid(row=0, column=0, sticky="w", pady=(0, 4))
+
+        editores_container = tk.Frame(secciones_frame)
+        editores_container.grid(row=1, column=0, sticky="nsew")
+
+        self._secciones_tecnica = {}   # clave -> {'editor', 'boton', 'etiqueta'}
+        self._seccion_tecnica_activa = None
+        for clave, etiqueta in self.SECCIONES_TECNICA:
+            editor = RichTextEditor(
+                editores_container,
+                get_adjuntos_fn       = self._get_adjuntos_imagenes,
+                get_b2_client_fn      = get_b2_client,
+                b2_root_folder        = B2_ROOT_FOLDER,
+                normalizar_ruta_b2_fn = normalizar_ruta_b2,
+                usar_b2_fn            = usar_b2,
+                height                = 16,
+                titulo                = etiqueta.split(" ", 1)[1],
+                on_change             = lambda c=clave: self._actualizar_boton_seccion_tecnica(c),
+            )
+            setattr(self, f"entry_{clave}", editor)
+            boton = ctk.CTkButton(
+                selector_frame,
+                text=etiqueta,
+                width=0,
+                height=28,
+                command=lambda c=clave: self._mostrar_seccion_tecnica(c),
+            )
+            boton.pack(side="left", padx=(0, 6))
+            self._secciones_tecnica[clave] = {'editor': editor, 'boton': boton, 'etiqueta': etiqueta}
+
+        self._mostrar_seccion_tecnica(self.SECCIONES_TECNICA[0][0])
 
         # Botón para generar la Solicitud de RMA desde la plantilla PDF
         ctk.CTkButton(
@@ -2800,7 +2874,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Autorizacion', 'Autorizado_Por', 'Fecha_Autorizacion', 'Fecha_Recepcion',
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente', 'motivo', 'Rma_Proveedor',
-            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica', 'Resolucion_Provisional', 'Obs_Res_Provisional',
+            'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Analisis_Situacion', 'Recomendaciones', 'Conclusiones',
+            'Resolucion_Provisional', 'Obs_Res_Provisional',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono'
         ]
         
@@ -2962,9 +3038,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             pass
 
         # 3. Inserción en la Base de Datos
-        # ── Editor enriquecido: sobreescribir obs_tecnica con JSON completo ──
-        if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
-            datos_maestro['obs_tecnica'] = self.entry_Obs_Tecnica.get_content()
+        # ── Editores enriquecidos: sobreescribir con el JSON completo (formato + imágenes) ──
+        for _clave, _ in self.SECCIONES_TECNICA:
+            _editor = getattr(self, f'entry_{_clave}', None)
+            if _editor is not None and hasattr(_editor, 'get_content'):
+                datos_maestro[_clave.lower()] = _editor.get_content()
 
         conn, cursor = self.master.conectar_db()
         if not conn: return
@@ -3111,6 +3189,7 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             'Recepcionado_Por', 'Fecha_Gestion', 'Gestionado_Por', 'Fecha_Proceso', 'Procesado_Por',
             'Fecha_para_factura', 'Numero_Albaran', 'Fecha_Doc_Cliente', 'Resultado_Expediente',
             'Fecha_Emision', 'Creado_Por', 'motivo', 'Rma_Proveedor', 'Modelo', 'N_Serie', 'Ref_Proveedor', 'Obs_Tecnica',
+            'Analisis_Situacion', 'Recomendaciones', 'Conclusiones',
             'Resolucion_Provisional', 'Obs_Res_Provisional',
             'numero_albaran_reposicion', 'fecha_albaran_reposicion', 'numero_factura_abono', 'fecha_factura_abono',
             'Aviso_Recepcion_Mensaje', 'Aviso_Recepcion_Sonido'
@@ -3172,9 +3251,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
         
-        # ── Editor enriquecido: sobreescribir obs_tecnica con JSON completo ──
-        if hasattr(self, 'entry_Obs_Tecnica') and hasattr(self.entry_Obs_Tecnica, 'get_content'):
-            datos_maestro['obs_tecnica'] = self.entry_Obs_Tecnica.get_content()
+        # ── Editores enriquecidos: sobreescribir con el JSON completo (formato + imágenes) ──
+        for _clave, _ in self.SECCIONES_TECNICA:
+            _editor = getattr(self, f'entry_{_clave}', None)
+            if _editor is not None and hasattr(_editor, 'get_content'):
+                datos_maestro[_clave.lower()] = _editor.get_content()
 
         # Num_Order se maneja por separado ya que está en la tabla rma_orders
         if hasattr(self, 'entry_Num_Order'):
@@ -4144,8 +4225,8 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
 
             # Comparación de campos normales (no boolean) usando la función de normalización
             elif valores_son_diferentes(valor_antiguo, valor_nuevo):
-                # No registrar obs_tecnica en historial (puede contener JSON con imágenes)
-                if columna_db != 'obs_tecnica':
+                # No registrar los campos del editor enriquecido en historial (JSON con imágenes)
+                if columna_db not in ('obs_tecnica', 'analisis_situacion', 'recomendaciones', 'conclusiones'):
                     self.guardar_cambio_historial(rma_id, columna_db.title().replace('_', ' '), str(valor_antiguo), str(valor_nuevo), cursor=cursor)
                 if columna_db in campos_bloqueados_si_resultado:
                     logger.info(f"[RESOLUCION_PROVISIONAL] RMA {rma_id}: '{columna_db}' '{valor_antiguo}' -> '{valor_nuevo}' (usuario={self.username})")

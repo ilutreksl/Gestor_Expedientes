@@ -92,6 +92,8 @@ class RichTextEditor(tk.Frame):
                  normalizar_ruta_b2_fn=None,
                  usar_b2_fn=None,
                  modo_expandido=False,
+                 titulo="Observaciones Técnicas",
+                 on_change=None,
                  **kwargs):
         height = kwargs.pop("height", 16)
         super().__init__(parent, **kwargs)
@@ -102,6 +104,8 @@ class RichTextEditor(tk.Frame):
         self._normalizar_ruta_b2   = normalizar_ruta_b2_fn
         self._usar_b2_fn           = usar_b2_fn
         self._modo_expandido       = modo_expandido
+        self._titulo               = titulo
+        self._on_change            = on_change
 
         self._image_refs  = []
         self._image_data  = {}
@@ -493,6 +497,15 @@ class RichTextEditor(tk.Frame):
             return
         self.text.edit_modified(False)
         self._programar_correccion_ortografica()
+        self._notificar_cambio()
+
+    def _notificar_cambio(self):
+        """Avisa al callback on_change (si lo hay) de que el contenido cambió."""
+        if self._on_change:
+            try:
+                self._on_change()
+            except Exception:
+                pass
 
     def _programar_correccion_ortografica(self):
         if not self._ortografia_activa or not SPELLCHECKER_AVAILABLE:
@@ -1316,6 +1329,7 @@ class RichTextEditor(tk.Frame):
             # Revisar ortografía del contenido recién cargado (no solo lo que
             # se escriba a partir de ahora).
             self._programar_correccion_ortografica()
+            self._notificar_cambio()
 
     def _load_from_json(self, data):
         for seg in data.get("segments", []):
@@ -1482,6 +1496,16 @@ class RichTextEditor(tk.Frame):
         self.text.delete("1.0", "end")
         self._image_refs.clear()
         self._image_data.clear()
+        self._notificar_cambio()
+
+    def tiene_contenido(self):
+        """True si el editor tiene texto (no solo espacios) o alguna imagen."""
+        try:
+            if self.text.get("1.0", "end-1c").strip():
+                return True
+            return bool(self.text.image_names())
+        except Exception:
+            return False
 
     def focus_set(self):
         self.text.focus_set()
@@ -1509,7 +1533,7 @@ class _VentanaExpandida(tk.Toplevel):
         super().__init__(editor_origen)
         self._editor_origen = editor_origen
 
-        self.title("Observaciones Técnicas — Editor expandido")
+        self.title(f"{editor_origen._titulo} — Editor expandido")
         self.geometry("1200x750")
         self.minsize(800, 500)
         self.resizable(True, True)
