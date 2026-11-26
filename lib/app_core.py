@@ -330,26 +330,12 @@ DB_NAME = "rma_app.db"
 # Mensaje de advertencia sobre la limitación de SQLite en red compartida
 ADVERTENCIA_MULTIUSUARIO = "⚠️ ADVERTENCIA: Esta app usa SQLite, NO es segura para múltiples usuarios escribiendo a la vez en red compartida. ¡Riesgo de corrupción de datos si escriben a la vez!"
 
-APP_VERSION = "v1.2.26"
+APP_VERSION = "v1.2.27"
 DB_FILENAME = "rma_app.db"
-
-# Session global para Turso (reutiliza conexiones HTTP)
-_turso_session = None
 
 # Caché simple para consultas frecuentes (estados, etc.)
 _query_cache = {}
 _cache_timeout = 300  # 5 minutos
-
-def _get_turso_session():
-    """Obtiene o crea una sesión HTTP persistente para Turso"""
-    global _turso_session
-    if _turso_session is None:
-        import requests
-        _turso_session = requests.Session()
-        _turso_session.headers.update({
-            "Content-Type": "application/json"
-        })
-    return _turso_session
 
 def _get_cached_query(cache_key, query_func, ttl=None):
     """Sistema de caché para queries frecuentes (estados, usuarios, etc.)"""
@@ -413,248 +399,28 @@ def parse_date_to_iso(value: str) -> str:
         raise ValueError(f"Formato de fecha no reconocido: {value}")
 
 # --- Conector unificado: Turso (libSQL) si hay credenciales, si no SQLite local ---
+# La implementación del conector Turso está en lib/db_turso.py.
+from lib.db_turso import (  # noqa: E402
+    TursoConnection,
+    TransaccionDB,
+    ejecutar_transaccion,
+    consultar_varias,
+    url_pipeline as _turso_url_pipeline,
+)
+
+
 def connect_db(timeout: float | None = None):
     """Devuelve una conexión a la BD.
     - Si existen TURSO_DATABASE_URL y TURSO_AUTH_TOKEN en el entorno, usa Turso (libSQL).
     - En caso contrario, usa SQLite local (rma_app.db).
     El API devuelto implementa DB-API 2.0 (cursor/execute/commit).
+    Para varias escrituras atómicas usar ejecutar_transaccion()/TransaccionDB.
     """
     turso_url = os.getenv("TURSO_DATABASE_URL")
     turso_token = os.getenv("TURSO_AUTH_TOKEN")
     if turso_url and turso_token:
         try:
-            import requests
-            import json
-
-            class TursoCursor:
-                def __init__(self, url: str, token: str, connection=None):
-                    self._url = url
-                    self._token = token
-                    self._connection = connection
-                    self._result = None
-                    self.lastrowid = None
-                    self.rowcount = -1
-                    self._fetch_idx = 0
-                    self.description = None  # DB-API 2.0: lista de tuplas con info de columnas
-
-                def execute(self, sql: str, params: tuple | list | None = None):
-                    # Convertir placeholders ? a args posicionales para Turso
-                    if params:
-                        # Turso espera args como lista de objetos con {type, value}
-                        args = [{"type": "text", "value": str(v)} for v in params]
-                    else:
-                        args = []
-                    
-                    # Usar session persistente para mejor rendimiento
-                    session = _get_turso_session()
-
-                    # Hacer request a la API REST de Turso (v2/pipeline format)
-                    request_payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}]}
-
-                    try:
-                        response = session.post(
-                            self._url,
-                            headers={
-                                "Authorization": f"Bearer {self._token}"
-                            },
-                            json=request_payload,
-                            timeout=30  # Campos como obs_tecnica pueden incluir imágenes
-                                        # en base64 y tardar más de 10s en subirse
-                        )
-                    except requests.exceptions.RequestException as e:
-                        # Sin esto, un timeout/error de red se propaga como Exception
-                        # genérica y el código que llama (que solo captura
-                        # sqlite3.Error) no lo detecta: el guardado falla en
-                        # silencio y el usuario no ve ningún aviso.
-                        print(f"Error de conexión con Turso: {e}")
-                        raise sqlite3.OperationalError(f"Error de conexión con Turso: {e}")
-
-                    if response.status_code != 200:
-                        print(f"Error - Response status: {response.status_code}, text: {response.text}")
-                        raise sqlite3.OperationalError(f"Turso API error: {response.status_code} - {response.text}")
-                    
-                    data = response.json()
-                    results = data.get("results", [])
-                    
-                    if results and len(results) > 0:
-                        # Verificar si hay error en la respuesta
-                        result_item = results[0]
-                        if result_item.get("type") == "error":
-                            error_msg = result_item.get("error", {}).get("message", "Unknown error")
-                            # No imprimir errores de verificación de esquema que son normales
-                            _es_error_esquema = (
-                                ("tipo_almacenamiento" in sql and "SELECT" in sql) or
-                                ("numero_albaran" in error_msg and "no such column" in error_msg) or
-                                ("numero_order" in error_msg and "no such column" in error_msg)
-                            )
-                            if not _es_error_esquema:
-                                print(f"SQL Error: {error_msg}")
-                                print(f"Query: {sql}")
-                                print(f"Params: {params}")
-                            # Lanzar excepción para que pueda ser manejada por el código que llama
-                            raise sqlite3.OperationalError(f"SQLite error: {error_msg}")
-                        else:
-                            result = result_item.get("response", {}).get("result", {})
-                            self._result = result
-                    else:
-                        self._result = {"rows": []}
-                    
-                    # Extraer metadatos
-                    self.lastrowid = self._result.get("last_insert_rowid")
-                    self.rowcount = self._result.get("rows_affected", -1)
-                    
-                    # Construir description según DB-API 2.0
-                    # Formato: (name, type_code, display_size, internal_size, precision, scale, null_ok)
-                    cols = self._result.get("cols", [])
-                    if cols:
-                        self.description = [
-                            (col.get("name"), None, None, None, None, None, None)
-                            for col in cols
-                        ]
-                    else:
-                        self.description = None
-                    
-                    self._fetch_idx = 0
-                    return self
-                
-                def executemany(self, sql: str, params_list: list):
-                    """Ejecuta múltiples queries en un solo batch (mucho más rápido)"""
-                    if not params_list:
-                        return self
-                    
-                    # Construir batch de requests para pipeline
-                    requests_batch = []
-                    for params in params_list:
-                        if params:
-                            args = [{"type": "text", "value": str(v)} for v in params]
-                        else:
-                            args = []
-                        requests_batch.append({
-                            "type": "execute",
-                            "stmt": {"sql": sql, "args": args}
-                        })
-                    
-                    session = _get_turso_session()
-                    try:
-                        response = session.post(
-                            self._url,
-                            headers={
-                                "Authorization": f"Bearer {self._token}"
-                            },
-                            json={"requests": requests_batch},
-                            timeout=30  # Timeout mayor para batch
-                        )
-                    except requests.exceptions.RequestException as e:
-                        print(f"Error de conexión con Turso: {e}")
-                        raise sqlite3.OperationalError(f"Error de conexión con Turso: {e}")
-
-                    if response.status_code != 200:
-                        raise sqlite3.OperationalError(f"Turso API error: {response.status_code} - {response.text}")
-
-                    # Para executemany, solo guardamos el último resultado
-                    data = response.json()
-                    results = data.get("results", [])
-                    for result_item in results:
-                        if result_item.get("type") == "error":
-                            error_msg = result_item.get("error", {}).get("message", "Unknown error")
-                            print(f"SQL Error (executemany): {error_msg}")
-                            raise sqlite3.OperationalError(f"SQLite error: {error_msg}")
-                    if results and len(results) > 0:
-                        last_result = results[-1].get("response", {}).get("result", {})
-                        self._result = last_result
-                        self.lastrowid = last_result.get("last_insert_rowid")
-                        self.rowcount = sum(
-                            r.get("response", {}).get("result", {}).get("rows_affected", 0)
-                            for r in results
-                        )
-                    
-                    return self
-
-                def fetchall(self):
-                    if not self._result:
-                        return []
-                    
-                    rows = self._result.get("rows", [])
-                    
-                    # Si no hay filas directamente, intentar extraer de otros posibles formatos
-                    if not rows and "values" in self._result:
-                        rows = self._result.get("values", [])
-                    
-                    if not rows and "data" in self._result:
-                        rows = self._result.get("data", [])
-                    
-                    # Turso puede devolver diferentes formatos
-                    result_rows = []
-                    for row in rows:
-                        if isinstance(row, list):
-                            # Caso 1: Lista de valores directos
-                            if row and not isinstance(row[0], dict):
-                                result_rows.append(tuple(row))
-                            else:
-                                # Caso 2: Lista de objetos {"type": ..., "value": ...}
-                                values = []
-                                for cell in row:
-                                    if isinstance(cell, dict):
-                                        value = cell.get("value")
-                                        if value is None:
-                                            value = cell.get("v")  # Otra posible key
-                                        
-                                        # IMPORTANTE: Convertir según el tipo para mantener tipos correctos
-                                        cell_type = cell.get("type", "").lower()
-                                        if value is not None:
-                                            if cell_type == "integer":
-                                                try:
-                                                    value = int(value)
-                                                except (ValueError, TypeError):
-                                                    pass  # Mantener el valor original si falla
-                                            elif cell_type == "real" or cell_type == "float":
-                                                try:
-                                                    value = float(value)
-                                                except (ValueError, TypeError):
-                                                    pass
-                                        
-                                        values.append(value)
-                                    else:
-                                        values.append(cell)
-                                result_rows.append(tuple(values))
-                        else:
-                            # Caso 3: Fila como tupla directa
-                            result_rows.append(tuple(row) if not isinstance(row, tuple) else row)
-                    
-                    return result_rows
-
-                def fetchone(self):
-                    rows = self.fetchall()
-                    if self._fetch_idx < len(rows):
-                        row = rows[self._fetch_idx]
-                        self._fetch_idx += 1
-                        return row
-                    return None
-
-            class TursoConnection:
-                def __init__(self, url: str, token: str):
-                    self._url = url
-                    self._token = token
-
-                def cursor(self):
-                    return TursoCursor(self._url, self._token, connection=self)
-
-                def commit(self):
-                    # No-op: Turso auto-commits
-                    pass
-
-                def close(self):
-                    # No cerramos la session para que se reutilice entre conexiones
-                    # La session se mantendrá viva durante toda la ejecución de la app
-                    pass
-
-            # Convertir URL: libsql://xxx o wss://xxx -> https://xxx
-            api_url = turso_url.replace("libsql://", "https://").replace("wss://", "https://")
-            if not api_url.endswith("/"):
-                api_url += "/"
-            api_url += "v2/pipeline"
-            
-            return TursoConnection(api_url, turso_token)
+            return TursoConnection(_turso_url_pipeline(turso_url), turso_token)
         except Exception as e:
             # Si falla, caer a SQLite local con log sencillo
             print("[WARN] No se pudo conectar a Turso (libSQL HTTP). Usando SQLite local. Causa:", e)

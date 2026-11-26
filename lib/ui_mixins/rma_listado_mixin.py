@@ -427,17 +427,19 @@ class RmaListadoMixin:
                     params.append(busqueda_like)
                     params.append(busqueda_like) 
 
-                # Ordenar y Ejecutar
-                sql += " ORDER BY id DESC"
+                # Ordenar y Ejecutar con paginación en SQL (solo traer los registros de la página actual)
+                sql_count = "SELECT COUNT(*) FROM (" + sql.rstrip() + ")"
+                sql_paginated = sql + " ORDER BY id DESC LIMIT ? OFFSET ?"
                 try:
-                    cursor.execute(sql, tuple(params))
-                    registros_todos = cursor.fetchall()
+                    # Consulta de conteo (separada para saber total de páginas)
+                    cursor.execute(sql_count, tuple(params))
+                    total_registros = cursor.fetchone()[0]
                     
-                    # Aplicar paginación
-                    total_registros = len(registros_todos)
+                    # Consulta paginada (solo los registros de esta página)
                     inicio = self.pagina_actual_lista * self.elementos_por_pagina_lista
-                    fin = min(inicio + self.elementos_por_pagina_lista, total_registros)
-                    registros = registros_todos[inicio:fin]
+                    params_paginados = list(params) + [self.elementos_por_pagina_lista, inicio]
+                    cursor.execute(sql_paginated, tuple(params_paginados))
+                    registros = cursor.fetchall()
                     
                     # Calcular total de páginas
                     total_paginas = (total_registros + self.elementos_por_pagina_lista - 1) // self.elementos_por_pagina_lista

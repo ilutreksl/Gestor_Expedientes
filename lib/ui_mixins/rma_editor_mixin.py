@@ -6,7 +6,7 @@ instancia (self.conn, self.username, self.tree_rmas, etc.) inicializados en
 VentanaPrincipal.__init__.
 """
 from lib.app_core import *  # noqa: F401,F403 - helpers/constantes/imports compartidos con app.py
-from lib.app_core import _get_cached_query, invalidate_cache  # nombres "privados" que el wildcard import no trae
+from lib.app_core import _get_cached_query, invalidate_cache, ejecutar_transaccion, TransaccionDB  # nombres "privados" que el wildcard import no trae
 
 class RmaEditorMixin:
     # Editores enriquecidos de la pestaña Técnica: (sufijo de entry_*, texto del botón).
@@ -2826,10 +2826,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             messagebox.showerror("Error", f"Error al procesar la eliminación:\n{str(e)}")
 
     def guardar_nuevo_rma(self):
-        """Valida los campos y realiza la inserción en rma_maestro y rma_detalles."""
+        """Valida los campos y realiza la inserción en rma_maestro y rma_detalles.
+        Usa transacción atómica para que todo se guarde o nada."""
         
         # 0. Validar que el cliente existe en la base de datos de clientes
-        # Obtener el nombre del cliente primero
         entry_cliente = getattr(self, 'entry_Cliente', None)
         if entry_cliente:
             nombre_cliente = ""
@@ -2851,21 +2851,18 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         conn_check.close()
                         
                         if not resultado:
-                            # Cliente no existe - mostrar mensaje de advertencia
                             self._mostrar_dialogo_cliente_no_existe(nombre_cliente)
-                            return  # Cancelar el guardado
+                            return
                         elif resultado and resultado[1] == 0:
-                            # Cliente existe pero está inactivo
                             messagebox.showerror(
                                 "Cliente Inactivo",
                                 f"El cliente '{nombre_cliente}' está inactivo y no puede ser usado para nuevos expedientes.\n\n"
                                 "Por favor, contacte con el administrador para reactivarlo.",
                                 icon="warning"
                             )
-                            return  # Cancelar el guardado
+                            return
                 except Exception as e:
                     print(f"Error verificando cliente: {e}")
-                    # Si hay error, permitir continuar (no bloquear por error de verificación)
         
         # 1. Recolección y Validación de campos obligatorios
         datos_maestro = {}
@@ -2882,19 +2879,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         for campo in campos_a_insertar:
             entry = getattr(self, f"entry_{campo}")
-            # Obtener el valor según el tipo de widget; soportar CTkDatePicker con get_date()/get()
             try:
                 if isinstance(entry, ctk.CTkTextbox):
                     valor = entry.get("1.0", "end-1c").strip()
                 elif hasattr(entry, 'get_date'):
-                    # CTkDatePicker exposes get_date() and also get() alias
                     valor = entry.get_date()
                 elif hasattr(entry, 'get'):
                     valor = entry.get()
                 else:
                     valor = entry.cget("text")
             except Exception:
-                # Fallback seguro
                 try:
                     if hasattr(entry, 'get_date'):
                         valor = entry.get_date()
@@ -2903,17 +2897,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 except Exception:
                     valor = ''
             
-            # Validación de obligatorios
             if campo in ["Cliente", "Numero_Documento_Cliente", "Persona_de_Contacto", "Email_de_Contacto", "motivo"] and not valor:
                 print(f"Error: El campo {campo.replace('_', ' ')} es obligatorio.")
                 messagebox.showinfo("Advertencia", f"Error: El campo {campo.replace('_', ' ')} es obligatorio.")
-                # Aquí deberías mostrar un mensaje de error en la interfaz
                 return
             
-            # Para los campos de fecha, validar y normalizar a ISO YYYY-MM-DD
             DATE_FIELDS = {'Fecha_Autorizacion', 'Fecha_Recepcion', 'Fecha_Proceso', 'Fecha_Gestion', 'Fecha_Emision', 'Fecha_Doc_Cliente', 'fecha_albaran_reposicion', 'fecha_factura_abono'}
             if campo in DATE_FIELDS:
-                # Permitir valor vacío
                 if valor is None or str(valor).strip() == "":
                     datos_maestro[campo.lower()] = ''
                 else:
@@ -2923,7 +2913,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                         messagebox.showerror("Fecha inválida", f"El campo {campo} debe ser una fecha válida. Valor: {valor}")
                         return
             else:
-                # Campos no fecha: conversiones especiales
                 if campo == 'Autorizacion':
                     try:
                         v = str(valor).strip().upper() if valor is not None else ''
@@ -2936,17 +2925,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     datos_maestro[campo.lower()] = valor.upper() if valor else ''
                 else:
                     datos_maestro[campo.lower()] = valor
-
+        
         # Campos automáticos/calculados
-        # NOTA: El código_rma se generará al momento del guardado para evitar condiciones de carrera
         if hasattr(self, 'es_modo_edicion') and self.es_modo_edicion:
-            # En modo edición, conservamos el código existente
             datos_maestro['codigo_rma'] = self.lbl_codigo_rma.cget("text").split(": ")[1]
-        else:
-            # En modo nuevo, lo generaremos dentro de la transacción
-            # No asignamos código_rma aquí
-            pass
-            
+        
         datos_maestro['fecha_emision'] = self.entry_Fecha_Emision.get()
         datos_maestro['creado_por'] = self.entry_Creado_Por.get()
 
@@ -2956,16 +2939,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 f"'{datos_maestro.get('resolucion_provisional')}' 'obs_res_provisional'="
                 f"'{datos_maestro.get('obs_res_provisional', '')}' (usuario={self.username})")
 
-        # Definir estado inicial basado en Autorización
-        # 1. INTEGRACIÓN DE LA TRAZABILIDAD
+        # Definir estado inicial
         datos_maestro['estado'] = self.determinar_estado_rma(datos_maestro)
         
-        # 2. Calcular Precio Total y validar Artículos
+        # 2. Calcular Precio Total
         precio_total = 0.0
-        
         for item in self.articulos_data:
             try:
-                # Convertir cantidad_entregada a float de forma segura
                 cantidad = item.get('cantidad_entregada', 0)
                 if isinstance(cantidad, str):
                     cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
@@ -2974,7 +2954,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 else:
                     cantidad = float(cantidad)
                 
-                # Usar precio_final si existe, sino precio_unitario como fallback
                 precio = item.get('precio_final', None)
                 if precio is None or precio == '' or precio == 0:
                     precio = item.get('precio_unitario', 0.0)
@@ -2987,21 +2966,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     precio = float(precio)
                 
                 precio_total += cantidad * precio
-                
             except (ValueError, TypeError) as e:
-                print(f"Error al calcular precio para artículo {item.get('referencia_articulo', 'N/A')}: {e}")
+                print(f"Error al calcular precio para artículo {item.get('referencia_articulo', 'N/A')}: e")
                 continue
         
         datos_maestro['precio_total_expediente'] = precio_total
 
         # 2.5 Validación: Numero de documento del cliente no debe repetirse
-        # Se permiten repeticiones para valores provisionales que contengan 'email' o 'telefonic'
         numero_doc = str(datos_maestro.get('numero_documento_cliente', '')).strip()
         if numero_doc:
             numero_doc_norm = numero_doc.lower()
-            # Si el valor contiene las palabras provisionales (email/e-mail/telefonica/telefonico), no realizar la comprobación de duplicados
             if not re.search(r"\b(e-?mail|telefonica|telefonico)\b", numero_doc_norm, re.IGNORECASE):
-                # Conectar a la DB para comprobar duplicados
                 conn_check, cursor_check = self.master.conectar_db()
                 if not conn_check:
                     return
@@ -3009,7 +2984,6 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     cursor_check = conn_check.cursor()
                     cursor_check.execute("SELECT COUNT(*) FROM rma_maestro WHERE lower(numero_documento_cliente) = ?", (numero_doc_norm,))
                     count = cursor_check.fetchone()[0]
-                    # Convertir a entero para evitar errores de comparación
                     count = int(count) if count is not None else 0
                     if count > 0:
                         conn_check.close()
@@ -3019,14 +2993,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     print(f"Error comprobando duplicados de numero_documento_cliente: {e}")
                     conn_check.close()
                     return
-                # Cerramos la conexión de comprobación; la conexión principal se abrirá más abajo para la inserción
                 conn_check.close()
 
-        # if not self.articulos_data:
-        #     print("Error: Debe añadir al menos un artículo.")
-        #     return
-
-        # Aviso: Si el número de documento contiene palabras provisionales, pedir confirmación al usuario
+        # Aviso: Si el número de documento contiene palabras provisionales
         try:
             if numero_doc and re.search(r"\b(e-?mail|telefonica|telefonico)\b", numero_doc, re.IGNORECASE):
                 respuesta_prov = messagebox.askyesno("Valor provisional detectado",
@@ -3034,10 +3003,9 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 if not respuesta_prov:
                     return
         except Exception:
-            # Si falla mostrar el diálogo, continuar sin bloquear el guardado
             pass
 
-        # 3. Inserción en la Base de Datos
+        # 3. Inserción en la Base de Datos - Preparar todo para transacción atómica
         # ── Editores enriquecidos: sobreescribir con el JSON completo (formato + imágenes) ──
         for _clave, _ in self.SECCIONES_TECNICA:
             _editor = getattr(self, f'entry_{_clave}', None)
@@ -3054,62 +3022,77 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                 codigo_rma_final = self.generar_codigo_rma_final(cursor)
                 datos_maestro['codigo_rma'] = codigo_rma_final
             
+            # Preparar sentencias para la transacción
+            sentencias = []
+            
             # 3a. Inserción en rma_maestro
             columnas_maestro = ', '.join(datos_maestro.keys())
             placeholders_maestro = ', '.join('?' * len(datos_maestro))
             valores_maestro = tuple(datos_maestro.values())
             
-            cursor.execute(f"""
-                INSERT INTO rma_maestro ({columnas_maestro}, estado) 
-                VALUES ({placeholders_maestro}, ?)
-            """, valores_maestro + (datos_maestro['estado'],)) # El estado se añade al final
-
-            # Obtener el ID del RMA recién creado
-            rma_id_generado = cursor.lastrowid
+            sentencias.append((
+                f"INSERT INTO rma_maestro ({columnas_maestro}, estado) VALUES ({placeholders_maestro}, ?)",
+                valores_maestro + (datos_maestro['estado'],)
+            ))
             
-            # 3b. Inserción en rma_detalles - OPTIMIZADO con executemany
+            # 3b. Inserción en rma_detalles
             if self.articulos_data:
-                # Preparar todos los artículos para inserción batch
-                primer_articulo = self.articulos_data[0].copy()
-                primer_articulo['rma_id'] = rma_id_generado
+                # Obtener columnas de la tabla
+                try:
+                    cursor.execute("PRAGMA table_info(rma_detalles)")
+                    _cols_bd = {r[1] for r in cursor.fetchall()}
+                except Exception:
+                    _cols_bd = {
+                        'rma_id', 'referencia_articulo', 'cantidad_segun_documento',
+                        'cantidad_entregada', 'estado_producto', 'precio_unitario',
+                        'precio_final', 'depreciacion', 'porcentaje_depreciacion', 'contabilizar'
+                    }
                 
-                columnas_detalle = ', '.join(primer_articulo.keys())
-                placeholders_detalle = ', '.join('?' * len(primer_articulo))
+                _campos_orden = [
+                    'referencia_articulo', 'cantidad_segun_documento', 'cantidad_entregada',
+                    'estado_producto', 'precio_unitario', 'precio_final',
+                    'depreciacion', 'porcentaje_depreciacion', 'contabilizar',
+                    'numero_albaran', 'numero_order'
+                ]
+                _cols_insert = ['rma_id'] + [c for c in _campos_orden if c in _cols_bd]
+                _cols_str = ', '.join(_cols_insert)
+                _ph_str   = ', '.join('?' * len(_cols_insert))
+                _num_campos = {'precio_unitario', 'precio_final', 'depreciacion',
+                               'porcentaje_depreciacion', 'cantidad_segun_documento',
+                               'cantidad_entregada'}
                 
-                # LOG: Debug de valores de contabilizar
-                for i, art in enumerate(self.articulos_data):
-                    logger.debug(f"Guardando artículo {i}: ref={art.get('referencia_articulo')} contabilizar={art.get('contabilizar', 'NO_FIELD')}")
-                
-                # Asegurar que todos los artículos tienen los campos nuevos (compatibilidad)
+                # Asegurar que todos los artículos tienen los campos nuevos
                 campos_nuevos_defaults = {"numero_albaran": "", "numero_order": ""}
                 for art in self.articulos_data:
                     for campo, defval in campos_nuevos_defaults.items():
                         if campo not in art:
                             art[campo] = defval
-
-                # Preparar lista de valores para executemany
-                valores_batch = []
+                
+                # INSERT artículos (usamos lastrowid del maestro, que obtendremos después)
+                # En transacción, el rma_id se conoce después del INSERT maestro
+                # Así que usamos un placeholder que se resolverá en la transacción
                 for articulo in self.articulos_data:
                     articulo_copia = articulo.copy()
-                    articulo_copia['rma_id'] = rma_id_generado
-                    valores_batch.append(tuple(articulo_copia.values()))
-                
-                # Insertar todos los artículos en una sola llamada (mucho más rápido con Turso)
-                cursor.executemany(f"""
-                    INSERT INTO rma_detalles ({columnas_detalle}) 
-                    VALUES ({placeholders_detalle})
-                """, valores_batch)
-
-            # 3c. Inserción en rma_historial (modificar descripción si no hay artículos)
+                    fila = [None]  # placeholder para rma_id
+                    for col in _cols_insert[1:]:
+                        val = articulo_copia.get(col)
+                        if val is None:
+                            val = 1 if col == 'contabilizar' else (0 if col in _num_campos else '')
+                        fila.append(val)
+                    sentencias.append((
+                        f"INSERT INTO rma_detalles ({_cols_str}) VALUES ({_ph_str})",
+                        tuple(fila)
+                    ))
+            
+            # 3c. Inserción en rma_historial
             num_articulos = len(self.articulos_data)
             descripcion = f"RMA creado. Cliente: {datos_maestro['cliente']}. Artículos: {num_articulos}. Total: {precio_total:.2f} €"
-            cursor.execute("""
+            sentencias.append(("""
                 INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
                 VALUES (?, ?, ?, ?)
-            """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion))
-
+            """, (None, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion)))
+            
             # 3d. Guardar número de orden en rma_orders
-            # Obtener num_order directamente del widget ya que no está en campos_a_insertar
             num_order = ''
             if hasattr(self, 'entry_Num_Order'):
                 try:
@@ -3118,19 +3101,100 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
                     num_order = ''
             
             if num_order and str(num_order).strip():
-                cursor.execute("""
+                sentencias.append(("""
                     INSERT INTO rma_orders (rma_id, num_order)
                     VALUES (?, ?)
-                """, (rma_id_generado, str(num_order).strip()))
-
+                """, (None, str(num_order).strip())))
+            
+            # 4. Ejecutar transacción - pero necesitamos el rma_id generado
+            # Estrategia: primero INSERT maestro, obtener lastrowid, luego el resto
+            # Como ejecutar_transaccion no devuelve lastrowid intermedio, separamos en dos fases:
+            
+            # Fase 1: Insertar maestro y obtener ID
+            cursor.execute(
+                f"INSERT INTO rma_maestro ({columnas_maestro}, estado) VALUES ({placeholders_maestro}, ?)",
+                valores_maestro + (datos_maestro['estado'],)
+            )
+            rma_id_generado = cursor.lastrowid
+            
+            # Fase 2: Preparar sentencias restantes con el rma_id real
+            sentencias_fase2 = []
+            
+            if self.articulos_data:
+                # Obtener columnas de la tabla
+                try:
+                    cursor.execute("PRAGMA table_info(rma_detalles)")
+                    _cols_bd = {r[1] for r in cursor.fetchall()}
+                except Exception:
+                    _cols_bd = {
+                        'rma_id', 'referencia_articulo', 'cantidad_segun_documento',
+                        'cantidad_entregada', 'estado_producto', 'precio_unitario',
+                        'precio_final', 'depreciacion', 'porcentaje_depreciacion', 'contabilizar'
+                    }
+                
+                _campos_orden = [
+                    'referencia_articulo', 'cantidad_segun_documento', 'cantidad_entregada',
+                    'estado_producto', 'precio_unitario', 'precio_final',
+                    'depreciacion', 'porcentaje_depreciacion', 'contabilizar',
+                    'numero_albaran', 'numero_order'
+                ]
+                _cols_insert = ['rma_id'] + [c for c in _campos_orden if c in _cols_bd]
+                _cols_str = ', '.join(_cols_insert)
+                _ph_str   = ', '.join('?' * len(_cols_insert))
+                _num_campos = {'precio_unitario', 'precio_final', 'depreciacion',
+                               'porcentaje_depreciacion', 'cantidad_segun_documento',
+                               'cantidad_entregada'}
+                
+                campos_nuevos_defaults = {"numero_albaran": "", "numero_order": ""}
+                for art in self.articulos_data:
+                    for campo, defval in campos_nuevos_defaults.items():
+                        if campo not in art:
+                            art[campo] = defval
+                
+                for articulo in self.articulos_data:
+                    articulo_copia = articulo.copy()
+                    fila = [rma_id_generado]
+                    for col in _cols_insert[1:]:
+                        val = articulo_copia.get(col)
+                        if val is None:
+                            val = 1 if col == 'contabilizar' else (0 if col in _num_campos else '')
+                        fila.append(val)
+                    sentencias_fase2.append((
+                        f"INSERT INTO rma_detalles ({_cols_str}) VALUES ({_ph_str})",
+                        tuple(fila)
+                    ))
+                
+                # Historial de artículos
+                sentencias_fase2.append(("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                    VALUES (?, ?, ?, ?)
+                """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                      f"Detalle Artículos: '0 items' -> '{len(self.articulos_data)} items'")))
+            
+            # Historial de creación
+            sentencias_fase2.append(("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id_generado, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username, descripcion)))
+            
+            # rma_orders
+            if num_order and str(num_order).strip():
+                sentencias_fase2.append(("""
+                    INSERT INTO rma_orders (rma_id, num_order)
+                    VALUES (?, ?)
+                """, (rma_id_generado, str(num_order).strip())))
+            
+            # Ejecutar fase 2 en transacción atómica
+            if sentencias_fase2:
+                ejecutar_transaccion(conn, sentencias_fase2)
+            
             conn.commit()
             
-            # Invalidar caché de estados (puede que se haya creado un nuevo estado)
+            # Invalidar caché
             invalidate_cache('estados_rma')
             
-            # Mostrar mensaje de confirmación con número RMA final
+            # Mostrar mensaje
             if not hasattr(self, 'es_modo_edicion') or not self.es_modo_edicion:
-                # Es un nuevo expediente - mostrar el número final asignado
                 codigo_final = datos_maestro['codigo_rma']
                 messagebox.showinfo("¡Expediente Creado!",
                                     f"✅ Expediente creado exitosamente\n\n"
@@ -3141,18 +3205,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             else:
                 messagebox.showinfo("Expediente Guardado", "El expediente se ha actualizado correctamente.")
 
-            # IMPORTANTE: Actualizar ambos IDs para que el siguiente guardado use actualizar_rma()
-            self.current_rma_id = rma_id_generado  # Asigna el ID al atributo de instancia
-            self.rma_actual_id = rma_id_generado   # CRÍTICO: Actualizar para que guardar_rma_placeholder() use actualizar_rma()
-            self.mode = 'editar'                    # Cambia la ventana a modo edición
-            self.es_modo_edicion = True            # Actualizar el indicador
+            # Actualizar IDs y cambiar a modo edición
+            self.current_rma_id = rma_id_generado
+            self.rma_actual_id = rma_id_generado
+            self.mode = 'editar'
+            self.es_modo_edicion = True
 
-            # Reconstruir la ficha completa en modo edición: varios botones (Email, Informe,
-            # Reposición/Devolución, Autorización, Reabrir, Eliminar) y la pestaña de Adjuntos
-            # solo se crean cuando es_edicion=True, así que hay que volver a llamar a
-            # mostrar_nuevo_rma() con el id ya asignado para que aparezcan sin necesidad de
-            # cerrar y reabrir la ventana. Se reutiliza el content_frame en el que se
-            # construyó originalmente esta ficha (ventana principal o RmaEditorWindow).
+            # Reconstruir la ficha completa en modo edición
             try:
                 content_frame_destino = getattr(self, '_content_frame_ficha_actual', self.content_frame)
                 content_frame_original = self.content_frame
@@ -3164,19 +3223,17 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             except Exception as e:
                 logger.error(f"Error reconstruyendo la ficha tras guardar nuevo expediente: {e}")
 
-            # NO volver al listado - mantener el expediente abierto para que puedan trabajar con él
-
         except sqlite3.IntegrityError as e:
-            if hasattr(conn, 'rollback'):
-                conn.rollback()
             print(f"Error al guardar (Integridad): {e}. Es posible que el código RMA ya exista.")
             messagebox.showerror("Error de Integridad", f"No se pudo guardar el expediente:\n{e}")
+            conn.close()
         except sqlite3.Error as e:
-            if hasattr(conn, 'rollback'):
-                conn.rollback()
             print(f"Error general de DB al guardar: {e}")
             messagebox.showerror("Error de Base de Datos", f"Error al guardar:\n{e}")
-        finally:
+            conn.close()
+        except Exception as e:
+            print(f"Error inesperado al guardar: {e}")
+            messagebox.showerror("Error", f"Error inesperado:\n{e}")
             conn.close()
 
     def obtener_datos_actuales_maestro(self):
@@ -4062,9 +4119,11 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
             conn.close()
 
     def actualizar_rma(self):
-        """Compara los datos, actualiza rma_maestro y rma_detalles, y registra los cambios."""
+        """Compara los datos, actualiza rma_maestro y rma_detalles, y registra los cambios.
+        Usa transacción atómica para que DELETE+INSERT de artículos no quede a medias."""
         conn, cursor = self.master.conectar_db()
-        if not conn: return
+        if not conn:
+            return
 
         cursor = conn.cursor()
         rma_id = self.rma_actual_id
@@ -4086,19 +4145,16 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         cliente_antiguo = datos_antiguos.get('cliente', '')
         cliente_nuevo = datos_nuevos.get('cliente', '')
         if str(cliente_antiguo).strip() != str(cliente_nuevo).strip() and cliente_nuevo:
-            # El cliente ha cambiado, verificar que existe
             try:
                 cursor.execute("SELECT cliente_id FROM clientes WHERE nombre = ?", (cliente_nuevo,))
                 resultado = cursor.fetchone()
                 
                 if not resultado:
-                    # Cliente no existe - mostrar mensaje de advertencia
                     conn.close()
                     self._mostrar_dialogo_cliente_no_existe(cliente_nuevo)
                     return
             except Exception as e:
                 print(f"Error verificando cliente: {e}")
-                # Si hay error, permitir continuar
 
         # ⚠️ ADVERTENCIA ADMIN: Cambios en campos críticos
         if self.username.lower() == "admin":
@@ -4161,12 +4217,10 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         # 2.2. CONFIRMACIONES INTELIGENTES: Verificar tareas pendientes antes de completar
         estado_anterior = datos_antiguos.get('estado', '')
         if estado_nuevo == 'Completado' and estado_anterior != 'Completado':
-            # El expediente se está intentando completar
             count_tareas, tareas_pendientes = self.verificar_tareas_pendientes_expediente(rma_id)
             
             if count_tareas > 0:
-                # Crear mensaje detallado con las tareas pendientes
-                mensaje_tareas = "\n• ".join(tareas_pendientes[:5])  # Mostrar máximo 5 tareas
+                mensaje_tareas = "\n• ".join(tareas_pendientes[:5])
                 if len(tareas_pendientes) > 5:
                     mensaje_tareas += f"\n• ... y {len(tareas_pendientes) - 5} tareas más"
                 
@@ -4192,14 +4246,13 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         
         def valores_son_diferentes(val1, val2):
             """Compara dos valores normalizando None y cadenas vacías."""
-            # Normalizar None y cadenas vacías
             v1 = str(val1).strip() if val1 is not None else ""
             v2 = str(val2).strip() if val2 is not None else ""
             return v1 != v2
         
         # Campos que no pertenecen a rma_maestro (se manejan en otras tablas)
-        campos_excluir = {'num_order'}  # num_order está en rma_orders, no en rma_maestro
-
+        campos_excluir = {'num_order'}
+        
         # Resolución Provisional / Observ. Res. Provisional dejan de poder modificarse
         # en cuanto Resultado_Expediente ya tiene valor (defensa server-side además del
         # bloqueo de la UI en _sync_resolucion_provisional).
@@ -4207,25 +4260,21 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         resultado_expediente_actual = str(datos_antiguos.get('resultado_expediente') or '').strip()
 
         for columna_db, valor_nuevo in datos_nuevos.items():
-            # Saltar campos que no pertenecen a rma_maestro
             if columna_db in campos_excluir:
                 continue
 
             if columna_db in campos_bloqueados_si_resultado and resultado_expediente_actual:
-                continue  # Bloqueado: Resultado Expediente ya está cumplimentado
+                continue
 
             valor_antiguo = datos_antiguos.get(columna_db)
 
-            # SQLite almacena el boolean como int (1/0)
             if columna_db == 'autorizacion':
                 if valor_nuevo != valor_antiguo:
                     self.guardar_cambio_historial(rma_id, "Autorización", "NO" if valor_antiguo == 0 else "SI", "NO" if valor_nuevo == 0 else "SI", cursor=cursor)
                     campos_a_actualizar.append(f"{columna_db} = ?")
                     valores_a_actualizar.append(valor_nuevo)
 
-            # Comparación de campos normales (no boolean) usando la función de normalización
             elif valores_son_diferentes(valor_antiguo, valor_nuevo):
-                # No registrar los campos del editor enriquecido en historial (JSON con imágenes)
                 if columna_db not in ('obs_tecnica', 'analisis_situacion', 'recomendaciones', 'conclusiones'):
                     self.guardar_cambio_historial(rma_id, columna_db.title().replace('_', ' '), str(valor_antiguo), str(valor_nuevo), cursor=cursor)
                 if columna_db in campos_bloqueados_si_resultado:
@@ -4236,162 +4285,154 @@ DATOS RELACIONADOS QUE SE ELIMINARÁN:
         columna_estado_ya_anadida = 'estado' in [c.split('=')[0].strip() for c in campos_a_actualizar]
 
         if not columna_estado_ya_anadida:
-            # Si no se incluyó en el bucle anterior (lo que indica que el estado no cambió),
-            # lo incluimos ahora, usando el nuevo valor calculado.
             campos_a_actualizar.append("estado = ?")
             valores_a_actualizar.append(estado_nuevo)
 
-        # 4. Actualizar rma_maestro si hay cambios
-        updated_any = False
+        # 4. Preparar todas las sentencias para la transacción atómica
+        sentencias = []
+
+        # 4a. UPDATE rma_maestro
         if campos_a_actualizar:
             valores_a_actualizar.append(rma_id)
             set_clause = ", ".join(campos_a_actualizar)
-            
-            try:
-                cursor.execute(f"UPDATE rma_maestro SET {set_clause} WHERE id = ?", tuple(valores_a_actualizar))
-                updated_any = True
-            except sqlite3.Error as e:
-                print(f"Error al actualizar maestro: {e}")
-                if hasattr(conn, 'rollback'):
-                    conn.rollback()
-                conn.close()
-                return
+            sentencias.append((f"UPDATE rma_maestro SET {set_clause} WHERE id = ?", tuple(valores_a_actualizar)))
 
-        # 5. Actualizar rma_detalles — siempre DELETE+INSERT
+        # 4b. rma_detalles: DELETE + INSERT en la misma transacción
+        # Obtener columnas de la tabla
         try:
+            cursor.execute("PRAGMA table_info(rma_detalles)")
+            _cols_bd = {r[1] for r in cursor.fetchall()}
+        except Exception:
+            _cols_bd = {
+                'rma_id', 'referencia_articulo', 'cantidad_segun_documento',
+                'cantidad_entregada', 'estado_producto', 'precio_unitario',
+                'precio_final', 'depreciacion', 'porcentaje_depreciacion', 'contabilizar'
+            }
+
+        _campos_orden = [
+            'referencia_articulo', 'cantidad_segun_documento', 'cantidad_entregada',
+            'estado_producto', 'precio_unitario', 'precio_final',
+            'depreciacion', 'porcentaje_depreciacion', 'contabilizar',
+            'numero_albaran', 'numero_order'
+        ]
+        _cols_insert = ['rma_id'] + [c for c in _campos_orden if c in _cols_bd]
+        _cols_str = ', '.join(_cols_insert)
+        _ph_str   = ', '.join('?' * len(_cols_insert))
+        _num_campos = {'precio_unitario', 'precio_final', 'depreciacion',
+                       'porcentaje_depreciacion', 'cantidad_segun_documento',
+                       'cantidad_entregada'}
+
+        # DELETE antiguos
+        sentencias.append(("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,)))
+
+        if self.articulos_data:
+            # Contar artículos antiguos para historial
             cursor.execute("SELECT COUNT(*) FROM rma_detalles WHERE rma_id = ?", (rma_id,))
             _cr = cursor.fetchone()
             articulos_antiguos_count = _cr[0] if _cr else 0
 
-            cursor.execute("DELETE FROM rma_detalles WHERE rma_id = ?", (rma_id,))
+            # INSERT nuevos
+            valores_batch = []
+            for articulo in self.articulos_data:
+                fila = [rma_id]
+                for col in _cols_insert[1:]:
+                    val = articulo.get(col)
+                    if val is None:
+                        val = 1 if col == 'contabilizar' else (0 if col in _num_campos else '')
+                    fila.append(val)
+                valores_batch.append(tuple(fila))
 
-            if self.articulos_data:
-                try:
-                    cursor.execute("PRAGMA table_info(rma_detalles)")
-                    _cols_bd = {r[1] for r in cursor.fetchall()}
-                except Exception:
-                    _cols_bd = {
-                        'rma_id', 'referencia_articulo', 'cantidad_segun_documento',
-                        'cantidad_entregada', 'estado_producto', 'precio_unitario',
-                        'precio_final', 'depreciacion', 'porcentaje_depreciacion', 'contabilizar'
-                    }
+            # Para executemany en transacción, insertamos uno a uno
+            for fila in valores_batch:
+                sentencias.append((f"INSERT INTO rma_detalles ({_cols_str}) VALUES ({_ph_str})", fila))
 
-                _campos_orden = [
-                    'referencia_articulo', 'cantidad_segun_documento', 'cantidad_entregada',
-                    'estado_producto', 'precio_unitario', 'precio_final',
-                    'depreciacion', 'porcentaje_depreciacion', 'contabilizar',
-                    'numero_albaran', 'numero_order'
-                ]
-                _cols_insert = ['rma_id'] + [c for c in _campos_orden if c in _cols_bd]
-                _cols_str = ', '.join(_cols_insert)
-                _ph_str   = ', '.join('?' * len(_cols_insert))
-                # Defaults numéricos para campos que no pueden ser string vacío
-                _num_campos = {'precio_unitario', 'precio_final', 'depreciacion',
-                               'porcentaje_depreciacion', 'cantidad_segun_documento',
-                               'cantidad_entregada'}
+            # Entrada de historial para artículos
+            sentencias.append(("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                  f"Detalle Artículos: '{articulos_antiguos_count} items' -> '{len(self.articulos_data)} items'")))
 
-                valores_batch = []
-                for articulo in self.articulos_data:
-                    fila = [rma_id]
-                    for col in _cols_insert[1:]:
-                        val = articulo.get(col)
-                        if val is None:
-                            val = 1 if col == 'contabilizar' else (0 if col in _num_campos else '')
-                        fila.append(val)
-                    valores_batch.append(tuple(fila))
+            # Recalcular precio total
+            try:
+                precio_total_recalc = 0.0
+                for item in self.articulos_data:
+                    cantidad = item.get('cantidad_entregada', 0) or 0
+                    if isinstance(cantidad, str):
+                        cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
+                    else:
+                        cantidad = float(cantidad)
+                    precio = item.get('precio_final') or item.get('precio_unitario', 0.0) or 0.0
+                    if isinstance(precio, str):
+                        precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
+                    else:
+                        precio = float(precio)
+                    precio_total_recalc += cantidad * precio
+                sentencias.append((
+                    "UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?",
+                    (precio_total_recalc, rma_id)
+                ))
+            except Exception as e:
+                print(f"Error al recalcular precio_total_expediente: {e}")
 
-                cursor.executemany(
-                    f"INSERT INTO rma_detalles ({_cols_str}) VALUES ({_ph_str})",
-                    valores_batch
-                )
+        elif (cursor.execute("SELECT COUNT(*) FROM rma_detalles WHERE rma_id = ?", (rma_id,)).fetchone() or [0])[0] > 0:
+            # Solo si había artículos y ahora no hay
+            sentencias.append(("""
+                INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                VALUES (?, ?, ?, ?)
+            """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                  f"Detalle Artículos: '{articulos_antiguos_count} items' -> '0 items - Artículos eliminados'")))
 
-                self.guardar_cambio_historial(
-                    rma_id, "Detalle Artículos",
-                    f"{articulos_antiguos_count} items",
-                    f"{len(self.articulos_data)} items",
-                    cursor=cursor
-                )
+        # 4c. rma_orders
+        num_order_nuevo = datos_nuevos.get('num_order', '')
+        cursor.execute("SELECT num_order FROM rma_orders WHERE rma_id = ?", (rma_id,))
+        orden_existente = cursor.fetchone()
+        
+        if orden_existente:
+            num_order_antiguo = orden_existente[0] or ''
+            if str(num_order_antiguo).strip() != str(num_order_nuevo).strip():
+                if num_order_nuevo and str(num_order_nuevo).strip():
+                    sentencias.append(("UPDATE rma_orders SET num_order = ? WHERE rma_id = ?", (str(num_order_nuevo).strip(), rma_id)))
+                    sentencias.append(("""
+                        INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                        VALUES (?, ?, ?, ?)
+                    """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                          f"Número de Orden: '{num_order_antiguo}' -> '{num_order_nuevo}'")))
+                else:
+                    sentencias.append(("DELETE FROM rma_orders WHERE rma_id = ?", (rma_id,)))
+                    sentencias.append(("""
+                        INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                        VALUES (?, ?, ?, ?)
+                    """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                          f"Número de Orden: '{num_order_antiguo}' -> '(eliminado)'")))
+        else:
+            if num_order_nuevo and str(num_order_nuevo).strip():
+                sentencias.append(("INSERT INTO rma_orders (rma_id, num_order) VALUES (?, ?)", (rma_id, str(num_order_nuevo).strip())))
+                sentencias.append(("""
+                    INSERT INTO rma_historial (rma_id, fecha_cambio, usuario, descripcion_cambio)
+                    VALUES (?, ?, ?, ?)
+                """, (rma_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.username,
+                      f"Número de Orden: '(ninguno)' -> '{num_order_nuevo}'")))
 
-                try:
-                    precio_total_recalc = 0.0
-                    for item in self.articulos_data:
-                        cantidad = item.get('cantidad_entregada', 0) or 0
-                        if isinstance(cantidad, str):
-                            cantidad = float(cantidad.replace(',', '.')) if cantidad.strip() else 0.0
-                        else:
-                            cantidad = float(cantidad)
-                        precio = item.get('precio_final') or item.get('precio_unitario', 0.0) or 0.0
-                        if isinstance(precio, str):
-                            precio = float(precio.replace(',', '.')) if precio.strip() else 0.0
-                        else:
-                            precio = float(precio)
-                        precio_total_recalc += cantidad * precio
-                    cursor.execute(
-                        "UPDATE rma_maestro SET precio_total_expediente = ? WHERE id = ?",
-                        (precio_total_recalc, rma_id)
-                    )
-                except Exception as e:
-                    print(f"Error al recalcular precio_total_expediente: {e}")
-
-            elif articulos_antiguos_count > 0:
-                self.guardar_cambio_historial(
-                    rma_id, "Detalle Artículos",
-                    f"{articulos_antiguos_count} items", "0 items - Artículos eliminados",
-                    cursor=cursor
-                )
-
-            updated_any = True
-
+        # 5. Ejecutar todo en una transacción atómica
+        try:
+            ejecutar_transaccion(conn, sentencias)
         except sqlite3.Error as e:
-            print(f"Error al actualizar detalles: {e}")
-            if hasattr(conn, 'rollback'):
-                conn.rollback()
+            print(f"Error en transacción de actualización: {e}")
+            messagebox.showerror("Error al actualizar", f"No se pudo guardar el expediente:\n{e}")
             conn.close()
             return
 
-                # 6. Actualizar/Insertar en rma_orders
-        try:
-            num_order_nuevo = datos_nuevos.get('num_order', '')
-            
-            # Verificar si ya existe un registro para este RMA
-            cursor.execute("SELECT num_order FROM rma_orders WHERE rma_id = ?", (rma_id,))
-            orden_existente = cursor.fetchone()
-            
-            if orden_existente:
-                # Actualizar solo si el valor cambió
-                num_order_antiguo = orden_existente[0] or ''
-                if str(num_order_antiguo).strip() != str(num_order_nuevo).strip():
-                    if num_order_nuevo and str(num_order_nuevo).strip():
-                        cursor.execute("UPDATE rma_orders SET num_order = ? WHERE rma_id = ?", (str(num_order_nuevo).strip(), rma_id))
-                        self.guardar_cambio_historial(rma_id, "Número de Orden", str(num_order_antiguo), str(num_order_nuevo), cursor=cursor)
-                    else:
-                        # Si el nuevo valor está vacío, eliminar el registro
-                        cursor.execute("DELETE FROM rma_orders WHERE rma_id = ?", (rma_id,))
-                        self.guardar_cambio_historial(rma_id, "Número de Orden", str(num_order_antiguo), "(eliminado)", cursor=cursor)
-                    updated_any = True
-            else:
-                # Insertar si no existe y hay valor
-                if num_order_nuevo and str(num_order_nuevo).strip():
-                    cursor.execute("INSERT INTO rma_orders (rma_id, num_order) VALUES (?, ?)", (rma_id, str(num_order_nuevo).strip()))
-                    self.guardar_cambio_historial(rma_id, "Número de Orden", "(ninguno)", str(num_order_nuevo), cursor=cursor)
-                    updated_any = True
-        except sqlite3.Error as e:
-            print(f"Error al actualizar rma_orders: {e}")
-            # No hacer rollback completo, solo registrar el error
-            
-        # 7. Commit final e invalidar caché
-        conn.commit()
         conn.close()
         
-        # Invalidar caché de estados (puede que se haya actualizado el estado)
+        # Invalidar caché de estados
         invalidate_cache('estados_rma')
 
-        # Mostrar un único mensaje de éxito y mantener la ficha abierta
-        if updated_any:
-            try:
-                messagebox.showinfo("Expediente actualizado", "El expediente se ha actualizado correctamente.")
-            except Exception:
-                pass
+        # Mostrar mensaje de éxito
+        try:
+            messagebox.showinfo("Expediente actualizado", "El expediente se ha actualizado correctamente.")
+        except Exception:
+            pass
 
     def mostrar_historial(self, parent_frame):
         """Muestra la lista de registros de cambios para el RMA actual con filtros de búsqueda."""

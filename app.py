@@ -331,58 +331,34 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
         try:
             self.user_settings = load_user_settings(self.username)
             
-            # Verificar estado de firma en B2 si está habilitado
+            # Verificar estado de firma en B2 en segundo plano (no bloquea el arranque)
             if usar_b2():
-                tiene_firma_guardada = self.user_settings.get("tiene_firma", False)
-                firma_existe = verificar_firma_usuario_existe(self.username, get_b2_client)
-                
-                # Si hay desincronización, corregir
-                if tiene_firma_guardada != firma_existe:
-                    self.user_settings["tiene_firma"] = firma_existe
-                    save_user_settings(self.user_settings, self.username)
-                    if firma_existe:
-                        logger.info(f"Firma detectada en B2 para usuario {self.username}")
-                    else:
-                        logger.info(f"No se detectó firma en B2 para usuario {self.username}")
+                self._verificar_firma_b2_en_fondo()
         except Exception as e:
             logger.error(f"Error al cargar ajustes de usuario: {e}")
             self.user_settings = {}
             
-        # Crear tablas necesarias si no existen
+        # Crear tablas necesarias si no existen (una sola petición)
         try:
-            self.crear_tabla_rma_orders()
-            self.crear_tabla_adjuntos()
-            self.crear_tabla_correos_asociados()
-            self.crear_tabla_tareas()
-            
-            # Actualizar estructura de tabla tareas (añadir columnas asignado_a y prioridad)
-            tareas_notificaciones.actualizar_tabla_tareas(self.master.conectar_db)
+            conn, cursor = self.master.conectar_db()
+            if conn:
+                # Tabla de metadatos para tracking de versión de esquema
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS db_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                """)
+                conn.commit()
+                conn.close()
         except Exception as e:
-            logger.error(f"Error al crear/actualizar tablas: {e}")
+            logger.error(f"Error al crear tabla de metadatos: {e}")
 
-        # Migrar columnas de rma_maestro y rma_detalles
+        # Ejecutar migraciones solo si la versión de esquema ha cambiado
         try:
-            self.verificar_columna_motivo()
+            self._ejecutar_migraciones_si_es_necesario()
         except Exception as e:
-            logger.error(f"Error en migración de columnas: {e}")
-
-        # Migrar columna fecha_entregado_contabilidad (Turso-safe)
-        try:
-            self._migrar_columna_contabilidad_rma_maestro()
-        except Exception as e:
-            logger.error(f"Error en migración columna contabilidad: {e}")
-
-        # Migrar columnas resolucion_provisional / obs_res_provisional (Turso-safe)
-        try:
-            self._migrar_columnas_resolucion_provisional()
-        except Exception as e:
-            logger.error(f"Error en migración columnas resolución provisional: {e}")
-
-        # Migrar columnas de secciones del informe (Turso-safe)
-        try:
-            self._migrar_columnas_secciones_informe()
-        except Exception as e:
-            logger.error(f"Error en migración columnas secciones informe: {e}")
+            logger.error(f"Error en migraciones: {e}")
 
         # Exponer a nivel de módulo para que Tooltip y otros lean la preferencia
         try:
@@ -688,6 +664,125 @@ class VentanaPrincipal(ctk.CTkToplevel, BusquedaMixin, DashboardMixin, TareasDas
             conn.close()
         except Exception as e:
             logger.error(f"Error en migración columnas secciones informe rma_maestro: {e}")
+
+    def _obtener_version_esquema(self):
+        """Lee la versión de esquema almacenada en db_meta."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return None
+            cursor.execute("SELECT value FROM db_meta WHERE key = 'schema_version'")
+            row = cursor.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def _guardar_version_esquema(self, version):
+        """Guarda la versión de esquema en db_meta."""
+        try:
+            conn, cursor = self.master.conectar_db()
+            if not conn:
+                return
+            cursor.execute("""
+                INSERT INTO db_meta (key, value) VALUES ('schema_version', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (version,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error guardando versión de esquema: {e}")
+
+    def _ejecutar_migraciones_si_es_necesario(self):
+        """Ejecuta las migraciones de esquema solo si la versión ha cambiado."""
+        version_actual = APP_VERSION
+        version_guardada = self._obtener_version_esquema()
+
+        if version_guardada == version_actual:
+            return  # Ya está al día
+
+        logger.info(f"Ejecutando migraciones: versión {version_guardada} -> {version_actual}")
+
+        # Crear tablas base (idempotentes, cada una abre su propia conexión)
+        try:
+            self.crear_tabla_rma_orders()
+        except Exception as e:
+            logger.error(f"Error creando tabla rma_orders: {e}")
+        try:
+            self.crear_tabla_adjuntos()
+        except Exception as e:
+            logger.error(f"Error creando tabla rma_adjuntos: {e}")
+        try:
+            self.crear_tabla_correos_asociados()
+        except Exception as e:
+            logger.error(f"Error creando tabla rma_correos_asociados: {e}")
+        try:
+            self.crear_tabla_tareas()
+        except Exception as e:
+            logger.error(f"Error creando tabla tareas: {e}")
+        # Actualizar estructura de tabla tareas
+        try:
+            tareas_notificaciones.actualizar_tabla_tareas(self.master.conectar_db)
+        except Exception as e:
+            logger.error(f"Error actualizando tabla tareas: {e}")
+
+        # Migraciones de columnas
+        try:
+            self.verificar_columna_motivo()
+        except Exception as e:
+            logger.error(f"Error en migración de columnas: {e}")
+
+        try:
+            self._migrar_columna_contabilidad_rma_maestro()
+        except Exception as e:
+            logger.error(f"Error en migración columna contabilidad: {e}")
+
+        try:
+            self._migrar_columnas_resolucion_provisional()
+        except Exception as e:
+            logger.error(f"Error en migración columnas resolución provisional: {e}")
+
+        try:
+            self._migrar_columnas_secciones_informe()
+        except Exception as e:
+            logger.error(f"Error en migración columnas secciones informe: {e}")
+
+        # Marcar versión como aplicada
+        self._guardar_version_esquema(version_actual)
+
+    def _verificar_firma_b2_en_fondo(self):
+        """Verifica la firma en B2 en segundo plano sin bloquear la UI."""
+        def trabajo():
+            try:
+                if not usar_b2():
+                    return
+                tiene_firma_guardada = self.user_settings.get("tiene_firma", False)
+                firma_existe = verificar_firma_usuario_existe(self.username, get_b2_client)
+                return tiene_firma_guardada, firma_existe
+            except Exception as e:
+                logger.error(f"Error verificando firma B2: {e}")
+                return None
+
+        def al_terminar(resultado):
+            if resultado is None:
+                return
+            tiene_firma_guardada, firma_existe = resultado
+            if tiene_firma_guardada != firma_existe:
+                self.user_settings["tiene_firma"] = firma_existe
+                try:
+                    save_user_settings(self.user_settings, self.username)
+                except Exception:
+                    pass
+                if firma_existe:
+                    logger.info(f"Firma detectada en B2 para usuario {self.username}")
+                else:
+                    logger.info(f"No se detectó firma en B2 para usuario {self.username}")
+
+        try:
+            from lib.tareas_fondo import lanzar_en_fondo
+            lanzar_en_fondo(self, trabajo, al_terminar=al_terminar)
+        except Exception as e:
+            logger.error(f"Error lanzando verificación de firma en fondo: {e}")
 
     def cerrar_app(self):
         """Maneja el cierre de la ventana principal y de toda la app."""

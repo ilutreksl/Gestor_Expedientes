@@ -1,3 +1,14 @@
+Cambio V.1.2.27 - 🚀 Rendimiento y seguridad de datos
+
+- 🔴 Corregido riesgo de perder artículos al guardar expediente: el borrado y la inserción de artículos se envían ahora en una sola petición transaccional a Turso (todo o nada). Si la red falla entre medio, no se quedan artículos a medias y el usuario recibe un aviso claro.
+- 🟠 Tiempos de espera separados: conexión (5 s) y lectura (30 s) para no congelar la ventana cuando la red va mal.
+- 🟠 Arranque más rápido: las migraciones de base de datos solo se ejecutan cuando cambia la versión de la app (tabla db_meta), y la verificación de firma en B2 se hace en segundo plano sin bloquear la ventana principal.
+- 🟠 Adjuntos sin bloquear la interfaz: abrir, editar y subir archivos de Backblaze B2 se ejecutan ahora en un hilo aparte con ventana de progreso ("Descargando…", "Subiendo…"), evitando que Windows marque la app como "No responde".
+- 🟡 Guardar un expediente reduce viajes a la nube: UPDATE, historial, artículos, órdenes y recálculo de total se envían en una o dos peticiones transaccionales.
+- 🟡 Listado de expedientes paginado en SQL (LIMIT/OFFSET): solo se descargan los 25 registros de la página actual, no todos los del año.
+- Sección técnica: las secciones "Análisis de la Situación", "Recomendaciones" y "Conclusiones" se copian al informe Word con el mismo formato del editor; las vacías ya no aparecen.
+- Corrección de tipos en Turso: los valores vacíos (None) se guardan como NULL de verdad, no como el texto "None".
+
 Cambio V.1.2.26 - ✨ Últimas mejoras implementadas:
 
 - Nuevas secciones del informe en la pestaña "Técnica" de la ficha del expediente: "📋 Análisis de la Situación", "💡 Recomendaciones" y "✅ Conclusiones". Se eligen con una fila de botones encima del editor, junto a "🔧 Obs. Técnicas", y cada una tiene el mismo editor enriquecido (fuente, tamaño, colores, negrita, imágenes, editor expandido...). Se guardan con el expediente y se cargan al volver a abrirlo.

@@ -7,6 +7,7 @@ VentanaPrincipal.__init__.
 """
 from lib.app_core import *  # noqa: F401,F403 - helpers/constantes/imports compartidos con app.py
 from lib.app_core import _get_cached_query, invalidate_cache  # nombres "privados" que el wildcard import no trae
+from lib.tareas_fondo import esperar_en_fondo
 
 class AdjuntosMixin:
     def crear_carpeta_adjuntos_rma(self, codigo_rma):
@@ -591,11 +592,14 @@ class AdjuntosMixin:
         ruta_b2 = normalizar_ruta_b2(ruta_b2)
         
         try:
-            # Leer el archivo (original o comprimido) y subirlo
-            bucket.upload_local_file(
-                local_file=archivo_a_subir,
-                file_name=ruta_b2
-            )
+            # Subir archivo a Backblaze B2 (en fondo para no bloquear la UI)
+            def subir():
+                bucket.upload_local_file(
+                    local_file=archivo_a_subir,
+                    file_name=ruta_b2
+                )
+            
+            esperar_en_fondo(self, subir, "Subiendo archivo a Backblaze B2...")
             
             # Limpiar archivo temporal si existe
             if archivo_temporal:
@@ -1206,28 +1210,32 @@ class AdjuntosMixin:
         # Construir ruta en B2
         ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
         
-        try:
-            # Crear archivo temporal
-            nombre_archivo = os.path.basename(ruta_relativa)
+        # Nombre del archivo para el temporal
+        nombre_archivo = os.path.basename(ruta_relativa)
+        
+        def descargar():
+            """Descarga el archivo de B2 a un temporal (solo I/O, sin UI)."""
             with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{nombre_archivo}") as temp_file:
                 temp_path = temp_file.name
             
-            # Descargar archivo de B2
             downloaded_file = bucket.download_file_by_name(ruta_b2)
             downloaded_file.save_to(temp_path)
             
-            # Abrir archivo temporal
+            return temp_path
+        
+        try:
+            temp_path = esperar_en_fondo(self, descargar, "Descargando adjunto...")
+            
+            # Abrir archivo temporal (en hilo principal)
             self._abrir_archivo_sistema(temp_path)
             
             # Programar eliminación del archivo temporal después de un tiempo
-            # (El usuario tendrá tiempo para abrirlo en su programa)
             def limpiar_temp():
                 try:
                     os.unlink(temp_path)
                 except:
                     pass
             
-            # Limpiar después de 60 segundos (suficiente tiempo para que se abra)
             threading.Timer(60.0, limpiar_temp).start()
             
         except B2Error as e:
@@ -1289,15 +1297,18 @@ class AdjuntosMixin:
         ruta_b2 = normalizar_ruta_b2(f"{B2_ROOT_FOLDER}/{ruta_relativa}")
         nombre_archivo = os.path.basename(ruta_relativa)
         
-        try:
-            # 1. Crear archivo temporal para edición
+        def descargar():
+            """Descarga el archivo de B2 a un temporal (solo I/O, sin UI)."""
             temp_dir = tempfile.mkdtemp(prefix="dropbox_edit_")
             temp_path = os.path.join(temp_dir, nombre_archivo)
             
-            # 2. Descargar archivo de Backblaze B2
-            print(f"Descargando {nombre_archivo} para edición...")
             downloaded_file = bucket.download_file_by_name(ruta_b2)
             downloaded_file.save_to(temp_path)
+            
+            return temp_dir, temp_path
+        
+        try:
+            temp_dir, temp_path = esperar_en_fondo(self, descargar, "Descargando adjunto...")
             
             # 3. Mostrar diálogo informativo
             respuesta = messagebox.askyesno(
@@ -1458,11 +1469,14 @@ class AdjuntosMixin:
                 messagebox.showerror("Error", "No se puede conectar con Backblaze B2.")
                 return
             
-            # Subir a Backblaze B2 (sobrescribir automáticamente)
-            bucket.upload_local_file(
-                local_file=temp_path,
-                file_name=ruta_b2
-            )
+            def subir():
+                """Sube el archivo editado a B2 (solo I/O, sin UI)."""
+                bucket.upload_local_file(
+                    local_file=temp_path,
+                    file_name=ruta_b2
+                )
+            
+            esperar_en_fondo(self, subir, "Subiendo cambios...")
             
             # Limpiar archivos temporales
             try:
@@ -1474,6 +1488,9 @@ class AdjuntosMixin:
             # Cerrar diálogo y mostrar éxito
             dialogo.destroy()
             messagebox.showinfo("Éxito", "¡Archivo editado y sincronizado con Backblaze B2 correctamente!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error subiendo cambios a Backblaze B2: {e}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Error subiendo cambios a Backblaze B2: {e}")
